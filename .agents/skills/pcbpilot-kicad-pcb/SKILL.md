@@ -138,6 +138,7 @@ post-layout 仿真 → 签核 → 保存（复制回工程）。板框、层叠�
 - **铺铜** `--pours auto|on|off`：`auto` 只给**没有任何铺铜区**的板加 GND/电源铺铜；已有铺铜区的板只重灌、不新建。
   有绝缘对（intent `pairs`）时，整板铺铜先按网所在绝缘域裁剪（域边界后退半个对间要求：外层爬电、内层电气间隙），
   每个铺铜仍是一个合并后的区（不再整板铺到异域焊盘下；没有绝缘对的网不变，报告 `pourClip` 写明）。
+  某个计划中的铺铜在自己的域里裁没了 → `pour-clip` 门禁失败并点名网/层（不会悄悄少一块地平面）。
   地/电源层用 `--gnd-net`、`--gnd-layers`、`--power-net`、`--power-layer` 改；层叠用 `kicad board stackup` 先定好。
 - **设计评审**：`--requirements` 必需；评审不通过就停止，不布线。`--no-review` / `--no-manual` 需要用户签名的 waiver。
 

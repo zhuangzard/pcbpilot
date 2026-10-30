@@ -48,3 +48,27 @@ func TestCMCWindingsAndPassPins(t *testing.T) {
 		t.Fatalf("eFuse UVLO pin carries %g A, want 0", a)
 	}
 }
+
+// The CMC's return winding between two GROUND nets (GND_J on the inlet,
+// GND on the board): every ground net used to be the one reference node,
+// so the return current and the winding's DCR vanished. The connector-side
+// ground is now its own node: the drop over the return winding is solved.
+func TestCMCReturnWindingBetweenGrounds(t *testing.T) {
+	d := design(
+		part("J1", "", "DC24", "1:1:VIN_J", "2:2:GND_J"),
+		part("L1", "", "CMC", "1:1:VIN_RAW", "2:2:GND", "3:3:GND_J", "4:4:VIN_J"),
+		part("J2", "", "LOAD", "1:1:VIN_RAW", "2:2:GND"),
+	)
+	d.NetRole = map[string]string{"GND": "ground", "GND_J": "ground"}
+	out, _, err := Simulate(d, testLib(t, cmcLib), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := findResult(t, out, "typical")
+	assertKCL(t, res)
+	// 1 A out through the 1–4 winding, back through 2–3: the inlet ground
+	// sits 0.03 V below the board ground, the load sees 24 − 1·(0.05 + 2·0.03).
+	near(t, "V(GND_J)", res.Nets["GND_J"].Voltage, -0.03, 0.002)
+	near(t, "V(VIN_RAW)", res.Nets["VIN_RAW"].Voltage, 24-1.0*(0.05+0.03)-0.03, 0.01)
+	near(t, "I(L1.3)", pinCurrent(t, res, "GND_J", "L1", "3").CurrentA, 1.0, 0.01)
+}

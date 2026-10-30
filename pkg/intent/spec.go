@@ -51,6 +51,11 @@ type Spec struct {
 	// Review declares the roles the schematic cannot show to the design
 	// review (`kicad sch-check --review`); copied into intent.json.
 	Review *ReviewNotes `json:"review,omitempty"`
+	// Windings declare the winding pin pairs of multi-winding inductors
+	// (common-mode chokes), ref → [["1","4"],["2","3"]]. Only a declared
+	// winding joins two grounds into one domain (a CMC carrying the return
+	// line); copied into intent.json for routing and sign-off.
+	Windings map[string][][2]string `json:"windings,omitempty"`
 }
 
 // ReviewNotes are explicit roles for the schematic design review. Pins are

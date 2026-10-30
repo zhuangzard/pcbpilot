@@ -59,3 +59,22 @@ func TestKicadSchCheckEGExternalSheet(t *testing.T) {
 		t.Fatalf("want an EG-05 failure for the inverted supply symbol, got %s: %s", g.Status, g.Detail)
 	}
 }
+
+// A sheet outside the root's directory is not skipped into a pass: the
+// engineer-grade gate refuses the hierarchy, naming it.
+func TestKicadSchCheckEGRejectsSheetOutsideRoot(t *testing.T) {
+	dir := t.TempDir()
+	spec := `{"schema":"pcbpilot.kicad.sch-build/1","name":"t",
+"parts":[{"ref":"R1","value":"1k","pins":[{"number":"1","name":"1"},{"number":"2","name":"2"}]}],
+"nets":[{"name":"A","pins":["R1:1"]},{"name":"GND","pins":["R1:2"],"kind":"ground"}]}`
+	specPath := filepath.Join(dir, "spec.json")
+	if err := os.WriteFile(specPath, []byte(spec), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(dir, "proj", "t.kicad_sch")
+	other := filepath.Join(dir, "elsewhere", "sub.kicad_sch")
+	_, err := kicadSchCheckEG(root, []string{root, other}, specPath)
+	if err == nil || !strings.Contains(err.Error(), "outside the root schematic's directory") || !strings.Contains(err.Error(), "sub.kicad_sch") {
+		t.Fatalf("a sheet outside the root dir: %v", err)
+	}
+}

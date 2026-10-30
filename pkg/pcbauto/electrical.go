@@ -41,6 +41,10 @@ type PowerSpec struct {
 	Coated bool `json:"coated,omitempty"`
 	// DiffPairs lists explicit P/N pairs; USB_DP/DM-style pairs are auto-detected.
 	DiffPairs [][2]string `json:"diffPairs,omitempty"`
+	// Windings declare the winding pin pairs of multi-winding inductors
+	// (common-mode chokes), ref → [[pin, pin], …]; also read from the
+	// intent's "windings". Undeclared, a 4-pad inductor joins no domains.
+	Windings map[string][][2]string `json:"windings,omitempty"`
 	// SingleEndedOhm / DiffOhm targets (defaults 50 / 90).
 	SingleEndedOhm float64 `json:"singleEndedOhm,omitempty"`
 	DiffOhm        float64 `json:"diffOhm,omitempty"`
@@ -370,8 +374,11 @@ type Analysis struct {
 	Edge *EdgePolicy `json:"edge,omitempty"`
 	// spans are the intent voltage envelopes [lo, hi] of the nets (ΔV
 	// clearance between two nets of one domain, hvrelief.go).
-	spans  map[string]voltSpan
-	coated bool
+	spans map[string]voltSpan
+	// Windings are the declared winding pin pairs (PowerSpec.Windings over
+	// the intent's), ref → pairs.
+	Windings map[string][][2]string `json:"windings,omitempty"`
+	coated   bool
 	// rated: the currents come from an intent or a simulation, so a via
 	// array's count is an electrical requirement (viafix.go), not a hint.
 	rated bool
@@ -418,6 +425,18 @@ func Analyze(b *Board, spec PowerSpec, stack *Stackup) *Analysis {
 	if spec.Intent != nil {
 		a.Iso = buildIsoRules(b, spec.Intent)
 		a.spans = intentSpans(b, spec.Intent)
+		for ref, ws := range spec.Intent.Windings {
+			if a.Windings == nil {
+				a.Windings = map[string][][2]string{}
+			}
+			a.Windings[ref] = ws
+		}
+	}
+	for ref, ws := range spec.Windings {
+		if a.Windings == nil {
+			a.Windings = map[string][][2]string{}
+		}
+		a.Windings[ref] = ws
 	}
 	a.Edge = EdgeFromIntent(spec.Intent, b)
 	a.coated = spec.Coated
@@ -698,4 +717,12 @@ func (a *Analysis) Plan(net string, r Rules) *NetPlan {
 		return p
 	}
 	return &NetPlan{Net: net, Role: RoleSignal, WidthMil: r.TrackWidth, InnerWidthMil: r.TrackWidth, ClearanceMil: r.Clearance, Priority: 5}
+}
+
+// windings is the declared winding list of ref (nil = not declared).
+func (a *Analysis) windings(ref string) [][2]string {
+	if a == nil {
+		return nil
+	}
+	return a.Windings[ref]
 }

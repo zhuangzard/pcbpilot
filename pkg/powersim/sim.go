@@ -33,6 +33,11 @@ type Engine struct {
 	warnings    []string
 	assumptions []string
 	runs        map[string]*run
+	// floated are ground nets on the far side of a choke winding that joins
+	// two ground nets (a CMC's return line GND_J–GND): their own node, so the
+	// return current and the winding DCR are solved instead of vanishing
+	// into the one reference node.
+	floated map[string]bool
 }
 
 // NewEngine binds models for d.
@@ -42,6 +47,7 @@ func NewEngine(d *Design, libs Libraries, opt Options) *Engine {
 		e.warnf("no power-model library loaded — every IC uses the generic assumed load")
 	}
 	e.bindAll()
+	e.floatChokeGrounds()
 	return e
 }
 
@@ -123,7 +129,7 @@ func (r *run) assumef(format string, args ...any) {
 }
 
 func (e *Engine) node(c *Circuit, net string) int {
-	if e.isGround(net) {
+	if e.isGround(net) && !e.floated[net] {
 		return Ground
 	}
 	return c.Node(net)
@@ -148,7 +154,7 @@ func (e *Engine) term(c *Circuit, ref string, pins []Pin) (Terminal, bool) {
 		if p.Net == "" {
 			return Terminal{}, false
 		}
-		if p.Net != net && !(e.isGround(p.Net) && e.isGround(net)) {
+		if p.Net != net && !(e.isGround(p.Net) && e.isGround(net) && !e.floated[p.Net] && !e.floated[net]) {
 			return Terminal{}, false
 		}
 	}
@@ -962,7 +968,7 @@ func (e *Engine) solve(sc scenario) *run {
 
 // voltage of a net in a run (0 for ground, ok=false when not in the circuit).
 func (r *run) voltage(net string, e *Engine) (float64, bool) {
-	if e.isGround(net) {
+	if e.isGround(net) && !e.floated[net] {
 		return 0, true
 	}
 	i, ok := r.c.index[net]
@@ -1005,13 +1011,58 @@ func sortedKeys[M ~map[string]V, V any](m M) []string {
 	return out
 }
 
+// chokeWindings is the winding list of a 4-pin inductor binding (the
+// model's, else the usual CMC pinout 1–4 / 2–3) and whether it was assumed.
+func chokeWindings(b *binding) ([][2]string, bool) {
+	if len(b.model.Windings) > 0 {
+		return b.model.Windings, false
+	}
+	return [][2]string{{"1", "4"}, {"2", "3"}}, true
+}
+
+// floatChokeGrounds finds every winding of a 4-pin inductor that joins two
+// different ground nets and gives the far one — the net with fewer pins in
+// the design (the connector-side return), ties by name — its own node.
+func (e *Engine) floatChokeGrounds() {
+	pins := map[string]int{}
+	for _, p := range e.d.Parts {
+		for _, q := range p.Pins {
+			pins[q.Net]++
+		}
+	}
+	for _, b := range e.binds {
+		if b.kind != KindInductor || len(b.part.Pins) != 4 {
+			continue
+		}
+		ws, _ := chokeWindings(b)
+		for _, w := range ws {
+			a, z := b.part.pinsNamed([]string{w[0]}), b.part.pinsNamed([]string{w[1]})
+			if len(a) == 0 || len(z) == 0 {
+				continue
+			}
+			na, nz := a[0].Net, z[0].Net
+			if na == nz || !e.isGround(na) || !e.isGround(nz) {
+				continue
+			}
+			far := nz
+			if pins[na] < pins[nz] || (pins[na] == pins[nz] && na > nz) {
+				far = na
+			}
+			if e.floated == nil {
+				e.floated = map[string]bool{}
+			}
+			e.floated[far] = true
+			e.assumef("%s: winding %s–%s joins ground nets %s and %s — %s is solved as its own node (the return current flows through the winding)", b.part.Ref, w[0], w[1], na, nz, far)
+		}
+	}
+}
+
 // stampWindings adds one series DCR per winding of a 4-pin inductor
 // (Model.Windings, default 1–4 / 2–3 — the usual CMC pinout).
 func (e *Engine) stampWindings(c *Circuit, r *run, b *binding, add func(*binding, element, string)) {
 	p, m := b.part, b.model
-	ws := m.Windings
-	if len(ws) == 0 {
-		ws = [][2]string{{"1", "4"}, {"2", "3"}}
+	ws, assumed := chokeWindings(b)
+	if assumed {
 		e.assumef("%s: 4-pin inductor taken as a common-mode choke, windings 1–4 and 2–3", p.Ref)
 	}
 	rr := m.DCROhm
@@ -1034,12 +1085,6 @@ func (e *Engine) stampWindings(c *Circuit, r *run, b *binding, add func(*binding
 		t1, ok1 := e.term(c, p.Ref, z)
 		if !ok0 || !ok1 {
 			continue
-		}
-		if t0.Node == Ground && t1.Node == Ground && a[0].Net != z[0].Net {
-			// Every ground net is the reference node, so a winding between two
-			// ground nets (CMC return line GND_J–GND_SYS) carries no solved
-			// current: declare that net's current in the spec instead.
-			e.assumef("%s: winding %s–%s joins ground nets %s and %s — its return current is not solved (declare it)", p.Ref, w[0], w[1], a[0].Net, z[0].Net)
 		}
 		add(b, &resistor{t: [2]Terminal{t0, t1}, r: rr}, fmt.Sprintf("%s DCR %s–%s", p.Ref, w[0], w[1]))
 	}

@@ -100,6 +100,13 @@ func Derive(in Input) (*Intent, error) {
 		ViaPlatingMil: c.viaQ(0, 0).PlatingMil, ViaMarginPct: pcbauto.ViaMarginOr(c.viaQ(0, 0).MarginPct)}
 	c.out.Simulation = c.simInfo()
 	c.out.Review = c.spec.Review
+	if len(c.spec.Windings) > 0 {
+		c.out.Windings = c.spec.Windings
+	}
+	for _, ref := range c.circ.UnknownWindings {
+		c.add("warn", "choke-windings", fmt.Sprintf("%s: 4-pad inductor between grounds, windings not declared — its grounds are separate domains (cannot tell whether it carries the return line)", ref),
+			[]string{ref}, nil, fmt.Sprintf(`if it is a common-mode choke on the return line, declare its windings in the intent spec: "windings": {"%s": [["1","4"],["2","3"]]} (its own pinout)`, ref))
+	}
 	c.out.Definitions = &Definitions{
 		Voltage:   "V over the solved DC scenarios: nom = typical, min/max = envelope, peak = highest instantaneous (switch node swings to Vin; AC = √2·Vrms)",
 		CurrentA:  "sizing current (A): simulated worst-case DC net current, switch-node ripple RMS, or a declared/heuristic budget (currentSource)",
@@ -227,7 +234,7 @@ func (c *ctx) setup() error {
 	if err != nil {
 		return err
 	}
-	ps := pcbauto.PowerSpec{TempRiseC: c.tempRise, Sim: sp, DiffOhm: 90}
+	ps := pcbauto.PowerSpec{TempRiseC: c.tempRise, Sim: sp, DiffOhm: 90, Windings: c.spec.Windings}
 	if r := c.spec.Rules; r != nil {
 		ps.ViaPlatingMil, ps.ViaMarginPct = r.ViaPlatingMil, r.ViaMarginPct
 	}
