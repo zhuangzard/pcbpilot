@@ -55,7 +55,8 @@ func TestPopulationRuleSharedByNetlistSimAndFab(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	d, simWarn, err := powersim.BuildDesign([]*powersim.ConnDoc{cd}, nil)
+	// A values file that marks R3 dnp does not override the flag.
+	d, simWarn, err := powersim.BuildDesign([]*powersim.ConnDoc{cd}, map[string]powersim.PartValues{"R3": {Value: "1k", DNP: true}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,6 +69,9 @@ func TestPopulationRuleSharedByNetlistSimAndFab(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(simWarn, "\n"), want) {
 		t.Fatalf("sim power warnings %v lack %q", simWarn, want)
+	}
+	if w := population.ValuesConflict("R3", true, false); !strings.Contains(strings.Join(simWarn, "\n"), w) {
+		t.Fatalf("sim power warnings %v lack %q", simWarn, w)
 	}
 
 	// lcsc / fab: the BOM's ${DNP} column is shadowed by the field text.

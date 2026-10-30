@@ -15,4 +15,10 @@ func TestConflict(t *testing.T) {
 	if Field(map[string]string{"dnp": " x "}) != "x" || Field(map[string]string{"Value": "1k"}) != "" {
 		t.Fatal("field lookup")
 	}
+	if ValuesConflict("R1", false, false) != "" || ValuesConflict("R1", true, true) != "" || ValuesConflict("R1", false, true) != "" {
+		t.Fatal("agreeing values dnp reported")
+	}
+	if w := ValuesConflict("R1", true, false); !strings.Contains(w, `R1: the values file marks it "dnp" but KiCad's DNP flag is off`) {
+		t.Fatalf("%q", w)
+	}
 }

@@ -3,6 +3,8 @@ package powersim
 import (
 	"strings"
 	"testing"
+
+	"github.com/zhuangzard/pcbpilot/pkg/population"
 )
 
 // A DNP part (KiCad "dnp" property → IR "dnp": true) is not fitted: a field board's
@@ -20,16 +22,28 @@ func TestBuildDesignSkipsDNP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	d, _, err := BuildDesign([]*ConnDoc{doc}, map[string]PartValues{"R106": {Value: "1k", DNP: true}})
+	// R106: the values file says dnp, the schematic flag does not — the flag
+	// decides (pkg/population): simulated, with the warning.
+	d, warns, err := BuildDesign([]*ConnDoc{doc}, map[string]PartValues{"R106": {Value: "1k", DNP: true}})
 	if err != nil {
 		t.Fatal(err)
 	}
+	refs := map[string]bool{}
 	for _, p := range d.Parts {
-		if p.Ref == "R105" || p.Ref == "R106" {
-			t.Fatalf("DNP part %s simulated", p.Ref)
-		}
+		refs[p.Ref] = true
 	}
-	if len(d.Parts) != 1 || !strings.Contains(strings.Join(d.Sources, ";"), "R105, R106") {
-		t.Fatalf("parts %d, sources %v", len(d.Parts), d.Sources)
+	if refs["R105"] || !refs["R104"] || !refs["R106"] || len(d.Parts) != 2 {
+		t.Fatalf("simulated %v", refs)
+	}
+	if !strings.Contains(strings.Join(d.Sources, ";"), "left out: R105") || strings.Contains(strings.Join(d.Sources, ";"), "R106") {
+		t.Fatalf("sources %v", d.Sources)
+	}
+	if w := population.ValuesConflict("R106", true, false); !strings.Contains(strings.Join(warns, "\n"), w) {
+		t.Fatalf("warnings %v lack %q", warns, w)
+	}
+	// A values "dnp" that agrees with the flag says nothing.
+	_, warns, _ = BuildDesign([]*ConnDoc{doc}, map[string]PartValues{"R105": {DNP: true}})
+	if strings.Contains(strings.Join(warns, "\n"), "values file") {
+		t.Fatalf("agreeing values dnp warned: %v", warns)
 	}
 }
