@@ -141,12 +141,17 @@ type routeVia struct {
 }
 
 // snapshotVias reads a snapshot's vias. A snapshot without its copper
-// section, a vias list that does not decode or a via without an id or a
+// section, an absent or null vias list, a vias list that does not decode or a via without an id or a
 // size is an error: never an empty list (that would hide router vias, or
 // make a board's own vias look router-added).
 func snapshotVias(s *boardSnapshot) ([]routeVia, error) {
 	if s == nil || s.Copper == nil {
 		return nil, fmt.Errorf("the snapshot has no copper section")
+	}
+	// encoding/json leaves the slice nil for an absent or null "vias" and
+	// makes it non-nil for an explicit []: only the latter means no vias.
+	if s.Copper.Vias == nil {
+		return nil, fmt.Errorf("copper.vias is absent or null")
 	}
 	var out []routeVia
 	if err := decodeAny(s.Copper.Vias, &out); err != nil {

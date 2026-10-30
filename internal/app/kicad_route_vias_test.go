@@ -183,6 +183,10 @@ func TestSizeRouterViasMalformedSnapshots(t *testing.T) {
 		{"before not a list", `{"copper":{"vias":{"x":1}}}`, "", "the board before the import"},
 		{"before via without id", `{"copper":{"vias":[{"net":"A","diameter":31.5,"holeDiameter":15.7}]}}`, "", "the board before the import"},
 		{"before without copper", `{}`, "", "the board before the import"},
+		{"before vias absent", `{"copper":{"lines":[]}}`, "", "the board before the import"},
+		{"before vias null", `{"copper":{"vias":null}}`, "", "the board before the import"},
+		{"after vias absent", "", `{"copper":{"lines":[]}}`, "the imported board"},
+		{"after vias null", "", `{"copper":{"vias":null}}`, "the imported board"},
 		{"after wrong type", "", `{"copper":{"vias":[{"primitiveId":"v1","net":"A","diameter":"big","holeDiameter":15.7}]}}`, "the imported board"},
 		{"after without size", "", `{"copper":{"vias":[{"primitiveId":"v1","net":"A"}]}}`, "the imported board"},
 	} {
@@ -193,6 +197,24 @@ func TestSizeRouterViasMalformedSnapshots(t *testing.T) {
 		}
 		if len(gates) != 1 || gates[0].Gate != "router-vias" || gates[0].Pass || !strings.Contains(gates[0].Detail, "cannot check: "+c.want) || !strings.Contains(gates[0].Detail, "none resized") {
 			t.Fatalf("%s: gates %+v", c.name, gates)
+		}
+	}
+}
+
+// Only an explicit [] is "no vias": the ok path still runs on it.
+func TestSnapshotViasExplicitEmpty(t *testing.T) {
+	var s boardSnapshot
+	if err := json.Unmarshal([]byte(`{"copper":{"vias":[]}}`), &s); err != nil {
+		t.Fatal(err)
+	}
+	if vs, err := snapshotVias(&s); err != nil || len(vs) != 0 {
+		t.Fatalf("explicit []: %v %v", vs, err)
+	}
+	for _, j := range []string{`{"copper":{"vias":null}}`, `{"copper":{}}`} {
+		var s boardSnapshot
+		_ = json.Unmarshal([]byte(j), &s)
+		if _, err := snapshotVias(&s); err == nil {
+			t.Fatalf("%s accepted as empty", j)
 		}
 	}
 }
