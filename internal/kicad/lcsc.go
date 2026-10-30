@@ -188,16 +188,34 @@ func ReadSchematicParts(cli, sch string) ([]SchPart, error) {
 
 // ApplyNetlistPopulation takes each row's DNP from KiCad's flag in the
 // netlist and its "DNP" field text from the symbol (pkg/population).
+//
+// Every netlist component is kept, also one the BOM export omits (kicad-cli
+// leaves excluded-from-BOM symbols out): it gets a row with its flag and
+// ExcludeBOM set, so a reference that exists in the schematic is always
+// judged by the schematic's flags, never by the board-only rule.
 func ApplyNetlistPopulation(rows []SchPart, nl *SchNetlist) []SchPart {
+	have := map[string]bool{}
 	byRef := map[string]SchNetComp{}
 	for _, c := range nl.Components {
 		byRef[c.Ref] = c
 	}
 	for i := range rows {
+		have[rows[i].Ref] = true
 		if c, ok := byRef[rows[i].Ref]; ok {
 			rows[i].DNP = c.DNP
 			rows[i].DNPText = population.Field(c.Fields)
+			rows[i].ExcludeBOM = rows[i].ExcludeBOM || c.ExcludeBOM
 		}
+	}
+	for _, c := range nl.Components {
+		if have[c.Ref] || strings.HasPrefix(c.Ref, "#") {
+			continue
+		}
+		have[c.Ref] = true
+		sp := SchPart{Ref: c.Ref, Value: c.Value, Footprint: c.Footprint, DNP: c.DNP, ExcludeBOM: true,
+			DNPText: population.Field(c.Fields)}
+		sp.LCSC, sp.LCSCField = LookupLCSC(c.Fields)
+		rows = append(rows, sp)
 	}
 	return rows
 }

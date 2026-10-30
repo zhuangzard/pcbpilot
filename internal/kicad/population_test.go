@@ -127,3 +127,66 @@ func TestPopulationBoardFlagMismatch(t *testing.T) {
 		t.Fatalf("board-only %+v %v", parts, warns)
 	}
 }
+
+// A symbol excluded from the BOM is missing from kicad-cli's BOM export but
+// not from the netlist: its schematic flags still decide. Here it is DNP in
+// the schematic while its stale board footprint has neither flag — sim
+// power leaves it out, and lcsc / fab must too (and say the board is stale)
+// instead of falling back to the board-only rule and assembling it.
+func TestPopulationExcludedFromBOMKeepsSchematicFlag(t *testing.T) {
+	xml := `<?xml version="1.0" encoding="utf-8"?>
+<export version="E">
+  <design><source>root.kicad_sch</source><sheet number="1" name="/" tstamps="/"/></design>
+  <components>
+    <comp ref="R1"><value>1k</value><libsource lib="Device" part="R"/><sheetpath names="/" tstamps="/"/></comp>
+    <comp ref="R7"><value>0</value><libsource lib="Device" part="R"/><sheetpath names="/" tstamps="/"/><property name="dnp"/><property name="exclude_from_bom"/></comp>
+  </components>
+  <libparts>
+    <libpart lib="Device" part="R"><pins><pin num="1" name="~" type="passive"/><pin num="2" name="~" type="passive"/></pins></libpart>
+  </libparts>
+  <nets>
+    <net code="1" name="/A"><node ref="R1" pin="1"/><node ref="R7" pin="1"/></net>
+    <net code="2" name="/B"><node ref="R1" pin="2"/><node ref="R7" pin="2"/></net>
+  </nets>
+</export>`
+	nl, err := ParseSchNetlist([]byte(xml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// sim power: R7 is not fitted.
+	doc, err := nl.ToConnectivityDoc("p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	blob, _ := json.Marshal(doc)
+	cd, err := powersim.ParseConnectivity(blob)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, _, err := powersim.BuildDesign([]*powersim.ConnDoc{cd}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range d.Parts {
+		if p.Ref == "R7" {
+			t.Fatal("sim power simulated the DNP part R7")
+		}
+	}
+	// lcsc / fab: the BOM export has no R7 row; the board footprint is stale.
+	rows, err := ParseSchBOM([]byte("\"Reference\",\"Value\",\"Footprint\",\"DNP\",\"EXCLUDE_FROM_BOM\",\"LCSC\"\n\"R1\",\"1k\",\"R:R\",\"\",\"\",\"C1\"\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows = ApplyNetlistPopulation(rows, nl)
+	bd := &Board{Footprints: []Footprint{{Ref: "R1"}, {Ref: "R7"}}}
+	parts, warns := MergeParts(bd, rows, true)
+	for _, p := range parts {
+		if p.Ref == "R7" && (p.Assembled() || !p.DNP) {
+			t.Fatalf("R7 assembled by lcsc/fab: %+v", p)
+		}
+	}
+	got := strings.Join(warns, "\n")
+	if !strings.Contains(got, population.BoardConflict("R7", false, true)) || strings.Contains(got, "not in the schematic BOM") {
+		t.Fatalf("warnings %v", warns)
+	}
+}

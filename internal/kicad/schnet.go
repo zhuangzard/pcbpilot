@@ -49,6 +49,7 @@ type SchNetlist struct {
 type SchNetComp struct {
 	Ref, Value, Footprint, Lib, Part, Sheet string
 	DNP                                     bool // <property name="dnp"/>: KiCad's flag, the population rule (pkg/population)
+	ExcludeBOM                              bool // <property name="exclude_from_bom"/>
 	Fields                                  map[string]string
 	Pins                                    []SchNetPin // library pins (libparts)
 }
@@ -162,8 +163,11 @@ func parseSchNetlist(data []byte, rootDir string) (*SchNetlist, error) {
 			sc.Fields[f.Name] = strings.TrimSpace(f.Value)
 		}
 		for _, pr := range c.Props {
-			if pr.Name == "dnp" {
+			switch pr.Name {
+			case "dnp":
 				sc.DNP = true
+			case "exclude_from_bom":
+				sc.ExcludeBOM = true
 			}
 		}
 		nl.Components = append(nl.Components, sc)
