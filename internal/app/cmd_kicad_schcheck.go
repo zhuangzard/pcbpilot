@@ -266,14 +266,21 @@ func kicadSchCheckEG(root string, files []string, specPath string) (sbGate, erro
 	if err != nil {
 		return sbGate{}, fmt.Errorf("--spec %s: %w", specPath, err)
 	}
+	// Every sheet of the hierarchy is judged: one the gate cannot read under
+	// the root's directory (elsewhere, another volume) is an error, never
+	// a sheet skipped into a pass.
 	dir := filepath.Dir(root)
-	var rel []string
+	var rel, outside []string
 	for _, f := range files {
 		r, err := filepath.Rel(dir, f)
-		if err != nil || strings.HasPrefix(r, "..") {
+		if err != nil || r == ".." || strings.HasPrefix(r, ".."+string(filepath.Separator)) || filepath.IsAbs(r) {
+			outside = append(outside, f)
 			continue
 		}
 		rel = append(rel, filepath.ToSlash(r))
+	}
+	if len(outside) > 0 {
+		return sbGate{}, fmt.Errorf("--engineer-grade: %d sheet(s) of the hierarchy lie outside the root schematic's directory %s (%s): the gate judges every sheet — move them under it", len(outside), dir, strings.Join(outside, ", "))
 	}
 	sort.Strings(rel)
 	return sbEngineerGrade(dir, rel, d), nil
