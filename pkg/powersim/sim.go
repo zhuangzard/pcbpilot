@@ -1020,9 +1020,13 @@ func chokeWindings(b *binding) ([][2]string, bool) {
 	return [][2]string{{"1", "4"}, {"2", "3"}}, true
 }
 
-// floatChokeGrounds finds every winding of a 4-pin inductor that joins two
-// different ground nets and gives the far one — the net with fewer pins in
-// the design (the connector-side return), ties by name — its own node.
+// floatChokeGrounds builds the graph of ground nets joined by windings of
+// 4-pin inductors (a CMC return line GND_J–GND, chained chokes A–B–C) and
+// keeps exactly one reference per connected group — the ground with the
+// most pins in the design (the board ground), ties by name — while every
+// other ground of the group is solved as its own node. Choosing a "far"
+// ground per winding instead floated the middle of a chain and left both
+// ends on the one reference, shorting the chain.
 func (e *Engine) floatChokeGrounds() {
 	pins := map[string]int{}
 	for _, p := range e.d.Parts {
@@ -1030,6 +1034,18 @@ func (e *Engine) floatChokeGrounds() {
 			pins[q.Net]++
 		}
 	}
+	parent := map[string]string{}
+	var find func(string) string
+	find = func(n string) string {
+		if parent[n] == "" || parent[n] == n {
+			parent[n] = n
+			return n
+		}
+		parent[n] = find(parent[n])
+		return parent[n]
+	}
+	type joint struct{ label, net string }
+	var via []joint // the joining windings, for the assumption
 	for _, b := range e.binds {
 		if b.kind != KindInductor || len(b.part.Pins) != 4 {
 			continue
@@ -1044,16 +1060,45 @@ func (e *Engine) floatChokeGrounds() {
 			if na == nz || !e.isGround(na) || !e.isGround(nz) {
 				continue
 			}
-			far := nz
-			if pins[na] < pins[nz] || (pins[na] == pins[nz] && na > nz) {
-				far = na
-			}
-			if e.floated == nil {
-				e.floated = map[string]bool{}
-			}
-			e.floated[far] = true
-			e.assumef("%s: winding %s–%s joins ground nets %s and %s — %s is solved as its own node (the return current flows through the winding)", b.part.Ref, w[0], w[1], na, nz, far)
+			parent[find(na)] = find(nz)
+			via = append(via, joint{fmt.Sprintf("%s %s–%s", b.part.Ref, w[0], w[1]), na})
 		}
+	}
+	groups := map[string][]string{}
+	for n := range parent {
+		groups[find(n)] = append(groups[find(n)], n)
+	}
+	roots := make([]string, 0, len(groups))
+	for r := range groups {
+		roots = append(roots, r)
+	}
+	sort.Strings(roots)
+	for _, r := range roots {
+		g := groups[r]
+		sort.Strings(g)
+		ref := g[0]
+		for _, n := range g[1:] {
+			if pins[n] > pins[ref] {
+				ref = n
+			}
+		}
+		var own, by []string
+		for _, j := range via {
+			if find(j.net) == r {
+				by = append(by, j.label)
+			}
+		}
+		for _, n := range g {
+			if n != ref {
+				if e.floated == nil {
+					e.floated = map[string]bool{}
+				}
+				e.floated[n] = true
+				own = append(own, n)
+			}
+		}
+		e.assumef("ground nets %s are joined by choke windings (%s): %s is the reference, %s solved as own node(s) (return currents flow through the windings)",
+			strings.Join(g, ", "), strings.Join(by, ", "), ref, strings.Join(own, ", "))
 	}
 }
 
