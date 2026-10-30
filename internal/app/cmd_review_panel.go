@@ -295,25 +295,12 @@ func hasNotMet(v reviewVerdict) bool {
 // runReviewPanel runs the reviewers in parallel and writes outDir/review.json
 // and one raw transcript per reviewer.
 func runReviewPanel(stage string, reqFiles, evFiles, reviewers []string, outDir string, timeout time.Duration, limit int, waivers []gateWaiver, stderr io.Writer) (*reviewRecord, error) {
-	read := func(files []string) (map[string]string, error) {
-		m := map[string]string{}
-		for _, f := range files {
-			b, err := os.ReadFile(f)
-			if err != nil {
-				return nil, err
-			}
-			m[filepath.Base(f)] = string(b)
-		}
-		return m, nil
-	}
 	if len(reqFiles) == 0 {
 		return nil, fmt.Errorf("--requirements is required: the review judges the design against the project's own requirements")
 	}
-	reqs, err := read(reqFiles)
-	if err != nil {
-		return nil, err
-	}
-	ev, err := read(evFiles)
+	// Each input is read once: the prompt and the full-file hashes come
+	// from the same bytes, before any reviewer starts.
+	reqs, ev, files, err := readReviewInputs(reqFiles, evFiles)
 	if err != nil {
 		return nil, err
 	}
@@ -363,14 +350,41 @@ func runReviewPanel(stage string, reqFiles, evFiles, reviewers []string, outDir 
 	wg.Wait()
 	g := reviewGate(vs, reviewers)
 	applyWaivers(&g, waivers)
-	files, err := reviewFilesSHA(reqFiles, evFiles)
-	if err != nil {
-		return nil, err
-	}
 	rec := &reviewRecord{Stage: stage, InputSHA256: fmt.Sprintf("%x", sum), Inputs: append(append([]string{}, reqFiles...), evFiles...),
 		FilesSHA256: files, Reviewers: vs, Gate: g, At: time.Now().UTC().Format(time.RFC3339)}
+	// The verdicts belong to the bytes they were given: an input that
+	// changed while the reviewers ran (also past the prompt's cut) is not
+	// recorded as reviewed.
+	if why := reviewFilesChanged(rec, reqFiles, evFiles); why != "" {
+		return nil, fmt.Errorf("an input changed during the review (%s); review.json not written - run the review again", why)
+	}
 	blob, _ := json.MarshalIndent(rec, "", "  ")
 	return rec, os.WriteFile(filepath.Join(outDir, "review.json"), append(blob, '\n'), 0o644)
+}
+
+// readReviewInputs reads every requirement and evidence file once and
+// returns their contents by base name (the prompt's input) and the SHA-256
+// of each complete file in requirements-then-evidence order.
+func readReviewInputs(reqFiles, evFiles []string) (reqs, ev map[string]string, files []string, err error) {
+	read := func(paths []string) (map[string]string, error) {
+		m := map[string]string{}
+		for _, f := range paths {
+			b, err := os.ReadFile(f)
+			if err != nil {
+				return nil, err
+			}
+			m[filepath.Base(f)] = string(b)
+			files = append(files, fmt.Sprintf("%x", sha256.Sum256(b)))
+		}
+		return m, nil
+	}
+	if reqs, err = read(reqFiles); err != nil {
+		return nil, nil, nil, err
+	}
+	if ev, err = read(evFiles); err != nil {
+		return nil, nil, nil, err
+	}
+	return reqs, ev, files, nil
 }
 
 // reapplyReviewWaivers recomputes the gate of an existing review.json with a new
