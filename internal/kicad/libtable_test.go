@@ -187,6 +187,22 @@ func TestValidateLibName(t *testing.T) {
 		{"con-lower", "con", true},
 		{"COM1", "COM1", true},
 		{"NUL", "NUL", true},
+		// Kimi finding #7: Windows-invalid characters.
+		{"colon", "my:lib", true},
+		{"asterisk", "my*lib", true},
+		{"question", "my?lib", true},
+		{"quote", `my"lib`, true},
+		{"lt", "my<lib", true},
+		{"gt", "my>lib", true},
+		{"pipe", "my|lib", true},
+		{"control", "my\x01lib", true},
+		// Reserved name with extension (e.g. CON.txt → NTFS alternate stream).
+		{"CON.txt", "CON.txt", true},
+		{"LPT1.log", "LPT1.log", true},
+		{"NUL.sym", "nul.sym", true},
+		// Allowed: names that merely start with reserved prefix but aren't exact.
+		{"CONX", "CONX", false},
+		{"COM10", "COM10", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -313,6 +329,35 @@ func TestLibTableTextMerge_MalformedExistingError(t *testing.T) {
 	_, err := LibTableTextMerge("sym_lib_table", map[string]string{"a": "a.kicad_sym"}, existingPath)
 	if err == nil {
 		t.Error("expected error for malformed existing table")
+	}
+}
+
+// Regression: lib entry without uri child must get one added, not silently succeed.
+// (Kimi finding #5)
+func TestEnsureLibTableEntry_MissingURIAdded(t *testing.T) {
+	dir := t.TempDir()
+	table := filepath.Join(dir, "sym-lib-table")
+
+	// Write a malformed table: lib entry has no (uri ...) child.
+	malformed := `(sym_lib_table
+	(version 7)
+	(lib (name "broken") (type "KiCad") (options "") (descr "no uri"))
+)
+`
+	os.WriteFile(table, []byte(malformed), 0o644)
+
+	changed, err := EnsureLibTableEntry(table, "sym_lib_table", "broken", "lib/fixed.kicad_sym")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !changed {
+		t.Error("expected changed=true when adding missing uri")
+	}
+
+	data, _ := os.ReadFile(table)
+	text := string(data)
+	if !strings.Contains(text, "fixed.kicad_sym") {
+		t.Errorf("expected uri to be written, got:\n%s", text)
 	}
 }
 

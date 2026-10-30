@@ -208,3 +208,132 @@ func TestAuthorSymbol_DefaultEmptyType(t *testing.T) {
 		t.Error("empty type should default to passive")
 	}
 }
+
+// Regression: common and unit-specific pins must not share the same coordinates.
+// A multi-unit symbol with a common left pin (GND) and a per-unit left pin (IN)
+// must place them at distinct Y positions. (Codex+Kimi finding #1)
+func TestAuthorSymbol_CommonAndUnitPinsNoCollision(t *testing.T) {
+	spec := SymbolSpec{
+		Name:  "MultiCollide",
+		Units: 2,
+		Pins: []SymbolPin{
+			{Number: "4", Name: "GND", Type: "power_in", Side: "left", Unit: 0},
+			{Number: "1", Name: "IN_A", Type: "input", Side: "left", Unit: 1},
+			{Number: "2", Name: "OUT_A", Type: "output", Side: "right", Unit: 1},
+			{Number: "3", Name: "IN_B", Type: "input", Side: "left", Unit: 2},
+		},
+	}
+	text, err := AuthorSymbol(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Extract pin coordinates from a delimited sub-symbol block.
+	type coord struct{ x, y string }
+	extractPinCoords := func(block string) []coord {
+		var coords []coord
+		for _, line := range strings.Split(block, "\n") {
+			idx := strings.Index(line, "(pin ")
+			if idx < 0 {
+				continue
+			}
+			atIdx := strings.Index(line, "(at ")
+			if atIdx < 0 {
+				continue
+			}
+			rest := line[atIdx+4:]
+			end := strings.Index(rest, ")")
+			if end < 0 {
+				continue
+			}
+			parts := strings.Fields(rest[:end])
+			if len(parts) >= 2 {
+				coords = append(coords, coord{parts[0], parts[1]})
+			}
+		}
+		return coords
+	}
+
+	// Split sub-symbol blocks by finding each (symbol "...") boundary.
+	extractBlock := func(text, marker string) string {
+		start := strings.Index(text, marker)
+		if start < 0 {
+			return ""
+		}
+		rest := text[start+len(marker):]
+		// Find the next (symbol " which starts the next sub-symbol.
+		next := strings.Index(rest, `(symbol "`)
+		if next >= 0 {
+			return rest[:next]
+		}
+		return rest
+	}
+
+	block01 := extractBlock(text, `"MultiCollide_0_1"`)
+	if block01 == "" {
+		t.Fatal("_0_1 not found")
+	}
+	block11 := extractBlock(text, `"MultiCollide_1_1"`)
+	if block11 == "" {
+		t.Fatal("_1_1 not found")
+	}
+	block21 := extractBlock(text, `"MultiCollide_2_1"`)
+	if block21 == "" {
+		t.Fatal("_2_1 not found")
+	}
+
+	commonCoords := extractPinCoords(block01)
+	unit1Coords := extractPinCoords(block11)
+	unit2Coords := extractPinCoords(block21)
+
+	// Check that no common pin coordinate collides with any unit-specific pin.
+	for _, cc := range commonCoords {
+		for _, uc := range unit1Coords {
+			if cc.x == uc.x && cc.y == uc.y {
+				t.Errorf("common pin at (%s,%s) collides with unit-1 pin", cc.x, cc.y)
+			}
+		}
+		for _, uc := range unit2Coords {
+			if cc.x == uc.x && cc.y == uc.y {
+				t.Errorf("common pin at (%s,%s) collides with unit-2 pin", cc.x, cc.y)
+			}
+		}
+	}
+
+	// Sanity: common block should have exactly 1 pin (GND).
+	if len(commonCoords) != 1 {
+		t.Errorf("expected 1 common pin, got %d", len(commonCoords))
+	}
+	// Unit 1 should have 2 pins (IN_A, OUT_A).
+	if len(unit1Coords) != 2 {
+		t.Errorf("expected 2 unit-1 pins, got %d", len(unit1Coords))
+	}
+}
+
+// Regression: declared units without unit-specific pins must still emit a child.
+// A 3-unit symbol where unit 3 has no dedicated pins must still emit _3_1.
+// (Codex+Kimi finding #2)
+func TestAuthorSymbol_EmptyUnitEmitted(t *testing.T) {
+	spec := SymbolSpec{
+		Name:  "ThreeUnit",
+		Units: 3,
+		Pins: []SymbolPin{
+			{Number: "1", Name: "VCC", Type: "power_in", Side: "top", Unit: 0},
+			{Number: "2", Name: "GND", Type: "power_in", Side: "bottom", Unit: 0},
+			{Number: "3", Name: "A", Type: "input", Side: "left", Unit: 1},
+			// Unit 2 has a pin.
+			{Number: "4", Name: "B", Type: "input", Side: "left", Unit: 2},
+			// Unit 3 has NO unit-specific pins — only common pins.
+		},
+	}
+	text, err := AuthorSymbol(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, sub := range []string{"ThreeUnit_0_1", "ThreeUnit_1_1", "ThreeUnit_2_1", "ThreeUnit_3_1"} {
+		if !strings.Contains(text, `"`+sub+`"`) {
+			t.Errorf("missing sub-symbol %q — declared unit must always be emitted", sub)
+		}
+	}
+}

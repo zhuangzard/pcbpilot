@@ -428,6 +428,119 @@ func TestEditFootprintPads_ShapeRoundRectManaged(t *testing.T) {
 	}
 }
 
+// Regression: negative courtyard margin rejected. (Kimi finding #6)
+func TestAuthorFootprint_NegativeCourtyardRejected(t *testing.T) {
+	spec := FootprintSpec{
+		Name:      "NegCrtYd",
+		Courtyard: -0.1,
+		Pads: []PadSpec{
+			{Number: "1", Type: "smd", Shape: "rect", Size: [2]float64{1, 1}, Layers: []string{"F.Cu", "F.Paste", "F.Mask"}},
+		},
+	}
+	_, err := AuthorFootprint(spec)
+	if err == nil || !strings.Contains(err.Error(), "non-negative") {
+		t.Errorf("expected non-negative courtyard error, got: %v", err)
+	}
+}
+
+// Regression: negative silk margin rejected. (Kimi finding #6)
+func TestAuthorFootprint_NegativeSilkMarginRejected(t *testing.T) {
+	spec := FootprintSpec{
+		Name:       "NegSilk",
+		SilkMargin: -0.05,
+		Pads: []PadSpec{
+			{Number: "1", Type: "smd", Shape: "rect", Size: [2]float64{1, 1}, Layers: []string{"F.Cu", "F.Paste", "F.Mask"}},
+		},
+	}
+	_, err := AuthorFootprint(spec)
+	if err == nil || !strings.Contains(err.Error(), "non-negative") {
+		t.Errorf("expected non-negative silk margin error, got: %v", err)
+	}
+}
+
+// Regression: roundrect ratio out of range rejected. (Kimi finding #6)
+func TestAuthorFootprint_RRatioOutOfRange(t *testing.T) {
+	tests := []struct {
+		name   string
+		rratio float64
+		want   string
+	}{
+		{"negative", -0.1, "non-negative"},
+		{"too large", 0.6, "at most 0.5"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spec := FootprintSpec{
+				Name: "RR",
+				Pads: []PadSpec{
+					{Number: "1", Type: "smd", Shape: "roundrect", Size: [2]float64{1, 1},
+						Layers: []string{"F.Cu", "F.Paste", "F.Mask"}, RRatio: tt.rratio},
+				},
+			}
+			_, err := AuthorFootprint(spec)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("expected %q error, got: %v", tt.want, err)
+			}
+		})
+	}
+}
+
+// Regression: shape edit on custom pad rejected to prevent stale primitives.
+// (Kimi finding #4)
+func TestEditFootprintPads_CustomShapeRejected(t *testing.T) {
+	src := `(footprint "Test" (pad "1" smd custom (at 0 0) (size 1 1) (layers "F.Cu") (primitives (gr_line (start 0 0) (end 1 1)))))`
+	s := "rect"
+	_, err := EditFootprintPads(src, []PadEdit{
+		{Number: "1", Shape: &s},
+	})
+	if err == nil || !strings.Contains(err.Error(), "custom pad") {
+		t.Errorf("expected custom pad rejection, got: %v", err)
+	}
+}
+
+// Regression: shape edit on pad with primitives child rejected even if not
+// currently labelled "custom". (Kimi finding #4)
+func TestEditFootprintPads_PrimitivesChildRejected(t *testing.T) {
+	src := `(footprint "Test" (pad "1" smd rect (at 0 0) (size 1 1) (layers "F.Cu") (primitives (gr_line (start 0 0) (end 1 1)))))`
+	s := "oval"
+	_, err := EditFootprintPads(src, []PadEdit{
+		{Number: "1", Shape: &s},
+	})
+	if err == nil || !strings.Contains(err.Error(), "primitives") {
+		t.Errorf("expected primitives rejection, got: %v", err)
+	}
+}
+
+// Regression: unknown pad layer rejected. (Codex finding #3)
+func TestAuthorFootprint_UnknownLayerRejected(t *testing.T) {
+	spec := FootprintSpec{
+		Name: "BadLayer",
+		Pads: []PadSpec{
+			{Number: "1", Type: "smd", Shape: "rect", Size: [2]float64{1, 1},
+				Layers: []string{"F.Cu", "Bogus.Layer"}},
+		},
+	}
+	_, err := AuthorFootprint(spec)
+	if err == nil || !strings.Contains(err.Error(), "unknown layer") {
+		t.Errorf("expected unknown layer error, got: %v", err)
+	}
+}
+
+// Regression: layer with a quote must not produce malformed output. (Codex finding #3)
+func TestAuthorFootprint_LayerQuoteRejected(t *testing.T) {
+	spec := FootprintSpec{
+		Name: "QuoteLayer",
+		Pads: []PadSpec{
+			{Number: "1", Type: "smd", Shape: "rect", Size: [2]float64{1, 1},
+				Layers: []string{`F.Cu"injection`}},
+		},
+	}
+	_, err := AuthorFootprint(spec)
+	if err == nil {
+		t.Error("expected error for layer containing quote")
+	}
+}
+
 func TestFootprintPadNumbers(t *testing.T) {
 	src := `(footprint "Test" (pad "1" smd rect (at 0 0) (size 1 1)) (pad "2" smd rect (at 1 0) (size 1 1)) (pad "" np_thru_hole circle (at 0 0) (size 1 1)))`
 	nums, err := FootprintPadNumbers(src)

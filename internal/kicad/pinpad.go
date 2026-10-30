@@ -73,15 +73,22 @@ func CheckPinPad(symbolText, footprintText string, excludePads []string) (*PinPa
 	}
 
 	excludeSet := make(map[string]bool)
-	excludeSet[""] = true // always exclude blank pad numbers
 	for _, e := range excludePads {
 		excludeSet[e] = true
 	}
 
 	padSet := make(map[string]bool)
+	var blankElectrical []string // blank-numbered non-NPTH pads (likely malformed)
 	for _, p := range padInfos {
 		// Auto-exclude np_thru_hole pads (mechanical, no symbol pin).
 		if p.Type == "np_thru_hole" {
+			continue
+		}
+		if p.Number == "" {
+			// Blank-numbered electrical pad: likely malformed rather than
+			// intentional. Report it rather than silently skipping.
+			// (Kimi finding #3)
+			blankElectrical = append(blankElectrical, p.Type)
 			continue
 		}
 		if !excludeSet[p.Number] {
@@ -122,14 +129,19 @@ func CheckPinPad(symbolText, footprintText string, excludePads []string) (*PinPa
 		}, nil
 	}
 
+	ok := len(unmatchedPins) == 0 && len(unmatchedPads) == 0 && len(blankElectrical) == 0
 	result := &PinPadResult{
-		OK:            len(unmatchedPins) == 0 && len(unmatchedPads) == 0,
+		OK:            ok,
 		UnmatchedPins: unmatchedPins,
 		UnmatchedPads: unmatchedPads,
 		MatchedCount:  matched,
 	}
 
 	// Build error messages.
+	if len(blankElectrical) > 0 {
+		result.Errors = append(result.Errors,
+			fmt.Sprintf("%d blank-numbered electrical pad(s) in footprint (likely malformed)", len(blankElectrical)))
+	}
 	if len(unmatchedPins) > 0 {
 		result.Errors = append(result.Errors,
 			fmt.Sprintf("symbol pins with no footprint pad: %s", strings.Join(unmatchedPins, ", ")))

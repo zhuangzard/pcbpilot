@@ -24,7 +24,9 @@ func sxArg(n *sexp, i int) string {
 }
 
 // ValidateLibName rejects names that contain path separators, traversal
-// sequences, absolute/drive/UNC prefixes, or Windows-invalid filenames.
+// sequences, absolute/drive/UNC prefixes, Windows-invalid characters
+// (: * ? " < > |), control characters, or Windows reserved base names
+// (CON, PRN, AUX, NUL, COM1-9, LPT1-9) even with extensions.
 func ValidateLibName(name string) error {
 	if name == "" {
 		return fmt.Errorf("library name is empty")
@@ -35,15 +37,29 @@ func ValidateLibName(name string) error {
 	if name == "." || name == ".." {
 		return fmt.Errorf("library name %q is a traversal component", name)
 	}
-	// Windows reserved names: CON, PRN, AUX, NUL, COM1-9, LPT1-9.
-	upper := strings.ToUpper(strings.TrimRight(name, ". "))
+	// Reject Windows-invalid filename characters and control chars.
+	for _, c := range name {
+		if c < 0x20 {
+			return fmt.Errorf("library name %q contains control character U+%04X", name, c)
+		}
+		if strings.ContainsRune(`:*?"<>|`, c) {
+			return fmt.Errorf("library name %q contains Windows-invalid character %q", name, string(c))
+		}
+	}
+	// Windows reserved names: base name before any '.' extension.
+	// "CON.txt", "LPT1.log" etc. are equally reserved on NTFS.
+	base := strings.ToUpper(name)
+	if dotIdx := strings.IndexByte(base, '.'); dotIdx >= 0 {
+		base = base[:dotIdx]
+	}
+	base = strings.TrimRight(base, " ")
 	for _, r := range []string{"CON", "PRN", "AUX", "NUL"} {
-		if upper == r {
+		if base == r {
 			return fmt.Errorf("library name %q is a Windows reserved name", name)
 		}
 	}
 	for _, prefix := range []string{"COM", "LPT"} {
-		if len(upper) == 4 && strings.HasPrefix(upper, prefix) && upper[3] >= '1' && upper[3] <= '9' {
+		if len(base) == 4 && strings.HasPrefix(base, prefix) && base[3] >= '1' && base[3] <= '9' {
 			return fmt.Errorf("library name %q is a Windows reserved name", name)
 		}
 	}
@@ -140,9 +156,17 @@ func EnsureLibTableEntry(tablePath, tableKind, nickname, relURI string) (bool, e
 		if uriNode != nil && sxArg(uriNode, 0) == uri {
 			return false, nil // already correct
 		}
-		// Update URI.
+		// Update or create the URI node. If the entry had no uri child
+		// (malformed), add one rather than silently succeeding without
+		// establishing the registration. (Kimi finding #5)
 		if uriNode != nil && len(uriNode.list) > 1 {
 			uriNode.list[1] = &sexp{atom: uri, quoted: true}
+		} else {
+			newURI, perr := parseSx(fmt.Sprintf("(uri %s)", Q(uri)))
+			if perr != nil {
+				return false, fmt.Errorf("internal: %w", perr)
+			}
+			ch.list = append(ch.list, newURI)
 		}
 		out := sexpSerializeTable(root, tableKind)
 		_, werr := kfile.WriteFile(tablePath, []byte(out), kfile.Opts{NoLockCheck: true})

@@ -252,18 +252,19 @@ func AuthorSymbol(spec SymbolSpec) (string, error) {
 
 	if units == 1 {
 		// Single-unit: _0_1 = body only, _1_1 = body + all pins.
-		fmt.Fprintf(&b, "\t\t%s\n", symBuildUnitChild(spec.Name, 0, nil, overallLayout))
-		fmt.Fprintf(&b, "\t\t%s\n", symBuildUnitChild(spec.Name, 1, spec.Pins, overallLayout))
+		fmt.Fprintf(&b, "\t\t%s\n", symBuildUnitChild(spec.Name, 0, nil, nil, overallLayout))
+		fmt.Fprintf(&b, "\t\t%s\n", symBuildUnitChild(spec.Name, 1, spec.Pins, nil, overallLayout))
 	} else {
 		// Multi-unit: _0_1 = common body + common pins, _U_1 = body + unit pins.
+		// Common pins reserve positions in every unit so per-unit pins never
+		// coincide with common pin coordinates (Codex+Kimi finding #1).
+		// Every declared unit gets a child even if it has no unit-specific pins
+		// (Codex+Kimi finding #2).
 		commonPins := unitPins[0]
-		fmt.Fprintf(&b, "\t\t%s\n", symBuildUnitChild(spec.Name, 0, commonPins, overallLayout))
+		fmt.Fprintf(&b, "\t\t%s\n", symBuildUnitChild(spec.Name, 0, commonPins, nil, overallLayout))
 		for u := 1; u <= units; u++ {
 			uPins := unitPins[u]
-			if len(uPins) == 0 {
-				continue
-			}
-			fmt.Fprintf(&b, "\t\t%s\n", symBuildUnitChild(spec.Name, u, uPins, overallLayout))
+			fmt.Fprintf(&b, "\t\t%s\n", symBuildUnitChild(spec.Name, u, uPins, commonPins, overallLayout))
 		}
 	}
 
@@ -276,7 +277,11 @@ func AuthorSymbol(spec SymbolSpec) (string, error) {
 // contains both the body rectangle and the pins. This is the correct KiCad
 // structure: one child per (unit, body-style) pair, never two siblings with
 // the same unit number.
-func symBuildUnitChild(name string, unit int, pins []SymbolPin, layout symLayout) string {
+//
+// commonPins (non-nil for per-unit children of multi-unit symbols) lists
+// unit-0 pins whose grid slots must be reserved so that per-unit pins are
+// placed below (or after) the common-pin region rather than overlapping.
+func symBuildUnitChild(name string, unit int, pins, commonPins []SymbolPin, layout symLayout) string {
 	var left, right, top, bottom []SymbolPin
 	for _, p := range pins {
 		side := p.Side
@@ -295,19 +300,38 @@ func symBuildUnitChild(name string, unit int, pins []SymbolPin, layout symLayout
 		}
 	}
 
+	// Count common-pin slots to reserve per side so unit pins start after them.
+	var reserveLeft, reserveRight, reserveTop, reserveBottom int
+	for _, p := range commonPins {
+		side := p.Side
+		if side == "" {
+			side = "left"
+		}
+		switch side {
+		case "left":
+			reserveLeft++
+		case "right":
+			reserveRight++
+		case "top":
+			reserveTop++
+		case "bottom":
+			reserveBottom++
+		}
+	}
+
 	var b strings.Builder
 	fmt.Fprintf(&b, "(symbol %s\n", Q(fmt.Sprintf("%s_%d_1", name, unit)))
 
-	// Body rectangle: always for unit 0, and for unit > 0 when it has pins.
-	if unit == 0 || len(pins) > 0 {
-		fill := "background"
-		fmt.Fprintf(&b, "\t\t\t(rectangle (start %s %s) (end %s %s) (stroke (width %s) (type default)) (fill (type %s)))\n",
-			F(layout.left), F(layout.top), F(layout.right), F(layout.bottom), F(symStroke), fill)
-	}
+	// Body rectangle: always for unit 0, and always for unit > 0
+	// (every declared unit emits a child).
+	fill := "background"
+	fmt.Fprintf(&b, "\t\t\t(rectangle (start %s %s) (end %s %s) (stroke (width %s) (type default)) (fill (type %s)))\n",
+		F(layout.left), F(layout.top), F(layout.right), F(layout.bottom), F(symStroke), fill)
 
 	// Pins in the same child (not a separate sibling).
 	if len(pins) > 0 {
-		symWritePins(&b, left, right, top, bottom, layout)
+		symWritePins(&b, left, right, top, bottom, layout,
+			reserveLeft, reserveRight, reserveTop, reserveBottom)
 	}
 
 	fmt.Fprintf(&b, "\t\t)")
@@ -315,29 +339,31 @@ func symBuildUnitChild(name string, unit int, pins []SymbolPin, layout symLayout
 }
 
 // symWritePins emits pin S-expressions for all four sides.
-func symWritePins(b *strings.Builder, left, right, top, bottom []SymbolPin, layout symLayout) {
+// reserveLeft/Right/Top/Bottom = how many common-pin grid slots to skip
+// at the start of each side so per-unit pins don't overlap common pins.
+func symWritePins(b *strings.Builder, left, right, top, bottom []SymbolPin, layout symLayout, reserveLeft, reserveRight, reserveTop, reserveBottom int) {
 	font := fmt.Sprintf("(effects (font (size %s %s)))", F(symFontSize), F(symFontSize))
 
 	for i, p := range left {
-		y := layout.top - symGrid - float64(i)*symGrid
+		y := layout.top - symGrid - float64(i+reserveLeft)*symGrid
 		x := layout.left - pinLength(p)
 		symWritePin(b, p, x, y, 0, pinLength(p), font)
 	}
 
 	for i, p := range right {
-		y := layout.top - symGrid - float64(i)*symGrid
+		y := layout.top - symGrid - float64(i+reserveRight)*symGrid
 		x := layout.right + pinLength(p)
 		symWritePin(b, p, x, y, 180, pinLength(p), font)
 	}
 
 	for i, p := range top {
-		x := layout.left + symGrid + float64(i)*symGrid
+		x := layout.left + symGrid + float64(i+reserveTop)*symGrid
 		y := layout.top + pinLength(p)
 		symWritePin(b, p, x, y, 270, pinLength(p), font)
 	}
 
 	for i, p := range bottom {
-		x := layout.left + symGrid + float64(i)*symGrid
+		x := layout.left + symGrid + float64(i+reserveBottom)*symGrid
 		y := layout.bottom - pinLength(p)
 		symWritePin(b, p, x, y, 90, pinLength(p), font)
 	}

@@ -53,6 +53,28 @@ const (
 	fpCrtYdSnap     = 0.01 // courtyard grid snap (mm)
 )
 
+// validPadLayers is the set of KiCad copper/mask/paste/silk/fab/courtyard layer
+// names accepted for pad declarations (including wildcards).
+var validPadLayers = map[string]bool{
+	"F.Cu": true, "B.Cu": true, "*.Cu": true,
+	"In1.Cu": true, "In2.Cu": true, "In3.Cu": true, "In4.Cu": true,
+	"In5.Cu": true, "In6.Cu": true, "In7.Cu": true, "In8.Cu": true,
+	"In9.Cu": true, "In10.Cu": true, "In11.Cu": true, "In12.Cu": true,
+	"In13.Cu": true, "In14.Cu": true, "In15.Cu": true, "In16.Cu": true,
+	"In17.Cu": true, "In18.Cu": true, "In19.Cu": true, "In20.Cu": true,
+	"In21.Cu": true, "In22.Cu": true, "In23.Cu": true, "In24.Cu": true,
+	"In25.Cu": true, "In26.Cu": true, "In27.Cu": true, "In28.Cu": true,
+	"In29.Cu": true, "In30.Cu": true,
+	"F.Paste": true, "B.Paste": true, "*.Paste": true,
+	"F.Mask": true, "B.Mask": true, "*.Mask": true,
+	"F.SilkS": true, "B.SilkS": true,
+	"F.Fab": true, "B.Fab": true,
+	"F.CrtYd": true, "B.CrtYd": true,
+}
+
+// ValidatePadLayer reports whether s is a valid KiCad pad layer name.
+func ValidatePadLayer(s string) bool { return validPadLayers[s] }
+
 // FPFileVersion is the format version for generated .kicad_mod files.
 // KiCad 9 reads older versions; we use the widely-compatible KiCad 8 token.
 const FPFileVersion = "20240108"
@@ -102,6 +124,29 @@ func AuthorFootprint(spec FootprintSpec) (string, error) {
 		}
 		if len(p.Layers) == 0 {
 			return "", fmt.Errorf("pad %d (%s): layers is required", i, p.Number)
+		}
+		for _, l := range p.Layers {
+			if !ValidatePadLayer(l) {
+				return "", fmt.Errorf("pad %d (%s): unknown layer %q", i, p.Number, l)
+			}
+		}
+	}
+
+	// Range-validate margins and roundrect ratio. (Kimi finding #6)
+	if spec.Courtyard < 0 {
+		return "", fmt.Errorf("courtyard margin must be non-negative, got %s", F(spec.Courtyard))
+	}
+	if spec.SilkMargin < 0 {
+		return "", fmt.Errorf("silk margin must be non-negative, got %s", F(spec.SilkMargin))
+	}
+
+	// Validate per-pad rratio.
+	for i, p := range spec.Pads {
+		if p.Shape == "roundrect" && p.RRatio < 0 {
+			return "", fmt.Errorf("pad %d (%s): roundrect ratio must be non-negative, got %s", i, p.Number, F(p.RRatio))
+		}
+		if p.Shape == "roundrect" && p.RRatio > 0.5 {
+			return "", fmt.Errorf("pad %d (%s): roundrect ratio must be at most 0.5, got %s", i, p.Number, F(p.RRatio))
 		}
 	}
 
@@ -252,7 +297,12 @@ func AuthorFootprint(spec FootprintSpec) (string, error) {
 
 // fpWritePad emits one pad S-expression.
 func fpWritePad(b *strings.Builder, p PadSpec) {
-	layers := "\"" + strings.Join(layerList(p.Layers), "\" \"") + "\""
+	sorted := layerList(p.Layers)
+	quoted := make([]string, len(sorted))
+	for i, l := range sorted {
+		quoted[i] = Q(l)
+	}
+	layers := strings.Join(quoted, " ")
 	atStr := fmt.Sprintf("%s %s", F(p.At[0]), F(p.At[1]))
 	if p.At[2] != 0 {
 		atStr += " " + F(p.At[2])
@@ -406,6 +456,21 @@ func EditFootprintPads(src string, edits []PadEdit) (string, error) {
 			case "roundrect", "rect", "circle", "oval":
 			default:
 				return "", fmt.Errorf("unknown pad shape %q", *e.Shape)
+			}
+			// Reject shape edits on custom pads: changing shape would leave
+			// stale primitives child in place. (Kimi finding #4)
+			if len(target.list) > 3 && target.list[3].atom == "custom" {
+				return "", fmt.Errorf("cannot change shape of custom pad %q; remove primitives manually first", e.Number)
+			}
+			hasPrimitives := false
+			for _, ch := range target.list {
+				if ch.head() == "primitives" {
+					hasPrimitives = true
+					break
+				}
+			}
+			if hasPrimitives {
+				return "", fmt.Errorf("cannot change shape of pad %q with primitives child; remove primitives manually first", e.Number)
 			}
 			// Shape is the 3rd atom in (pad "num" type shape ...)
 			if len(target.list) > 3 {

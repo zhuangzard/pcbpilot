@@ -115,11 +115,11 @@ func TestCheckPinPad_ExcludePad(t *testing.T) {
 	}
 }
 
-func TestCheckPinPad_BlankPadExcluded(t *testing.T) {
+func TestCheckPinPad_BlankNPTHPadExcluded(t *testing.T) {
 	sym := testSymbol(
 		SymbolPin{Number: "1", Name: "A", Type: "passive", Side: "left"},
 	)
-	// Footprint has a blank-number NPTH.
+	// Footprint has a blank-number NPTH — should be auto-excluded (mechanical).
 	fpText := `(footprint "Test" (pad "1" smd rect (at 0 0) (size 1 1) (layers "F.Cu")) (pad "" np_thru_hole circle (at 5 5) (size 3 3) (drill 2.2) (layers "*.Cu")))`
 
 	result, err := CheckPinPad(sym, fpText, nil)
@@ -127,7 +127,34 @@ func TestCheckPinPad_BlankPadExcluded(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !result.OK {
-		t.Errorf("expected OK (blank pad excluded), got errors: %v", result.Errors)
+		t.Errorf("expected OK (blank NPTH pad excluded), got errors: %v", result.Errors)
+	}
+}
+
+// Regression: blank-numbered SMD pad must be reported as malformed, not silently
+// excluded. (Kimi finding #3)
+func TestCheckPinPad_BlankElectricalPadReported(t *testing.T) {
+	sym := testSymbol(
+		SymbolPin{Number: "1", Name: "A", Type: "passive", Side: "left"},
+	)
+	// Footprint has pad "1" + a blank-numbered SMD pad (likely authoring mistake).
+	fpText := `(footprint "Test" (pad "1" smd rect (at 0 0) (size 1 1) (layers "F.Cu")) (pad "" smd rect (at 2 0) (size 1 1) (layers "F.Cu")))`
+
+	result, err := CheckPinPad(sym, fpText, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.OK {
+		t.Error("expected not OK when blank-numbered electrical pad is present")
+	}
+	hasBlankMsg := false
+	for _, e := range result.Errors {
+		if strings.Contains(e, "blank-numbered") {
+			hasBlankMsg = true
+		}
+	}
+	if !hasBlankMsg {
+		t.Errorf("expected blank-numbered error message, got: %v", result.Errors)
 	}
 }
 
