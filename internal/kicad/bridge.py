@@ -1295,7 +1295,10 @@ def pours(pcb, spec_path, out):
         # errors: 166 on a field board); otherwise the board outline.
         z = make_pour_zone(board, zs, net, board_pts)
         if zs.get("polys"):
-            merged = pcbnew.SHAPE_POLY_SET()
+            # Built in the zone's own outline: ZONE.SetOutline takes ownership
+            # of a SHAPE_POLY_SET Python still frees (pcbnew crashed, 0xc0000005).
+            merged = z.Outline()
+            merged.RemoveAllContours()
             for poly in zs["polys"]:
                 merged.NewOutline()
                 for x, y in poly:
@@ -1304,7 +1307,6 @@ def pours(pcb, spec_path, out):
                 merged.Simplify()
             except TypeError:
                 merged.Simplify(pcbnew.SHAPE_POLY_SET.PM_FAST)
-            z.SetOutline(merged)
         board.Add(z)
         made.append(z.GetZoneName())
     zones = fill_zones(board)
