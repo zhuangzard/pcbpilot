@@ -275,3 +275,20 @@ func TestKiCadLcscPlanFingerprintGuard(t *testing.T) {
 		t.Errorf("--qty mismatch: %v", err)
 	}
 }
+
+func TestResolveSetArgsRejectsCombiningPlans(t *testing.T) {
+	dir := t.TempDir()
+	plan := filepath.Join(dir, "p.json")
+	os.WriteFile(plan, []byte(`{"boards":1,"fingerprint":"x","assignments":{"R1":"C9"},"expect":{"R1":"C1"}}`), 0o644)
+	plan2 := filepath.Join(dir, "q.json")
+	os.WriteFile(plan2, []byte(`{"boards":1,"fingerprint":"y","assignments":{"R2":"C9"},"expect":{"R2":"C2"}}`), 0o644)
+	if _, _, err := resolveSetArgs("x.kicad_pcb", []string{"@" + plan, "@" + plan2}); err == nil || !strings.Contains(err.Error(), "cannot be combined") {
+		t.Errorf("two plans: %v", err)
+	}
+	if _, _, err := resolveSetArgs("x.kicad_pcb", []string{"@" + plan, "R5=C7"}); err == nil || !strings.Contains(err.Error(), "cannot be combined") {
+		t.Errorf("plan + plain: %v", err)
+	}
+	if _, _, err := resolveSetArgs("x.kicad_pcb", []string{"R5=C7", "R6=C8"}); err != nil {
+		t.Errorf("plain only: %v", err)
+	}
+}

@@ -226,6 +226,11 @@ func resolveSetArgs(pcb string, sets []string) (map[string]string, map[string]*k
 			plain = append(plain, v)
 		}
 	}
+	// A plan was sized against the unchanged design; a second plan or plain assignments could
+	// claim the same replacement stock, so a plan is only accepted on its own.
+	if len(plans) > 1 || (len(plans) == 1 && len(plain) > 0) {
+		return nil, nil, fmt.Errorf("a --set @plan cannot be combined with other plans or plain --set assignments: their stock demands were not checked together (regenerate one plan with --alternatives)")
+	}
 	assign, err := kicad.ParseAssignments(plain)
 	if err != nil {
 		return nil, nil, err

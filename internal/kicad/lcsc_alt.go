@@ -366,40 +366,59 @@ func Alternatives(in AltInput) *AltReport {
 	}
 	// Safety net: re-add up the demand on every proposed number (what the lines that still keep it
 	// need plus every proposal drawn on it) and revoke proposals that together exceed its stock.
-	demand := map[string]int64{}
-	for code, n := range pending {
-		if n > 0 {
-			demand[code] += need[code]
-		}
-	}
-	byCode := map[string][]int{}
+	// Revoking a proposal puts its line's demand back on the original number, which can in turn
+	// overload a number another line was proposed after that release, so repeat until stable.
+	// Stock per number is the lowest figure any search reported for it.
+	stockOf := map[string]int64{}
 	for i := range rep.Lines {
-		if p := rep.Lines[i].Proposal; p != nil {
-			demand[p.LCSC] += proposalNeed(in, &rep.Lines[i], p.LCSC)
-			byCode[p.LCSC] = append(byCode[p.LCSC], i)
+		for _, c := range rep.Lines[i].Candidates {
+			if s, ok := stockOf[c.LCSC]; !ok || c.Stock < s {
+				stockOf[c.LCSC] = c.Stock
+			}
 		}
 	}
-	for code, idx := range byCode {
-		stock := int64(-1)
-		for _, c := range rep.Lines[idx[0]].Candidates {
-			if c.LCSC == code {
-				stock = c.Stock
-			}
-		}
-		if stock < 0 || demand[code] <= stock {
-			continue
-		}
-		for _, i := range idx {
+	for {
+		demand := map[string]int64{}
+		kept := map[string]bool{}
+		byCode := map[string][]int{}
+		for i := range rep.Lines {
 			l := &rep.Lines[i]
-			for _, ref := range l.Refs {
-				delete(rep.Assignments, ref)
-				delete(rep.Expect, ref)
+			if p := l.Proposal; p != nil {
+				demand[p.LCSC] += proposalNeed(in, l, p.LCSC)
+				byCode[p.LCSC] = append(byCode[p.LCSC], i)
+			} else if !kept[l.LCSC] {
+				kept[l.LCSC] = true
+				demand[l.LCSC] += need[l.LCSC]
 			}
-			l.Proposal = nil
-			l.Reasons = append(l.Reasons, "proposal-revoked: total demand on "+code+" exceeds its stock")
-			if l.Blocking {
-				verdicts = append(verdicts, gate.Result{Name: refList(l.Refs), Status: gate.Fail})
+		}
+		revoked := false
+		codesOver := make([]string, 0, len(byCode))
+		for code := range byCode {
+			codesOver = append(codesOver, code)
+		}
+		sort.Strings(codesOver)
+		for _, code := range codesOver {
+			stock, ok := stockOf[code]
+			if !ok || demand[code] <= stock {
+				continue
 			}
+			revoked = true
+			for _, i := range byCode[code] {
+				l := &rep.Lines[i]
+				for _, ref := range l.Refs {
+					delete(rep.Assignments, ref)
+					delete(rep.Expect, ref)
+				}
+				l.Proposal = nil
+				l.Reasons = append(l.Reasons, "proposal-revoked: total demand on "+code+" exceeds its stock")
+				if l.Blocking {
+					verdicts = append(verdicts, gate.Result{Name: refList(l.Refs), Status: gate.Fail})
+				}
+			}
+			break // recompute demand before judging the next number
+		}
+		if !revoked {
+			break
 		}
 	}
 	skipped := 0

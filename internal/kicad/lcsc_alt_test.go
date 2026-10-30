@@ -527,3 +527,48 @@ func TestNormMPNPunctuationDistinct(t *testing.T) {
 		t.Errorf("got %q", NormMPN(" ab-1_2 "))
 	}
 }
+
+// Review round 4: revoking proposals puts demand back on their original numbers, which must be
+// re-validated against proposals drawn on those numbers after their release.
+type seqCatalog struct {
+	*fakeCatalog
+	answers [][]CatalogPart
+	n       int
+}
+
+func (c *seqCatalog) Search(q string, l int) ([]CatalogPart, error) {
+	if !strings.Contains(q, "0402") {
+		return nil, nil // MPN queries find nothing; only the value+package query is scripted
+	}
+	i := c.n
+	c.n++
+	if i >= len(c.answers) {
+		i = len(c.answers) - 1
+	}
+	return c.answers[i], nil
+}
+
+func TestAlternativesRevocationCascades(t *testing.T) {
+	zero := func(p *CatalogPart) *CatalogPart { p.Loss = i64(0); return p }
+	c1 := zero(resistor("C1", "EXT-1", "0402", "1kΩ", "±1%", "62.5mW", false, 1))
+	c2 := zero(resistor("C2", "OLD-2", "0402", "1kΩ", "±1%", "62.5mW", true, 0))
+	c3 := zero(resistor("C3", "OLD-3", "0402", "1kΩ", "±1%", "62.5mW", true, 0))
+	// Successive searches report C9 at stock 1, then 2; the third search offers C1 (stock 1).
+	c9a := zero(resistor("C9", "NEW-9", "0402", "1kΩ", "±1%", "62.5mW", true, 1))
+	c9b := zero(resistor("C9", "NEW-9", "0402", "1kΩ", "±1%", "62.5mW", true, 2))
+	cat := &seqCatalog{
+		fakeCatalog: &fakeCatalog{byCode: map[string]*CatalogPart{"C1": c1, "C2": c2, "C3": c3}},
+		answers:     [][]CatalogPart{{*c9a}, {*c9b}, {*c1}},
+	}
+	rep := Alternatives(AltInput{
+		Parts:  partsOf([4]string{"R1", "1k", r0402, "C1"}, [4]string{"R2", "1k", r0402, "C2"}, [4]string{"R3", "1k", r0402, "C3"}),
+		Boards: 1, Catalog: cat,
+	})
+	// Revoking R1 and R2 puts R1 back on C1, so R3's draw on C1 (stock 1) must go too.
+	if len(rep.Assignments) != 0 {
+		t.Errorf("cascading revocation must leave no assignment: %v", rep.Assignments)
+	}
+	if rep.Verdict == gate.Pass {
+		t.Errorf("verdict %s", rep.Verdict)
+	}
+}
