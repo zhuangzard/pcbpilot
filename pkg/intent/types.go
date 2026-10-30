@@ -41,6 +41,9 @@ type Intent struct {
 	Analog *AnalogInfo `json:"analog,omitempty"` // sim analog summary (analog.go)
 	// Review are the design-review roles declared in spec.review (additive).
 	Review *ReviewNotes `json:"review,omitempty"`
+	// Windings are spec.windings (additive): pcbauto reads them as
+	// pcbauto.Intent.Windings.
+	Windings map[string][][2]string `json:"windings,omitempty"`
 }
 
 // Edge is intent.json "edge" — the same type pcb auto reads
