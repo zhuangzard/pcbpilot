@@ -42,6 +42,7 @@ type PartValues struct {
 	LCSC         string `json:"lcsc,omitempty"`
 	Manufacturer string `json:"manufacturer,omitempty"`
 	Description  string `json:"description,omitempty"`
+	DNP          bool   `json:"dnp,omitempty"` // not fitted: left out of the simulation
 }
 
 // ConnDoc is the subset of the 1.4 connectivity IR the simulator reads.
@@ -52,6 +53,7 @@ type ConnDoc struct {
 		ID     string `json:"id"`
 		Ref    string `json:"ref"`
 		PageID string `json:"pageId"`
+		DNP    bool   `json:"dnp"`
 		Device struct {
 			Name       string `json:"name"`
 			SupplierID string `json:"supplierId"`
@@ -224,6 +226,12 @@ func BuildDesign(pages []*ConnDoc, values map[string]PartValues) (*Design, []str
 	d := &Design{NetRole: map[string]string{}}
 	var warnings []string
 	byRef := map[string]*Part{}
+	dnp := map[string]bool{}
+	defer func() {
+		if len(dnp) > 0 {
+			d.Sources = append(d.Sources, fmt.Sprintf("not fitted (DNP), left out: %s", strings.Join(sortedKeysBool(dnp), ", ")))
+		}
+	}()
 	for pi, pg := range pages {
 		netName := map[string]string{}
 		for _, n := range pg.Nets {
@@ -259,6 +267,13 @@ func BuildDesign(pages []*ConnDoc, values map[string]PartValues) (*Design, []str
 			ref := c.Ref
 			if ref == "" {
 				ref = c.ID
+			}
+			// A not-fitted part carries no current: simulating it fitted made
+			// a field board's R105 (0R, DNP) ground the 50 MHz oscillator enable and a
+			// reviewer flagged the FPGA clock as disabled.
+			if c.DNP || values[ref].DNP {
+				dnp[ref] = true
+				continue
 			}
 			p := byRef[ref]
 			if p == nil {
@@ -355,6 +370,15 @@ func (d *Design) Nets() []string {
 				out = append(out, pin.Net)
 			}
 		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func sortedKeysBool(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
 	}
 	sort.Strings(out)
 	return out
