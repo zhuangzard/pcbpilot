@@ -182,8 +182,9 @@ func (r *kicadRun) fastrouteCandidate(classed, dsnPath string) *routeCandidate {
 		// fastroute used the largest class via everywhere (one padstack per
 		// run): each router via goes to its own net's class via.
 		if before, _, err := r.snapshot(classed); err == nil {
-			if nb, err := r.routerViasToClass(before, imported); err == nil {
+			if nb, gates, err := r.routerViasToClass(before, imported); err == nil {
 				imported = nb
+				res.Gates = gates
 			} else {
 				fmt.Fprintf(r.stderr, "vias: cannot size the router vias to their class (%v); kept\n", err)
 				r.summary["routerViasError"] = err.Error()

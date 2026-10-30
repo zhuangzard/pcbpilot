@@ -58,6 +58,9 @@ type routeResult struct {
 	// checkpoint session exists (no report): incomplete by definition,
 	// UnroutedCount unknown (-1) — the board's connectivity counts it.
 	Partial bool `json:"partial,omitempty"`
+	// Gates: checks of this result made while committing it (router-vias),
+	// reported with the board's gates.
+	Gates []gateResult `json:"-"`
 }
 
 // fastrouteResult turns the kept fastroute run into a routeResult.
