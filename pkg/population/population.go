@@ -48,3 +48,16 @@ func ValuesConflict(ref string, valuesDNP, flag bool) string {
 	}
 	return fmt.Sprintf(`%s: the values file marks it "dnp" but KiCad's DNP flag is off — fitted (simulated); KiCad's flag decides: set it in KiCad to leave the part out, or drop "dnp" from the values file`, ref)
 }
+
+// BoardConflict is the warning for ref when the board footprint's DNP
+// attribute differs from the schematic's flag: with schematic data the
+// schematic decides (the board is updated from it); "" when they agree.
+func BoardConflict(ref string, boardDNP, schDNP bool) string {
+	if boardDNP == schDNP {
+		return ""
+	}
+	if boardDNP {
+		return fmt.Sprintf(`%s: the board footprint is marked DNP but KiCad's DNP flag in the schematic is off — fitted (simulated, on the BOM and placed); the schematic decides: run Update PCB from Schematic, or set the flag in the schematic to leave the part out`, ref)
+	}
+	return fmt.Sprintf(`%s: KiCad's DNP flag is set in the schematic but not on the board footprint — not fitted (left out of the simulation, BOM and placement); the schematic decides: run Update PCB from Schematic`, ref)
+}

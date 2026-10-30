@@ -204,7 +204,9 @@ func ApplyNetlistPopulation(rows []SchPart, nl *SchNetlist) []SchPart {
 
 // MergeParts combines board footprints (the set of placed parts) with the
 // schematic rows. The schematic's LCSC field wins when both have one (the
-// schematic is the source the board is updated from); DNP / exclude flags are
+// schematic is the source the board is updated from). DNP is the
+// schematic's flag (pkg/population); a board footprint whose DNP attribute
+// differs is reported, not OR-ed in. Exclude-from-BOM / position flags are
 // OR-ed. A board footprint the schematic BOM does not list keeps the board's
 // own fields and flags (so it is still gated) and is reported as a warning:
 // kicad-cli omits excluded-from-BOM symbols, so an out-of-sync board must be
@@ -233,10 +235,15 @@ func MergeParts(bd *Board, sch []SchPart, haveSch bool) ([]Part, []string) {
 					warns = append(warns, fmt.Sprintf("%s (%s) is on the board but not in the schematic BOM (board-only part, or excluded from BOM only in the schematic) — using the board's fields; run Update PCB from Schematic if out of sync", f.Ref, f.LibID))
 				}
 			} else {
-				if w := population.Conflict(f.Ref, s.DNPText, s.DNP || p.DNP); w != "" {
+				// The schematic's DNP flag decides (pkg/population): a board
+				// footprint whose DNP attribute differs is stale, and said so.
+				if w := population.BoardConflict(f.Ref, p.DNP, s.DNP); w != "" {
 					dnpField = append(dnpField, w)
 				}
-				p.DNP = p.DNP || s.DNP
+				if w := population.Conflict(f.Ref, s.DNPText, s.DNP); w != "" {
+					dnpField = append(dnpField, w)
+				}
+				p.DNP = s.DNP
 				p.ExcludeBOM = p.ExcludeBOM || s.ExcludeBOM
 				if s.LCSC != "" {
 					if p.LCSC != "" && p.LCSC != s.LCSC {
