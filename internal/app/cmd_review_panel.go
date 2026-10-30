@@ -401,22 +401,9 @@ func reapplyReviewWaivers(stage string, reqFiles, evFiles []string, outDir strin
 	if err := json.Unmarshal(b, &rec); err != nil {
 		return nil, fmt.Errorf("--reapply-waivers: %s: %w", path, err)
 	}
-	read := func(files []string) (map[string]string, error) {
-		m := map[string]string{}
-		for _, f := range files {
-			b, err := os.ReadFile(f)
-			if err != nil {
-				return nil, err
-			}
-			m[filepath.Base(f)] = string(b)
-		}
-		return m, nil
-	}
-	reqs, err := read(reqFiles)
-	if err != nil {
-		return nil, err
-	}
-	ev, err := read(evFiles)
+	// Each input is read once: the prompt hash and the full-file hashes
+	// are both checked against these bytes.
+	reqs, ev, files, err := readReviewInputs(reqFiles, evFiles)
 	if err != nil {
 		return nil, err
 	}
@@ -424,7 +411,8 @@ func reapplyReviewWaivers(stage string, reqFiles, evFiles []string, outDir strin
 	if rec.Stage != stage || rec.InputSHA256 != sum {
 		return nil, fmt.Errorf("--reapply-waivers: the requirements/evidence differ from the reviewed input (sha256 %s, review.json %s) - run the review again", sum, rec.InputSHA256)
 	}
-	if why := reviewFilesChanged(&rec, reqFiles, evFiles); why != "" {
+	paths := append(append([]string{}, reqFiles...), evFiles...)
+	if why := reviewHashesDiffer(rec.FilesSHA256, files, paths); why != "" {
 		return nil, fmt.Errorf("--reapply-waivers: %s - run the review again", why)
 	}
 	var names []string
@@ -434,9 +422,18 @@ func reapplyReviewWaivers(stage string, reqFiles, evFiles []string, outDir strin
 	g := reviewGate(rec.Reviewers, names)
 	applyWaivers(&g, waivers)
 	rec.Gate = g
+	reviewBeforeWrite()
+	// The files must still be the ones checked above.
+	if why := reviewFilesChanged(&rec, reqFiles, evFiles); why != "" {
+		return nil, fmt.Errorf("--reapply-waivers: an input changed while the gate was recomputed (%s); review.json not written - run again", why)
+	}
 	blob, _ := json.MarshalIndent(&rec, "", "  ")
 	return &rec, os.WriteFile(path, append(blob, '\n'), 0o644)
 }
+
+// reviewBeforeWrite runs just before reapplyReviewWaivers re-checks the
+// inputs and writes review.json (a test seam for a change in between).
+var reviewBeforeWrite = func() {}
 
 func newReviewPanelCmd(stdout, stderr io.Writer) *cobra.Command {
 	var reqFiles, evFiles []string
@@ -530,19 +527,27 @@ func reviewFilesSHA(reqFiles, evFiles []string) ([]string, error) {
 // file list differs, or rec predates the per-file hashes. "" = unchanged.
 func reviewFilesChanged(rec *reviewRecord, reqFiles, evFiles []string) string {
 	if len(rec.FilesSHA256) == 0 {
-		return "review.json has no per-file hashes (an older review), so a change past the prompt's --max-bytes cut cannot be ruled out"
+		return reviewHashesDiffer(nil, nil, nil)
 	}
 	got, err := reviewFilesSHA(reqFiles, evFiles)
 	if err != nil {
 		return err.Error()
 	}
-	files := append(append([]string{}, reqFiles...), evFiles...)
-	if len(got) != len(rec.FilesSHA256) {
-		return fmt.Sprintf("%d input file(s), the review had %d", len(got), len(rec.FilesSHA256))
+	return reviewHashesDiffer(rec.FilesSHA256, got, append(append([]string{}, reqFiles...), evFiles...))
+}
+
+// reviewHashesDiffer compares recorded full-file hashes with the hashes of
+// the files at paths; "" when every one matches.
+func reviewHashesDiffer(recorded, got, paths []string) string {
+	if len(recorded) == 0 {
+		return "review.json has no per-file hashes (an older review), so a change past the prompt's --max-bytes cut cannot be ruled out"
+	}
+	if len(got) != len(recorded) {
+		return fmt.Sprintf("%d input file(s), the review had %d", len(got), len(recorded))
 	}
 	for i := range got {
-		if got[i] != rec.FilesSHA256[i] {
-			return fmt.Sprintf("%s differs from the reviewed file (sha256 %s, review.json %s)", files[i], got[i], rec.FilesSHA256[i])
+		if got[i] != recorded[i] {
+			return fmt.Sprintf("%s differs from the reviewed file (sha256 %s, review.json %s)", paths[i], got[i], recorded[i])
 		}
 	}
 	return ""

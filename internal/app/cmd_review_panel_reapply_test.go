@@ -120,3 +120,35 @@ func TestReapplyReviewWaiversChangeBeyondTruncation(t *testing.T) {
 		t.Fatalf("a review without per-file hashes must be refused, got %v", err)
 	}
 }
+
+// --reapply-waivers checks the inputs it read once; a file that changes
+// after that check and before review.json is written is refused, and the
+// record on disk keeps its old gate.
+func TestReapplyReviewWaiversInputChangedBeforeWrite(t *testing.T) {
+	dir := t.TempDir()
+	req := filepath.Join(dir, "REQ.md")
+	ev := filepath.Join(dir, "ev.json")
+	_ = os.WriteFile(req, []byte("R1 the box shall be blue\n"), 0o644)
+	_ = os.WriteFile(ev, []byte(`{"color":"red"}`), 0o644)
+	reqs, evs, files, err := readReviewInputs([]string{req}, []string{ev})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := reviewRecord{Stage: "design", InputSHA256: fmt.Sprintf("%x", sha256.Sum256([]byte(reviewPrompt("design", reqs, evs, 120000)))), FilesSHA256: files,
+		Reviewers: []reviewVerdict{{Reviewer: "codex", Verdict: "fail", Requirements: []reviewRequirement{{ID: "R1", Status: "not_met"}}}}}
+	out := filepath.Join(dir, "review")
+	_ = os.MkdirAll(out, 0o755)
+	blob, _ := json.Marshal(rec)
+	_ = os.WriteFile(filepath.Join(out, "review.json"), blob, 0o644)
+	old := reviewBeforeWrite
+	t.Cleanup(func() { reviewBeforeWrite = old })
+	reviewBeforeWrite = func() { _ = os.WriteFile(ev, []byte(`{"color":"green"}`), 0o644) }
+	w := []gateWaiver{{Gate: "design-review", Match: "R1 not met", Reason: "approved", By: "t"}}
+	if _, err := reapplyReviewWaivers("design", []string{req}, []string{ev}, out, 120000, w); err == nil || !strings.Contains(err.Error(), "changed while the gate was recomputed") {
+		t.Fatalf("a change before the write must be refused, got %v", err)
+	}
+	after, _ := os.ReadFile(filepath.Join(out, "review.json"))
+	if string(after) != string(blob) {
+		t.Fatal("review.json rewritten despite the refusal")
+	}
+}
