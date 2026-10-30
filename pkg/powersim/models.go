@@ -26,7 +26,7 @@ const (
 	// on, open when off; the gate is not solved. On by default (the model
 	// declares a pass element); "on": false or --switch REF=open turns it
 	// off.
-	KindMOSFET = "mosfet"
+	KindMOSFET    = "mosfet"
 	KindResistor  = "resistor"
 	KindCapacitor = "capacitor"
 	KindInductor  = "inductor"
@@ -115,13 +115,13 @@ type Model struct {
 	// supplyPins/returnPins/voltageV (each output has its own return).
 	Outputs []SourceOutput `json:"outputs,omitempty"`
 	// Passives / switches / resistive parts.
-	RsOhm     float64 `json:"rsOhm,omitempty"`
-	DCROhm    float64 `json:"dcrOhm,omitempty"`
+	RsOhm  float64 `json:"rsOhm,omitempty"`
+	DCROhm float64 `json:"dcrOhm,omitempty"`
 	// Windings of a multi-winding inductor (common-mode choke): pin pairs,
 	// each a series DCR. A 4-pin inductor without it uses 1–4 / 2–3.
-	Windings [][2]string `json:"windings,omitempty"`
-	RonOhm    float64 `json:"ronOhm,omitempty"`
-	Momentary *bool   `json:"momentary,omitempty"`
+	Windings  [][2]string `json:"windings,omitempty"`
+	RonOhm    float64     `json:"ronOhm,omitempty"`
+	Momentary *bool       `json:"momentary,omitempty"`
 	// On is a mosfet model's state in every scenario (default true).
 	On *bool `json:"on,omitempty"`
 	// Leakage for esd/tvs (typ / peak scenario).
