@@ -55,6 +55,12 @@ pcbpilot intent derive --connectivity sch-p1.json --connectivity sch-p2.json \
  "rules":{"clearanceMil":6,"trackMil":6,"viaDrillMil":12,"viaDiaMil":24}}
 ```
 
+`spec.windings`（可选，v0.12.3，原样进 `intent.json`）：多绕组电感（共模扼流圈）的绕组脚对，`{"L1":[["1","4"],["2","3"]]}`
+（按它自己的数据手册）。只有**声明了**的绕组才把两边的地并成同一个域（如 CMC 回线 GND_J–GND）；没声明的 4 焊盘电感
+接在两个地上时两边保持独立的域，`intent derive` 报 `choke-windings` warning 并给出要补的声明——不再默认按
+1–4/2–3 合并（1–2/3–4 接法或双电感会把两个独立的地并掉、绝缘对被吞）。`sim power` 的绕组同理取模型的 `windings`
+（缺省 1–4/2–3 记为 assumption），绕组两端都是地网时远端地（脚少的那一侧）单独成节点，回线电流和绕组压降照常求解。
+
 <a id="review"></a>`spec.review`（可选，原样进 `intent.json` 的 `review`，旧的 intent.json 没有它也照常可用）：给
 `kicad sch-check --review` / sch-build `sch-review` 门禁声明原理图看不出的**角色**，每条豁免在报告里注明来源字段。
 
