@@ -108,6 +108,8 @@ func TestClassViaPlan(t *testing.T) {
 type fakeViaTools struct {
 	failOn string
 	edited map[string]any
+	// before / after replace the snapshots' JSON when set.
+	before, after string
 }
 
 func (f *fakeViaTools) Snapshot(pcb string) ([]byte, error) {
@@ -115,7 +117,13 @@ func (f *fakeViaTools) Snapshot(pcb string) ([]byte, error) {
 		return nil, errors.New("pcbnew crashed")
 	}
 	if pcb == "classed" {
+		if f.before != "" {
+			return []byte(f.before), nil
+		}
 		return []byte(`{"copper":{"vias":[]}}`), nil
+	}
+	if f.after != "" {
+		return []byte(f.after), nil
 	}
 	return []byte(`{"copper":{"vias":[{"primitiveId":"v1","net":"A","diameter":31.4961,"holeDiameter":15.748}]}}`), nil // 0.8/0.4 mm
 }
@@ -162,6 +170,29 @@ func TestSizeRouterViasErrorPaths(t *testing.T) {
 		}
 		if len(gates) == 0 || gates[0].Gate != "router-vias" || gates[0].Pass || !strings.Contains(gates[0].Detail, c.wantDetail) {
 			t.Fatalf("%s: gates %+v", c.failOn, gates)
+		}
+	}
+}
+
+// A vias list that does not decode (or a via without an id or size) on
+// either snapshot is a cannot-check gate with no via edits — never an empty
+// list that hides router vias or makes a board's own vias look new.
+func TestSizeRouterViasMalformedSnapshots(t *testing.T) {
+	next := func(string) string { return "resized" }
+	for _, c := range []struct{ name, before, after, want string }{
+		{"before not a list", `{"copper":{"vias":{"x":1}}}`, "", "the board before the import"},
+		{"before via without id", `{"copper":{"vias":[{"net":"A","diameter":31.5,"holeDiameter":15.7}]}}`, "", "the board before the import"},
+		{"before without copper", `{}`, "", "the board before the import"},
+		{"after wrong type", "", `{"copper":{"vias":[{"primitiveId":"v1","net":"A","diameter":"big","holeDiameter":15.7}]}}`, "the imported board"},
+		{"after without size", "", `{"copper":{"vias":[{"primitiveId":"v1","net":"A"}]}}`, "the imported board"},
+	} {
+		f := &fakeViaTools{before: c.before, after: c.after}
+		board, gates := sizeRouterVias(f, "classed", "imported", next, map[string]any{}, io.Discard)
+		if board != "imported" || f.edited != nil {
+			t.Fatalf("%s: board %s edits %v", c.name, board, f.edited)
+		}
+		if len(gates) != 1 || gates[0].Gate != "router-vias" || gates[0].Pass || !strings.Contains(gates[0].Detail, "cannot check: "+c.want) || !strings.Contains(gates[0].Detail, "none resized") {
+			t.Fatalf("%s: gates %+v", c.name, gates)
 		}
 	}
 }

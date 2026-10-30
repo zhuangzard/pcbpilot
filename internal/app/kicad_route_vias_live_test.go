@@ -102,7 +102,11 @@ func TestRouterViaPadstackKiCadLive(t *testing.T) {
 	um := func(v float64) float64 { return v * 25.4 }
 	class := map[string][2]float64{"A": {800, 200}, "GND": {700, 400}}
 	nets := map[string]int{}
-	for _, v := range snapshotVias(after) {
+	afterVias, err := snapshotVias(after)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range afterVias {
 		nets[v.Net]++
 		want, ok := class[v.Net]
 		if !ok {
@@ -123,7 +127,11 @@ func TestRouterViaPadstackKiCadLive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, v := range snapshotVias(final) {
+	finalVias, err := snapshotVias(final)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range finalVias {
 		want, ok := class[v.Net]
 		if !ok {
 			want = [2]float64{600, 300} // Default

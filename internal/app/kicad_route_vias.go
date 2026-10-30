@@ -140,13 +140,24 @@ type routeVia struct {
 	Drill float64 `json:"holeDiameter"`
 }
 
-func snapshotVias(s *boardSnapshot) []routeVia {
-	var out []routeVia
+// snapshotVias reads a snapshot's vias. A snapshot without its copper
+// section, a vias list that does not decode or a via without an id or a
+// size is an error: never an empty list (that would hide router vias, or
+// make a board's own vias look router-added).
+func snapshotVias(s *boardSnapshot) ([]routeVia, error) {
 	if s == nil || s.Copper == nil {
-		return nil
+		return nil, fmt.Errorf("the snapshot has no copper section")
 	}
-	_ = decodeAny(s.Copper.Vias, &out)
-	return out
+	var out []routeVia
+	if err := decodeAny(s.Copper.Vias, &out); err != nil {
+		return nil, fmt.Errorf("copper.vias: %w", err)
+	}
+	for i, v := range out {
+		if v.ID == "" || v.Dia <= 0 || v.Drill <= 0 {
+			return nil, fmt.Errorf("copper.vias[%d]: no id, diameter or hole diameter (%+v)", i, v)
+		}
+	}
+	return out, nil
 }
 
 // classViaPlan sorts the router vias (not in old) into shrink operations
@@ -211,23 +222,33 @@ func sizeRouterVias(t routerViaTools, classed, board string, next func(string) s
 	before, err := snap(classed)
 	if err != nil {
 		summary["routerVias"] = map[string]any{"error": err.Error()}
-		return board, gate(false, "cannot check: the board before the import could not be read, so the router vias are unknown: "+err.Error())
+		return board, gate(false, "cannot check: the board before the import could not be read, so the router vias are unknown (none resized): "+err.Error())
+	}
+	beforeVias, err := snapshotVias(before)
+	if err != nil {
+		summary["routerVias"] = map[string]any{"error": err.Error()}
+		return board, gate(false, "cannot check: the board before the import has no readable vias, so the router vias are unknown (none resized): "+err.Error())
 	}
 	old := map[string]bool{}
-	for _, v := range snapshotVias(before) {
+	for _, v := range beforeVias {
 		old[v.ID] = true
 	}
 	after, err := snap(board)
 	if err != nil {
 		summary["routerVias"] = map[string]any{"error": err.Error()}
-		return board, gate(false, "cannot check: the imported board could not be read, so the router vias were not sized to their class: "+err.Error())
+		return board, gate(false, "cannot check: the imported board could not be read, so the router vias were not sized to their class (none resized): "+err.Error())
 	}
 	rb, err := t.RulesRead(board)
 	if err != nil {
 		summary["routerVias"] = map[string]any{"error": err.Error()}
 		return board, gate(false, "cannot check: KiCad's class readback failed, so the router vias were not sized to their class: "+err.Error())
 	}
-	ops, fail, unknown, n := classViaPlan(snapshotVias(after), old, func(net string) (int64, int64, bool) {
+	afterVias, err := snapshotVias(after)
+	if err != nil {
+		summary["routerVias"] = map[string]any{"error": err.Error()}
+		return board, gate(false, "cannot check: the imported board has no readable vias, so the router vias were not sized to their class (none resized): "+err.Error())
+	}
+	ops, fail, unknown, n := classViaPlan(afterVias, old, func(net string) (int64, int64, bool) {
 		e, ok := rb.Nets[net]
 		return e.ViaDiameter, e.ViaDrill, ok
 	})
