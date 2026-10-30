@@ -800,8 +800,12 @@ func (r *kicadRun) prepareRoute(classed string, reqs map[string]kicad.NetRequire
 	// first, shrunk to each net's class via after the import
 	// (kicad_route_vias.go).
 	var viaOrder []string
-	prepared, viaOrder = dsnViaLargestFirst(prepared)
+	var routerVia *dsnVia
+	prepared, viaOrder, routerVia = dsnRouterVia(prepared)
 	r.summary["dsnViaOrder"] = viaOrder
+	if routerVia != nil {
+		r.summary["routerViaPadstack"] = map[string]any{"name": routerVia.name, "diameterUm": routerVia.dia, "drillUm": routerVia.drill}
+	}
 	dsnPath = filepath.Join(o.outDir, "route.dsn")
 	if err := os.WriteFile(dsnPath, []byte(prepared), 0o644); err != nil {
 		return "", 0, err
@@ -1134,6 +1138,9 @@ func (r *kicadRun) qualityGates(board string) (bool, error) {
 	// Post-route steps whose own check could not run (a DRC that timed out):
 	// cannot-check gates of this board.
 	keep = append(keep, r.stepGates...)
+	if r.route != nil {
+		keep = append(keep, r.route.Gates...)
+	}
 	r.gates = keep
 	routed := filepath.Join(o.outDir, "routed.kicad_pcb")
 	removeKicadBoard(routed)

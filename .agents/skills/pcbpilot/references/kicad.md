@@ -493,10 +493,13 @@ pcbpilot kicad route --pcb board-b-v5a.kicad_pcb --intent intent.json --sim sim.
    （`no_neckdown`），显式差分对带间距/偏斜。`both`：两个后端同时跑，**先「完整 + 无新增 DRC 错误」的胜出并取消另一个**，胜出者仍要过
    本次运行的全部门禁；任一门禁失败就换下一个（被取消的会重跑），全都不过则按最少未布通/新增 DRC 的那个报告失败。
    `summary.routerCandidates` 记录每个后端的未布通数、用时、快检结果、是否过全量门禁。任何门禁、签核都不因后端而减少。
-3. **过孔尺寸**：fastroute（0.1.14）每次只用 DSN structure `(via …)` 列表里的第一个过孔，不认类的 `use_via`（实板 262 个
-   过孔全是 Default 的 0.6 mm，类要求 0.6096 / 0.7 mm，`kicad rules --check` 的 via-size 判失败）。所以列表按直径、孔径从大到小
-   排（`summary.dsnViaOrder`），导入后把每个布线器过孔**缩**到它所在网的有效类过孔（KiCad 回读；bridge edit `setVia`，
-   `summary.routerVias`）——只缩不放，fastroute 按大过孔留的间距都还在。
+3. **过孔尺寸**：fastroute（0.1.14）不会让每个过孔都用类的 `use_via`：fanout 等路径从 DSN structure `(via …)` 列表里取过孔（实板 262 个
+   过孔全是 Default 的 0.6 mm，类要求 0.6096 / 0.7 mm，`kicad rules --check` 的 via-size 判失败）。所以列表里只放**逐项取最大**的
+   一个过孔（自动布线仍按各类 `use_via`，已实测）：所有类过孔里最大的直径**和**最大的孔径（类 0.8/0.2 与 0.7/0.4 → 0.8/0.4；没有这样的类就按 KiCad 的命名
+   `Via[…]_<径>:<孔>_um` 加一个 padstack，SES 导入时 KiCad 从名字读孔径——实测导入为 0.8/0.4），作为列表里唯一的过孔（`summary.routerViaPadstack`、
+   `dsnViaOrder`）。导入后每个布线器过孔**缩**到它所在网的有效类过孔（KiCad 回读；bridge edit `setVia`，`summary.routerVias`）：
+   两个尺寸都只缩不放，fastroute 按大过孔留的间距都还在，每个类过孔（含它自己的环宽）都缩得到。缩不到类过孔的（某一维比类小）
+   判 `router-vias` 失败，网没有有效类过孔的判 cannot-check——都不会悄悄跳过。
    **DRC 时限**：kicad-cli DRC 的时限按板文件大小放大（15 min + 每 MB 2 min，最多 2 h；`PCBPILOT_KICAD_DRC_TIMEOUT` 覆盖），
    超时报 `kicad-cli pcb drc on <板> timed out after <时限>`。铺铜后的 starved-thermal 修复、widen 的 DRC 回退是可选步骤：
    它们的 DRC 没跑成（超时）时记一个 cannot-check 门禁（`starved-thermals` / `widen-drc`），照样写 routed 板、跑其余门禁，
