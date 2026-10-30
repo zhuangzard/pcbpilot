@@ -84,7 +84,7 @@ func TestPopulationRuleSharedByNetlistSimAndFab(t *testing.T) {
 		t.Fatal(err)
 	}
 	rows = ApplyNetlistPopulation(rows, nl)
-	bd := &Board{Footprints: []Footprint{{Ref: "R1"}, {Ref: "R2"}, {Ref: "R3"}}}
+	bd := &Board{Footprints: []Footprint{{Ref: "R1", DNP: true}, {Ref: "R2"}, {Ref: "R3"}}} // synced with the schematic
 	parts, warns := MergeParts(bd, rows, true)
 	assembled := map[string]bool{}
 	for _, p := range parts {
@@ -95,5 +95,35 @@ func TestPopulationRuleSharedByNetlistSimAndFab(t *testing.T) {
 	}
 	if strings.Join(warns, "\n") != want {
 		t.Fatalf("fab/lcsc warnings %v, want exactly %q", warns, want)
+	}
+}
+
+// With schematic data the schematic's DNP flag decides in lcsc / fab, as
+// in sim power: a stale board DNP attribute is reported, both ways, never
+// OR-ed; a board-only run keeps the board's attribute.
+func TestPopulationBoardFlagMismatch(t *testing.T) {
+	rows := []SchPart{{Ref: "R1"}, {Ref: "R2", DNP: true}, {Ref: "R3"}}
+	bd := &Board{Footprints: []Footprint{{Ref: "R1", DNP: true}, {Ref: "R2"}, {Ref: "R3"}}}
+	parts, warns := MergeParts(bd, rows, true)
+	fitted := map[string]bool{}
+	for _, p := range parts {
+		fitted[p.Ref] = !p.DNP
+	}
+	if !fitted["R1"] || fitted["R2"] || !fitted["R3"] {
+		t.Fatalf("fitted %v", fitted)
+	}
+	got := strings.Join(warns, "\n")
+	for _, w := range []string{population.BoardConflict("R1", true, false), population.BoardConflict("R2", false, true)} {
+		if !strings.Contains(got, w) {
+			t.Fatalf("warnings %v lack %q", warns, w)
+		}
+	}
+	if strings.Contains(got, "R3") {
+		t.Fatalf("agreeing part warned: %v", warns)
+	}
+	// No schematic: the board's attribute is all there is.
+	parts, warns = MergeParts(bd, nil, false)
+	if !parts[0].DNP || parts[1].DNP || len(warns) != 0 {
+		t.Fatalf("board-only %+v %v", parts, warns)
 	}
 }
