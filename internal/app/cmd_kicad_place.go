@@ -29,6 +29,7 @@ type kicadPlaceOpts struct {
 	seed                     int64
 	timeBudget               time.Duration
 	haloMil, haloICMil       float64
+	haloICSet                bool // --halo-ic-mil given explicitly (0 then means no halo on ICs)
 }
 
 // kicadPlaceSeed is one placement seed in the report.
@@ -112,6 +113,7 @@ its parts need vs. what it offers), stderr warns, and the exit code is
   pcbpilot kicad place --pcb board.kicad_pcb --out placed/board.kicad_pcb --mech mech.json --intent intent.json --place-seeds 8`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			o.haloICSet = cmd.Flags().Changed("halo-ic-mil")
 			rep, err := runKicadPlace(o, kicadPlaceDeps{snapshot: kicad.Snapshot, place: kicad.Place}, stderr)
 			if err != nil {
 				return err
@@ -233,7 +235,7 @@ func runKicadPlace(o kicadPlaceOpts, deps kicadPlaceDeps, stderr io.Writer) (*ki
 	// The same options as `pcb auto run --place --no-route`.
 	popt := pcbauto.PlaceOptions{Seed: o.seed}
 	if o.haloMil > 0 || o.haloICMil > 0 {
-		popt.Halo = kicadPlaceHalo(b, o.haloMil, o.haloICMil)
+		popt.Halo = kicadPlaceHalo(b, o.haloMil, o.haloICMil, o.haloICSet || o.haloICMil > 0)
 		rep.Notes = append(rep.Notes, fmt.Sprintf("halo: %.1f mil per side on every part, %.1f mil on parts with 6+ pads", o.haloMil, o.haloICMil))
 	}
 	if ls := kicadLabelSpec(raw); ls != nil {
@@ -787,11 +789,11 @@ func (pp *placeProgress) stop() {
 // --halo-ic-mil. a field board (353 parts, 4 layers): packed for wirelength only, the
 // patient side left 140 SMD pins without a fan-out and 131 connections
 // unrouted while a third of the board stayed empty.
-func kicadPlaceHalo(b *pcbauto.Board, all, ic float64) map[string]float64 {
+func kicadPlaceHalo(b *pcbauto.Board, all, ic float64, icSet bool) map[string]float64 {
 	h := map[string]float64{}
 	for _, p := range b.Parts {
 		v := all
-		if ic > 0 && len(p.Pads) >= 6 {
+		if icSet && len(p.Pads) >= 6 {
 			v = ic
 		}
 		if v > 0 {
