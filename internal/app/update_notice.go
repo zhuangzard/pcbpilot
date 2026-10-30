@@ -142,17 +142,71 @@ func runSessionNotice(ctx context.Context, d noticeDeps, stderr io.Writer) bool 
 			}
 		}
 	}
+	u := parseHealthUpdates(p.Raw)
+	id, shown := sessionOutcome(u)
 	lines := healthNoticeLines(p.Raw, true)
+	if u != nil && !shown {
+		// Drop an outcome line already relayed in an earlier session (an
+		// older daemon still sends it: it neither reads the ack nor hands
+		// out the outcome identity).
+		v := *u
+		v.Notices = nil
+		for _, n := range u.Notices {
+			if !isOutcomeNotice(n, u.LastUpdate) {
+				v.Notices = append(v.Notices, n)
+			}
+		}
+		raw, _ := json.Marshal(map[string]any{"updates": v})
+		lines = healthNoticeLines(raw, true)
+	}
 	for _, line := range lines {
 		fmt.Fprintln(stderr, line)
 	}
 	// The update outcome ("a → b updated … restart your AI client") is news
-	// once: acknowledge exactly the outcome health announced, and only when
-	// its line was relayed (other notices acknowledge nothing).
-	if u := parseHealthUpdates(p.Raw); u != nil && u.Outcome != nil && len(u.Notices) > 0 {
-		_ = selfupdate.AckUpdateOutcome(*u.Outcome)
+	// once: acknowledge exactly the outcome that was relayed, and only when
+	// its line was (other notices acknowledge nothing).
+	if shown {
+		_ = selfupdate.AckUpdateOutcome(id)
 	}
 	return len(lines) > 0
+}
+
+// sessionOutcome is the update outcome this session relays, if any: the
+// identity health handed out (a current daemon), else — an older daemon
+// sends the line without it — the identity of its lastUpdate when one of
+// its notices is that outcome's line and it was not acknowledged yet.
+func sessionOutcome(u *healthUpdates) (selfupdate.OutcomeID, bool) {
+	if u == nil {
+		return selfupdate.OutcomeID{}, false
+	}
+	if u.Outcome != nil {
+		return *u.Outcome, len(u.Notices) > 0
+	}
+	if u.LastUpdate == nil {
+		return selfupdate.OutcomeID{}, false
+	}
+	id := u.LastUpdate.Outcome()
+	if id.Zero() || selfupdate.ReadNoticedOutcome().Same(id) {
+		return id, false
+	}
+	for _, n := range u.Notices {
+		if isOutcomeNotice(n, u.LastUpdate) {
+			return id, true
+		}
+	}
+	return id, false
+}
+
+// isOutcomeNotice reports whether notice n is the line health builds from
+// the update outcome st (daemon_selfupdate.go Health).
+func isOutcomeNotice(n string, st *selfupdate.UpdateState) bool {
+	if st == nil || !selfupdate.OneShotPhase(st.Phase) {
+		return false
+	}
+	if st.Phase == selfupdate.PhaseFailed {
+		return strings.HasPrefix(n, "pcbpilot update to "+st.To+" failed")
+	}
+	return st.Summary != "" && strings.HasPrefix(n, st.Summary)
 }
 
 // healthNoticeLines renders /health "updates" notices (plus the connector

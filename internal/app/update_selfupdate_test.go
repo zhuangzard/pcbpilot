@@ -576,3 +576,39 @@ func TestUpdateOutcomeNoticeRelayedOnce(t *testing.T) {
 		t.Fatal("the unseen 0.6.3 outcome must still be announced")
 	}
 }
+
+// An older daemon (v0.12.1) sends the outcome line with no identity and
+// never reads the ack, so it repeats it for 24 h: the CLI recognises the
+// line from health's lastUpdate, relays it once, acknowledges that outcome
+// and drops the line in later sessions, keeping every other notice.
+func TestUpdateOutcomeNoticeFromOlderDaemonRelayedOnce(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	now := time.Date(2026, 10, 29, 10, 0, 0, 0, time.UTC)
+	st := selfupdate.UpdateState{Phase: selfupdate.PhaseDone, From: "0.6.0", To: "0.6.1", At: now.Add(-2 * time.Hour),
+		Summary: "pcbpilot 0.6.0 → 0.6.1 updated: cli, skill"}
+	raw, _ := json.Marshal(map[string]any{"version": "v0.6.1", "updates": map[string]any{
+		"current": "0.6.1", "state": "current", "lastUpdate": st,
+		"notices": []string{st.Summary + " — restart your AI client to load the new Skill/MCP", "pcbpilot 0.6.2 available — the daemon applies it when EasyEDA is idle"}}})
+	d := noticeDeps{now: func() time.Time { return now }, version: "v0.6.1",
+		probe: func(context.Context) daemonProbe { return daemonProbe{Running: true, Version: "v0.6.1", Raw: raw} }}
+	session := func() string {
+		var out bytes.Buffer
+		runSessionNotice(context.Background(), d, &out)
+		return out.String()
+	}
+	if s := session(); !strings.Contains(s, "0.6.0 → 0.6.1 updated") || !strings.Contains(s, "0.6.2 available") {
+		t.Fatalf("first session: %q", s)
+	}
+	if !selfupdate.ReadNoticedOutcome().Same(st.Outcome()) {
+		t.Fatalf("outcome not acknowledged: %+v", selfupdate.ReadNoticedOutcome())
+	}
+	s := session()
+	if strings.Contains(s, "updated") {
+		t.Fatalf("an older daemon's outcome line repeated: %q", s)
+	}
+	if !strings.Contains(s, "0.6.2 available") {
+		t.Fatalf("other notices must still be relayed: %q", s)
+	}
+}
