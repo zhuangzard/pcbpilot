@@ -122,5 +122,18 @@ RMS 0.53 A（L1 额定 0.77 A）；ngspice 比对 16 个节点最大差 0.4 µV�
   引脚按名 D/S 识别，或在 `pins.drain` / `pins.source` 写脚号。不必再用代理件。
 - 模型可按位号绑定：`"match":{"refs":["Q7"]}`，同一文件内位号优先于 LCSC、MPN、nameRegex，
   同型号的两个件可以各用一个模型（一个导通、一个关断）。旧模型文件不受影响。
+  示例（`--models project-models.json`，数字是占位，按数据手册填并写 `source`）：
+
+  ```json
+  {"schemaVersion": 1, "models": [
+    {"id": "q1-rpp", "kind": "mosfet", "match": {"refs": ["Q1"]}, "ronOhm": 0.012,
+     "source": "datasheet Rds(on) @ Vgs=-10 V", "confidence": "datasheet"},
+    {"id": "q7-ovp", "kind": "mosfet", "match": {"refs": ["Q7"]},
+     "pins": {"drain": ["5", "6", "7", "8"], "source": ["1", "2", "3"]}, "ronOhm": 0.008,
+     "source": "datasheet", "confidence": "datasheet"},
+    {"id": "q8-off", "kind": "mosfet", "match": {"refs": ["Q8"]}, "on": false,
+     "source": "intent: load switch off in the standby scenario", "confidence": "assumed"}
+  ]}
+  ```
 - 多个地网被当成同一参考点（报告里可能合并）；多轨负载需在模型中写 `rails[]`。
 - 结果质量取决于模型数据：`assumed` 的数字要回到数据手册核实。
