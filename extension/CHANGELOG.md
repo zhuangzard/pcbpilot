@@ -18,9 +18,10 @@ round until no blocker remained.
 - `kicad rules` writes an insulation pair's creepage constraint only when it is larger than the pair's clearance (the clearance
   rule already implies an equal or smaller creepage). This removes KiCad's slow creepage check where it adds nothing. Boards that
   carry a 0.12.2 rules block need `kicad rules --apply` again to benefit.
-- Vias: fastroute routes with one via as large as every class via in both diameter and drill; after import each router via is
-  shrunk to its own net class's via. A new `router-vias` gate fails or is cannot-check when a via cannot be sized, including when
-  the board snapshot cannot be read.
+- Vias: route offers fastroute one via as large as every class via in both diameter and drill and, after import, shrinks each
+  router via to its own net class's via. A new `router-vias` gate fails or is cannot-check when a via cannot be sized, including
+  when the board snapshot cannot be read. Known limit: on some boards fastroute 0.1.14 still places its own smaller via; the gate
+  then fails instead of passing undersized vias (follow-up in the next release).
 - `kicad rules` copper-widths accepts the pad escapes route plans.
 - Pours are clipped to their insulation domain and kept as one zone each; a planned pour clipped to nothing fails the new
   `pour-clip` gate. On the test board pour-to-foreign-domain isolation errors went from 1005 to 2.
