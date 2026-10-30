@@ -969,7 +969,12 @@ def netclasses(pcb, reqs_path, out):
         cons = []
         if pr.get("clearanceMm"):
             cons.append("(constraint clearance (min %smm))" % ("%.4f" % pr["clearanceMm"]).rstrip("0").rstrip("."))
-        if pr.get("creepageMm"):
+        # A creepage minimum not above the clearance minimum is implied by
+        # it (a surface path is never shorter than the straight line between
+        # the same copper; KiCad 10's DRC flags every such creepage pair as a
+        # clearance violation too) and KiCad's creepage test costs most of a
+        # DRC run on a large board: written only when it adds a constraint.
+        if pr.get("creepageMm") and float(pr["creepageMm"]) > float(pr.get("clearanceMm") or 0) + 1e-6:
             cons.append("(constraint creepage (min %smm))" % ("%.4f" % pr["creepageMm"]).rstrip("0").rstrip("."))
         if not cons:
             continue
@@ -1510,7 +1515,7 @@ def copper_by_uuid(board):
     return out
 
 
-EDIT_OPS = ("setWidth", "addVias", "addTracks", "setText", "addTexts", "hideTexts", "padZoneNone")
+EDIT_OPS = ("setWidth", "setVia", "addVias", "addTracks", "setText", "addTexts", "hideTexts", "padZoneNone")
 
 
 def validate_edit(board, ops):
@@ -1528,6 +1533,7 @@ def validate_edit(board, ops):
     texts = {it[0]: it[1] for it in text_index_cache}
     plan = {"lists": L, "tracks": tracks, "texts": texts, "zonePads": []}
     bad += check_fields("setWidth", L["setWidth"], need=("width",), positive=("width",))
+    bad += check_fields("setVia", L["setVia"], need=("diameter", "drill"), positive=("diameter", "drill"))
     bad += check_fields("addVias", L["addVias"], need=("x", "y"), opt=("diameter", "drill"), positive=("diameter", "drill"))
     bad += check_fields("addTracks", L["addTracks"], need=("startX", "startY", "endX", "endY", "lineWidth"), positive=("lineWidth",))
     bad += check_fields("setText", L["setText"], need=("x", "y"), opt=("rotation", "fontSize", "lineWidth"), positive=("fontSize", "lineWidth"))
@@ -1536,6 +1542,14 @@ def validate_edit(board, ops):
     bad += check_fields("padZoneNone", L["padZoneNone"])
     obj = {k: [op for op in L[k] if isinstance(op, dict)] for k in EDIT_OPS if k != "hideTexts"}
     bad += check_text_layers([op.get("layer", 3) for op in obj["addTexts"]])
+    for i, op in enumerate(L["setVia"]):
+        if not isinstance(op, dict):
+            continue
+        vid = op.get("id")
+        if not isinstance(vid, str) or not vid or len(copper.get(vid, [])) != 1 or copper[vid][0].Type() != pcbnew.PCB_VIA_T:
+            bad.append("setVia[%d]: %r is not exactly one via" % (i, vid))
+        elif isinstance(op.get("drill"), (int, float)) and isinstance(op.get("diameter"), (int, float)) and op["drill"] >= op["diameter"]:
+            bad.append("setVia[%d]: drill must be smaller than the diameter" % i)
     for i, op in enumerate(L["setWidth"]):
         if not isinstance(op, dict):
             continue
@@ -1580,7 +1594,7 @@ def validate_edit(board, ops):
 
 def edit(pcb, ops_path, out):
     """Apply copper/silk edits (mil, y-up), fill the zones and save:
-    {"setWidth":[{"id","width"}], "addVias":[{"net","x","y","diameter","drill"}],
+    {"setWidth":[{"id","width"}], "setVia":[{"id","diameter","drill"}], "addVias":[{"net","x","y","diameter","drill"}],
      "addTracks":[{"net","layer","startX","startY","endX","endY","lineWidth"}],
      "setText":[{"id","x","y","rotation","fontSize","lineWidth"}],  (x, y = text centre)
      "addTexts":[{"text","x","y","layer","rotation","fontSize","lineWidth"}],
@@ -1597,10 +1611,15 @@ def edit(pcb, ops_path, out):
     L, tracks, texts, zone_pads = plan["lists"], plan["tracks"], plan["texts"], plan["zonePads"]
 
     # 2. Apply.
-    done = {"setWidth": 0, "addVias": 0, "addTracks": 0, "setText": 0}
+    done = {"setWidth": 0, "setVia": 0, "addVias": 0, "addTracks": 0, "setText": 0}
     for op in L["setWidth"]:
         tracks[op["id"]].SetWidth(nm(op["width"]))
         done["setWidth"] += 1
+    for op in L["setVia"]:
+        v = tracks[op["id"]]
+        set_via_width(v, nm(op["diameter"]))
+        v.SetDrill(nm(op["drill"]))
+        done["setVia"] += 1
 
     def pos(x, y):
         return pcbnew.VECTOR2I(nm(x), -nm(y))
@@ -1663,7 +1682,7 @@ def edit(pcb, ops_path, out):
     for p in zone_pads:
         p.SetLocalZoneConnection(pcbnew.ZONE_CONNECTION_NONE)
     done["padZoneNone"] = len(L["padZoneNone"])
-    zones = fill_zones(board) if (done["setWidth"] or done["addVias"] or done["addTracks"] or done["padZoneNone"]) else 0
+    zones = fill_zones(board) if (done["setWidth"] or done["setVia"] or done["addVias"] or done["addTracks"] or done["padZoneNone"]) else 0
     save_board(board, pcb, out)
     return {"ok": True, "error": "", "out": out, "done": done, "zonesFilled": zones}
 

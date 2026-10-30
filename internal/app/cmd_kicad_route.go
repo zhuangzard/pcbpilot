@@ -205,19 +205,22 @@ const noReviewMatch = "--no-review"
 
 // kicadRun is one kicad route execution.
 type kicadRun struct {
-	o       kicadRouteOpts
-	kt      *kicad.Tools
-	in      *designIntent
-	waivers []gateWaiver
-	summary map[string]any
-	gates   []gateResult
-	work    string
-	step    int
-	classes []kicad.NetClass
-	route   *routeResult
-	conn    string // schematic connectivity JSON (with --sch)
-	netlist *kicad.SchNetlist
-	stderr  io.Writer
+	// stepGates: cannot-check gates from post-route steps whose own check
+	// did not run (postRoute resets them, qualityGates reports them).
+	stepGates []gateResult
+	o         kicadRouteOpts
+	kt        *kicad.Tools
+	in        *designIntent
+	waivers   []gateWaiver
+	summary   map[string]any
+	gates     []gateResult
+	work      string
+	step      int
+	classes   []kicad.NetClass
+	route     *routeResult
+	conn      string // schematic connectivity JSON (with --sch)
+	netlist   *kicad.SchNetlist
+	stderr    io.Writer
 	// inputDRC: the input board's own DRC errors (rule|message), to mark
 	// what routing did not cause.
 	inputDRC map[string]bool
@@ -661,6 +664,7 @@ func (r *kicadRun) run() error {
 func (r *kicadRun) postRoute(board string, inSnap *boardSnapshot) (string, bool, error) {
 	o := r.o
 	var err error
+	r.stepGates = nil
 	// 4. Post-route copper: via arrays, widen to intent, pours, widen nets, silk.
 	if board, err = r.viaArrays(board); err != nil {
 		return board, false, err
@@ -792,6 +796,12 @@ func (r *kicadRun) prepareRoute(classed string, reqs map[string]kicad.NetRequire
 	if prepared, err = r.planEscapes(inSnap, prepared); err != nil {
 		return "", 0, fmt.Errorf("pre-route gate: escapes: %w", err)
 	}
+	// fastroute takes the first via of the list for every net: largest
+	// first, shrunk to each net's class via after the import
+	// (kicad_route_vias.go).
+	var viaOrder []string
+	prepared, viaOrder = dsnViaLargestFirst(prepared)
+	r.summary["dsnViaOrder"] = viaOrder
 	dsnPath = filepath.Join(o.outDir, "route.dsn")
 	if err := os.WriteFile(dsnPath, []byte(prepared), 0o644); err != nil {
 		return "", 0, err
@@ -985,7 +995,12 @@ func (r *kicadRun) widen(board, what string, plan func([]specctra.Track, []widen
 	for round := 0; round < 2; round++ {
 		rep, err := r.kt.DRC(out, filepath.Join(r.work, fmt.Sprintf("%02d-widen-drc%d.json", r.step, round)))
 		if err != nil {
-			return ops, out, err
+			// The widened tracks were planned clear of their neighbours; the
+			// KiCad step-back check did not run: kept, and said so (the
+			// routed board's own DRC gate judges the copper).
+			fmt.Fprintf(r.stderr, "widen: cannot check the widened tracks with KiCad DRC (%v); kept as planned\n", err)
+			r.stepGates = append(r.stepGates, gateResult{Gate: "widen-drc", Detail: fmt.Sprintf("cannot check: the KiCad DRC step-back of %s did not run: %v", what, err)})
+			return ops, out, nil
 		}
 		bad := map[string]bool{}
 		for _, v := range rep.Violations {
@@ -1116,6 +1131,9 @@ func (r *kicadRun) qualityGates(board string) (bool, error) {
 			keep = append(keep, g)
 		}
 	}
+	// Post-route steps whose own check could not run (a DRC that timed out):
+	// cannot-check gates of this board.
+	keep = append(keep, r.stepGates...)
 	r.gates = keep
 	routed := filepath.Join(o.outDir, "routed.kicad_pcb")
 	removeKicadBoard(routed)
@@ -1420,7 +1438,14 @@ var reStarvedPad = regexp.MustCompile(`[Pp]ad (\S+) \[[^\]]*\] of (\S+)`)
 func (r *kicadRun) starvedThermals(board string) (string, error) {
 	rep, err := r.kt.DRC(board, filepath.Join(r.work, fmt.Sprintf("%02d-pours-drc.json", r.step)))
 	if err != nil {
-		return board, err
+		// An optional repair step: its DRC not running (a timeout on a
+		// large board) never stops the route — the pours stay, the gate
+		// says the check did not happen, the routed board and every other
+		// gate still come.
+		fmt.Fprintf(r.stderr, "thermals: cannot check starved thermals (%v); pours kept as filled\n", err)
+		r.summary["starvedThermals"] = map[string]any{"error": err.Error()}
+		r.stepGates = append(r.stepGates, gateResult{Gate: "starved-thermals", Detail: "cannot check: the DRC that finds starved thermal pads did not run: " + err.Error()})
+		return board, nil
 	}
 	seen := map[string]bool{}
 	var ops []map[string]any
