@@ -4,7 +4,7 @@ description: "用 pcbpilot 离线完成 KiCad 板子的板级设置、布局、�
 license: MIT
 metadata:
   author: "zhuangzard (pcbpilot); original easyeda-agent by zhoushoujianwork"
-  version: "0.12.2"
+  version: "0.12.3"
   homepage: "https://github.com/zhuangzard/pcbpilot"
 ---
 

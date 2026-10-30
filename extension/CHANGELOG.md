@@ -1,5 +1,57 @@
 # Changelog
 
+## [0.12.3] — 2026-10-30
+
+**CLI, daemon, Skills and MCP move to 0.12.3. The connector runtime is UNCHANGED (only its version number moves); import the
+0.12.3 `pcbpilot-connector.eext` so the versions match — the daemon pauses design actions until they do.**
+
+Summary: routing and sign-off on large boards. On the 1443-part test board, `kicad route` in 0.12.2 aborted on a DRC timeout and
+wrote no board; in 0.12.3 it writes the routed board and runs all 16 mandatory gates, and DRC of the routed board takes about 3
+minutes instead of not finishing. Pours are clipped to their insulation domain. Reviewed by Codex and Kimi K3.1 Pro round after
+round until no blocker remained.
+
+**Routing and DRC**
+- A DRC that hits its limit is reported as a timeout naming the check, the board and the limit. The limit scales with the board
+  file (15 min + 2 min per MB, at most 2 h; `PCBPILOT_KICAD_DRC_TIMEOUT` overrides it).
+- Optional DRC-backed route steps (starved-thermal repair, widen step-back) record a cannot-check gate instead of aborting; the
+  routed board is still written and every other gate runs.
+- `kicad rules` writes an insulation pair's creepage constraint only when it is larger than the pair's clearance (the clearance
+  rule already implies an equal or smaller creepage). This removes KiCad's slow creepage check where it adds nothing. Boards that
+  carry a 0.12.2 rules block need `kicad rules --apply` again to benefit.
+- Vias: fastroute routes with one via as large as every class via in both diameter and drill; after import each router via is
+  shrunk to its own net class's via. A new `router-vias` gate fails or is cannot-check when a via cannot be sized, including when
+  the board snapshot cannot be read.
+- `kicad rules` copper-widths accepts the pad escapes route plans.
+- Pours are clipped to their insulation domain and kept as one zone each; a planned pour clipped to nothing fails the new
+  `pour-clip` gate. On the test board pour-to-foreign-domain isolation errors went from 1005 to 2.
+- A fastroute run that saved its final session but does not exit is stopped after 30 s and imported as a partial result with the
+  counts from its log.
+
+**Placement**
+- `kicad place --halo-mil` / `--halo-ic-mil` reserve routing room around parts.
+- Decaps more than 0.4 inch from their pin are moved closer when that lowers their cost without lengthening any of their nets or
+  blocking more labels; the rescue stops at the budget deadline plus 15 s.
+
+**Population (DNP)**
+- KiCad's own DNP flag decides everywhere: netlist, `sim power`, `kicad lcsc` and `kicad fab` (read from the schematic when it is
+  available, including symbols excluded from the BOM). A symbol field named "DNP", a values-file `dnp`, or a board flag that
+  disagrees is reported with the same warning in every tool instead of silently changing the result.
+- `kicad lcsc --check` prints an assembly breakdown (footprints, assembled, DNP, excluded).
+
+**Simulation and intent**
+- `sim power` models common-mode chokes (one resistance per winding) and pass elements with control pins; ground nets joined by
+  choke windings keep one reference per group, so return currents and winding drops are solved.
+- Grounds are merged into one isolation domain through a choke only when its windings are declared (`windings` in the intent
+  spec); otherwise they stay separate with a warning naming the declaration to add.
+- A poured ground or a branched rail keeps the floor minimum width.
+
+**Other**
+- `kicad sch-check --engineer-grade --spec` runs the sch-build engineer-grade gate on any project (sheets outside the root's folder
+  are refused).
+- `review-panel --reapply-waivers` recomputes a review's gate from its stored verdicts; reviews record hashes of their complete
+  input files, taken from the bytes the reviewers saw, and refuse inputs that changed.
+- An update notice relayed from an older daemon is shown once.
+
 ## [0.12.2] — 2026-10-29
 
 **CLI, daemon, Skills and MCP move to 0.12.2. The connector runtime is UNCHANGED (only its version number moves); import the
