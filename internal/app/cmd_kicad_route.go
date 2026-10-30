@@ -1341,7 +1341,7 @@ func designReviewGate(stage string, o reviewRunOpts, evidence []string, waivers 
 	if sha, err := reviewInputSHA(stage, o.requirements, evidence, reviewMaxBytes); err == nil {
 		var old reviewRecord
 		if b, err := os.ReadFile(filepath.Join(dir, "review.json")); err == nil && json.Unmarshal(b, &old) == nil &&
-			old.Stage == stage && old.InputSHA256 == sha && old.Gate.Pass {
+			old.Stage == stage && old.InputSHA256 == sha && old.Gate.Pass && reviewFilesChanged(&old, o.requirements, evidence) == "" {
 			g := old.Gate
 			g.Detail = "reused " + filepath.Join(dir, "review.json") + " (same inputs): " + g.Detail
 			summary["review-"+stage] = filepath.Join(dir, "review.json")

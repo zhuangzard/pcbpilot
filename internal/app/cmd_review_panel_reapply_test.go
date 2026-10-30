@@ -25,7 +25,11 @@ func TestReapplyReviewWaivers(t *testing.T) {
 	}
 	prompt := reviewPrompt("design", map[string]string{"REQ.md": "R1 the box shall be blue\nR2 the box shall be small\n"},
 		map[string]string{"ev.json": `{"color":"red"}`}, 120000)
-	rec := reviewRecord{Stage: "design", InputSHA256: fmt.Sprintf("%x", sha256.Sum256([]byte(prompt))),
+	files, err := reviewFilesSHA([]string{req}, []string{ev})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := reviewRecord{Stage: "design", InputSHA256: fmt.Sprintf("%x", sha256.Sum256([]byte(prompt))), FilesSHA256: files,
 		Reviewers: []reviewVerdict{{Reviewer: "codex", Verdict: "fail",
 			Requirements: []reviewRequirement{{ID: "R1", Status: "not_met", Evidence: "red"}, {ID: "R2", Status: "met"}},
 			Blocking:     []string{"enclosure not designed"}}}}
@@ -54,5 +58,65 @@ func TestReapplyReviewWaivers(t *testing.T) {
 	}
 	if _, err := reapplyReviewWaivers("design", []string{req}, []string{ev}, out, 120000, w2); err == nil || !strings.Contains(err.Error(), "differ") {
 		t.Fatalf("changed evidence must be refused, got %v", err)
+	}
+}
+
+// --max-bytes cuts the prompt; a change past the cut leaves the prompt hash
+// as it was, but not the hash of the complete file: reapplying waivers to
+// the old verdicts is refused, and so is a review.json without per-file
+// hashes.
+func TestReapplyReviewWaiversChangeBeyondTruncation(t *testing.T) {
+	dir := t.TempDir()
+	req := filepath.Join(dir, "REQ.md")
+	ev := filepath.Join(dir, "ev.json")
+	head := "R1 the box shall be blue\n" + strings.Repeat("filler line\n", 400)
+	if err := os.WriteFile(req, []byte(head+"R9 the box shall weigh 1 kg\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ev, []byte(`{"color":"blue"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	const limit = 2000 // far shorter than REQ.md
+	read := func(p string) string { b, _ := os.ReadFile(p); return string(b) }
+	prompt := func() string {
+		return reviewPrompt("design", map[string]string{"REQ.md": read(req)}, map[string]string{"ev.json": read(ev)}, limit)
+	}
+	files, err := reviewFilesSHA([]string{req}, []string{ev})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := reviewRecord{Stage: "design", InputSHA256: fmt.Sprintf("%x", sha256.Sum256([]byte(prompt()))), FilesSHA256: files,
+		Reviewers: []reviewVerdict{{Reviewer: "codex", Verdict: "fail", Requirements: []reviewRequirement{{ID: "R1", Status: "not_met"}}}}}
+	out := filepath.Join(dir, "review")
+	if err := os.MkdirAll(out, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write := func(r reviewRecord) {
+		blob, _ := json.Marshal(r)
+		if err := os.WriteFile(filepath.Join(out, "review.json"), blob, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(rec)
+	w := []gateWaiver{{Gate: "design-review", Match: "R1 not met", Reason: "approved", By: "t"}}
+	if _, err := reapplyReviewWaivers("design", []string{req}, []string{ev}, out, limit, w); err != nil {
+		t.Fatalf("unchanged input refused: %v", err)
+	}
+	before := prompt()
+	if err := os.WriteFile(req, []byte(head+"R9 the box shall weigh 9 kg\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if prompt() != before {
+		t.Fatal("test setup: the change must lie past the --max-bytes cut")
+	}
+	write(rec)
+	if _, err := reapplyReviewWaivers("design", []string{req}, []string{ev}, out, limit, w); err == nil || !strings.Contains(err.Error(), "REQ.md differs") {
+		t.Fatalf("a change past the cut must be refused, got %v", err)
+	}
+	old := rec
+	old.FilesSHA256 = nil
+	write(old)
+	if _, err := reapplyReviewWaivers("design", []string{req}, []string{ev}, out, limit, w); err == nil || !strings.Contains(err.Error(), "no per-file hashes") {
+		t.Fatalf("a review without per-file hashes must be refused, got %v", err)
 	}
 }

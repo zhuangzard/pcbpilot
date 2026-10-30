@@ -46,9 +46,13 @@ type reviewRequirement struct {
 
 // reviewRecord is what the gate stores (review.json).
 type reviewRecord struct {
-	Stage       string          `json:"stage"`
-	InputSHA256 string          `json:"inputSha256"`
-	Inputs      []string        `json:"inputs"`
+	Stage       string   `json:"stage"`
+	InputSHA256 string   `json:"inputSha256"`
+	Inputs      []string `json:"inputs"`
+	// FilesSHA256 is the SHA-256 of every complete input file, in Inputs
+	// order. InputSHA256 hashes the prompt, which --max-bytes may cut: a
+	// change past the cut keeps the prompt hash, never these.
+	FilesSHA256 []string        `json:"filesSha256,omitempty"`
 	Reviewers   []reviewVerdict `json:"reviewers"`
 	Gate        gateResult      `json:"gate"`
 	At          string          `json:"at"`
@@ -359,8 +363,12 @@ func runReviewPanel(stage string, reqFiles, evFiles, reviewers []string, outDir 
 	wg.Wait()
 	g := reviewGate(vs, reviewers)
 	applyWaivers(&g, waivers)
+	files, err := reviewFilesSHA(reqFiles, evFiles)
+	if err != nil {
+		return nil, err
+	}
 	rec := &reviewRecord{Stage: stage, InputSHA256: fmt.Sprintf("%x", sum), Inputs: append(append([]string{}, reqFiles...), evFiles...),
-		Reviewers: vs, Gate: g, At: time.Now().UTC().Format(time.RFC3339)}
+		FilesSHA256: files, Reviewers: vs, Gate: g, At: time.Now().UTC().Format(time.RFC3339)}
 	blob, _ := json.MarshalIndent(rec, "", "  ")
 	return rec, os.WriteFile(filepath.Join(outDir, "review.json"), append(blob, '\n'), 0o644)
 }
@@ -402,6 +410,9 @@ func reapplyReviewWaivers(stage string, reqFiles, evFiles []string, outDir strin
 	if rec.Stage != stage || rec.InputSHA256 != sum {
 		return nil, fmt.Errorf("--reapply-waivers: the requirements/evidence differ from the reviewed input (sha256 %s, review.json %s) - run the review again", sum, rec.InputSHA256)
 	}
+	if why := reviewFilesChanged(&rec, reqFiles, evFiles); why != "" {
+		return nil, fmt.Errorf("--reapply-waivers: %s - run the review again", why)
+	}
 	var names []string
 	for _, v := range rec.Reviewers {
 		names = append(names, v.Reviewer)
@@ -435,7 +446,8 @@ finding; a missing, timed-out or unparsable reviewer FAILS it. Results:
 
 --reapply-waivers recomputes the gate of --out-dir/review.json with --waivers
 without running the reviewers again; the requirements and evidence must be
-byte-identical to the reviewed input (the prompt SHA-256 is checked).`,
+byte-identical to the reviewed input (the prompt SHA-256 and the SHA-256 of
+every complete input file are checked, so a change past --max-bytes counts).`,
 		Args: cobra.NoArgs,
 		Example: `  pcbpilot review-panel --stage design \
     --requirements 03_Requirement/REQUIREMENTS.md --requirements 03_Requirement/CONNECTOR_PINOUT.md \
@@ -484,3 +496,40 @@ byte-identical to the reviewed input (the prompt SHA-256 is checked).`,
 
 // reviewerRawFile is the file a reviewer's raw reply is saved to.
 func reviewerRawFile(name string) string { return "reviewer_" + name + ".md" }
+
+// reviewFilesSHA hashes every complete input file (requirements, then
+// evidence), independent of the prompt and its --max-bytes cut.
+func reviewFilesSHA(reqFiles, evFiles []string) ([]string, error) {
+	var out []string
+	for _, f := range append(append([]string{}, reqFiles...), evFiles...) {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, fmt.Sprintf("%x", sha256.Sum256(b)))
+	}
+	return out, nil
+}
+
+// reviewFilesChanged says why rec's verdicts do not belong to these files:
+// a file differs from the reviewed one (also past the prompt's cut), the
+// file list differs, or rec predates the per-file hashes. "" = unchanged.
+func reviewFilesChanged(rec *reviewRecord, reqFiles, evFiles []string) string {
+	if len(rec.FilesSHA256) == 0 {
+		return "review.json has no per-file hashes (an older review), so a change past the prompt's --max-bytes cut cannot be ruled out"
+	}
+	got, err := reviewFilesSHA(reqFiles, evFiles)
+	if err != nil {
+		return err.Error()
+	}
+	files := append(append([]string{}, reqFiles...), evFiles...)
+	if len(got) != len(rec.FilesSHA256) {
+		return fmt.Sprintf("%d input file(s), the review had %d", len(got), len(rec.FilesSHA256))
+	}
+	for i := range got {
+		if got[i] != rec.FilesSHA256[i] {
+			return fmt.Sprintf("%s differs from the reviewed file (sha256 %s, review.json %s)", files[i], got[i], rec.FilesSHA256[i])
+		}
+	}
+	return ""
+}
