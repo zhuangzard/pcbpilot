@@ -52,6 +52,7 @@ type AltCandidate struct {
 	Eligible   bool         `json:"eligible"` // every hard filter verified
 	Params     []ParamCheck `json:"params,omitempty"`
 	Unverified []string     `json:"unverified,omitempty"` // why it cannot be proposed
+	loss       int64        // lossNumber, for the final demand re-check
 }
 
 // AltProposal is the replacement chosen for a line.
@@ -319,12 +320,15 @@ func Alternatives(in AltInput) *AltReport {
 			flagged[g.LCSC] = true
 		}
 	}
+	// Every number in the BOM keeps its demand reserved, blocked lines included: a blocking line
+	// whose own stock cannot cover it still holds that stock until every one of its placements has a
+	// confirmed replacement, so no other line can be proposed the same number against its full stock.
 	held := map[string]bool{}
+	pending := map[string]int{} // lines per number still without a confirmed replacement
 	for _, k := range order {
-		// Every line that keeps its number claims its demand (once per number), including
-		// extended-only lines that may find no basic replacement and lines whose buyability is unknown.
 		g := groups[k]
-		if g.Blocking || held[g.LCSC] {
+		pending[g.LCSC]++
+		if held[g.LCSC] {
 			continue
 		}
 		held[g.LCSC] = true
@@ -340,26 +344,63 @@ func Alternatives(in AltInput) *AltReport {
 		if len(g.Reasons) > 0 {
 			proposeFor(in, g, reserved, uncertain, rep)
 		}
-		if g.Blocking {
-			st := gate.Pass
-			if g.Proposal == nil {
-				// An error (catalog unreachable, search failed) means we could not
-				// look; otherwise we looked and found nothing safe.
-				if g.Error != "" {
-					st = gate.CannotCheck
-				} else {
-					st = gate.Fail
-				}
+		if g.Proposal != nil {
+			if pending[g.LCSC]--; pending[g.LCSC] == 0 {
+				reserved[g.LCSC] -= need[g.LCSC]
+				delete(uncertain, g.LCSC)
 			}
-			verdicts = append(verdicts, gate.Result{Name: refList(g.Refs), Status: st})
-		} else if g.Error != "" && g.Proposal == nil {
-			// A search that failed on an extended-only line: we could not look, so no clean pass.
+		}
+		switch {
+		case g.Error != "":
+			// A failed catalog query (lookup or search) means we could not look, proposal or not.
 			verdicts = append(verdicts, gate.Result{Name: refList(g.Refs), Status: gate.CannotCheck, Detail: g.Error})
+		case g.Blocking && g.Proposal == nil:
+			verdicts = append(verdicts, gate.Result{Name: refList(g.Refs), Status: gate.Fail})
+		case g.Blocking:
+			verdicts = append(verdicts, gate.Result{Name: refList(g.Refs), Status: gate.Pass})
 		}
 		if g.Unknown {
 			verdicts = append(verdicts, gate.Result{Name: refList(g.Refs), Status: gate.CannotCheck})
 		}
 		rep.Lines = append(rep.Lines, *g)
+	}
+	// Safety net: re-add up the demand on every proposed number (what the lines that still keep it
+	// need plus every proposal drawn on it) and revoke proposals that together exceed its stock.
+	demand := map[string]int64{}
+	for code, n := range pending {
+		if n > 0 {
+			demand[code] += need[code]
+		}
+	}
+	byCode := map[string][]int{}
+	for i := range rep.Lines {
+		if p := rep.Lines[i].Proposal; p != nil {
+			demand[p.LCSC] += proposalNeed(in, &rep.Lines[i], p.LCSC)
+			byCode[p.LCSC] = append(byCode[p.LCSC], i)
+		}
+	}
+	for code, idx := range byCode {
+		stock := int64(-1)
+		for _, c := range rep.Lines[idx[0]].Candidates {
+			if c.LCSC == code {
+				stock = c.Stock
+			}
+		}
+		if stock < 0 || demand[code] <= stock {
+			continue
+		}
+		for _, i := range idx {
+			l := &rep.Lines[i]
+			for _, ref := range l.Refs {
+				delete(rep.Assignments, ref)
+				delete(rep.Expect, ref)
+			}
+			l.Proposal = nil
+			l.Reasons = append(l.Reasons, "proposal-revoked: total demand on "+code+" exceeds its stock")
+			if l.Blocking {
+				verdicts = append(verdicts, gate.Result{Name: refList(l.Refs), Status: gate.Fail})
+			}
+		}
 	}
 	skipped := 0
 	for _, p := range in.Parts {
@@ -469,6 +510,9 @@ func proposeFor(in AltInput, g *AltLine, reserved map[string]int64, uncertain ma
 		}
 		if h.Stock != nil {
 			c.Stock = *h.Stock
+		}
+		if h.Loss != nil {
+			c.loss = *h.Loss
 		}
 		if pr, ok := h.UnitPrice(int64(len(g.Refs)) * int64(in.Boards)); ok {
 			c.UnitPrice = &pr
@@ -633,4 +677,15 @@ func tolOf(code string, pool []CatalogPart) (float64, bool) {
 		}
 	}
 	return 0, false
+}
+
+// proposalNeed is the demand a proposal puts on its replacement number.
+func proposalNeed(in AltInput, g *AltLine, code string) int64 {
+	var loss int64
+	for _, c := range g.Candidates {
+		if c.LCSC == code {
+			loss = c.loss
+		}
+	}
+	return int64(len(g.Refs))*int64(in.Boards) + loss
 }

@@ -453,3 +453,77 @@ func TestAlternativesReportCarriesFingerprint(t *testing.T) {
 		t.Errorf("added placement on the replacement number: %v", bad)
 	}
 }
+
+// Round-2 finding 1: a blocking line that finds no replacement keeps its stock reserved.
+func TestAlternativesBlockedLineWithoutReplacementKeepsItsStockReserved(t *testing.T) {
+	a := resistor("C201", "OLD-A", "0402", "1kΩ", "±1%", "62.5mW", true, 0)
+	// C300 itself is blocked: 6 placements need 6+10 > 15 in stock, and nothing replaces it.
+	held := resistor("C300", "HELD", "0402", "1kΩ", "±1%", "62.5mW", true, 15)
+	cat := &fakeCatalog{byCode: map[string]*CatalogPart{"C201": a, "C300": held}, search: map[string][]CatalogPart{"1kΩ 0402": {*held}}}
+	rows := [][4]string{{"R1", "1k", r0402, "C201"}}
+	for _, r := range []string{"R3", "R4", "R5", "R6", "R7", "R8"} {
+		rows = append(rows, [4]string{r, "1k", r0402, "C300"})
+	}
+	rep := Alternatives(AltInput{Parts: partsOf(rows...), Boards: 1, Catalog: cat})
+	if !altLine(t, rep, "R3").Blocking {
+		t.Fatal("C300 should be blocked on stock")
+	}
+	if p := altLine(t, rep, "R1").Proposal; p != nil {
+		t.Errorf("R1 must not draw on the stock the blocked C300 lines still hold: %+v", p)
+	}
+	if len(rep.Assignments) != 0 || rep.Verdict != gate.Fail {
+		t.Errorf("assignments %v verdict %s", rep.Assignments, rep.Verdict)
+	}
+}
+
+// Round-2 finding 1: stock is released once every placement of the blocked number is replaced.
+func TestAlternativesReplacedBlockedNumberReleasesItsStock(t *testing.T) {
+	a := resistor("C201", "OLD-A", "0402", "1kΩ", "±1%", "62.5mW", true, 0)
+	b := resistor("C202", "OLD-B", "0402", "1kΩ", "±1%", "62.5mW", true, 0)
+	good := resistor("C300", "GOOD", "0402", "1kΩ", "±1%", "62.5mW", true, 100)
+	cat := &fakeCatalog{byCode: map[string]*CatalogPart{"C201": a, "C202": b}, search: map[string][]CatalogPart{"1kΩ 0402": {*good}}}
+	rep := Alternatives(AltInput{Parts: partsOf([4]string{"R1", "1k", r0402, "C201"}, [4]string{"R2", "1k", r0402, "C202"}), Boards: 1, Catalog: cat})
+	if rep.Assignments["R1"] != "C300" || rep.Assignments["R2"] != "C300" || rep.Verdict != gate.Pass {
+		t.Errorf("both fit in 100: %v %s", rep.Assignments, rep.Verdict)
+	}
+}
+
+// Round-2 finding 2: a proposal does not mask a failed catalog query.
+type firstSearchErrCatalog struct {
+	*fakeCatalog
+	n int
+}
+
+func (c *firstSearchErrCatalog) Search(q string, l int) ([]CatalogPart, error) {
+	c.n++
+	if c.n == 1 {
+		return nil, errString("search down")
+	}
+	return c.fakeCatalog.Search(q, l)
+}
+
+func TestAlternativesFailedSearchWithProposalIsCannotCheck(t *testing.T) {
+	cur := resistor("C100", "OLD-10K", "0402", "10kΩ", "±1%", "62.5mW", false, 0)
+	good := resistor("C25744", "0402WGF1002TCE", "0402", "10kΩ", "±1%", "62.5mW", true, 1000000)
+	cat := &firstSearchErrCatalog{fakeCatalog: &fakeCatalog{byCode: map[string]*CatalogPart{"C100": cur}, search: map[string][]CatalogPart{"10kΩ 0402": {*good}}}}
+	rep := Alternatives(AltInput{Parts: partsOf([4]string{"R1", "10k", r0402, "C100"}), Boards: 1, Catalog: cat})
+	l := altLine(t, rep, "R1")
+	if l.Proposal == nil || l.Error == "" {
+		t.Fatalf("expected a proposal and a search error: %+v", l)
+	}
+	if rep.Verdict != gate.CannotCheck || rep.ExitCode != 5 {
+		t.Errorf("verdict %s", rep.Verdict)
+	}
+}
+
+// Round-2 finding 3: punctuation other than space, '-' and '_' distinguishes MPNs.
+func TestNormMPNPunctuationDistinct(t *testing.T) {
+	for _, p := range [][2]string{{"AB#1", "AB1"}, {"AB,1", "AB1"}, {"AB(1)", "AB1"}, {"AB(1)", "AB[1]"}, {"AB#1", "AB,1"}, {"AB;1", "AB1"}, {"AB:1", "AB1"}} {
+		if NormMPN(p[0]) == NormMPN(p[1]) {
+			t.Errorf("%q and %q must differ", p[0], p[1])
+		}
+	}
+	if NormMPN(" ab-1_2 ") != "AB12" {
+		t.Errorf("got %q", NormMPN(" ab-1_2 "))
+	}
+}

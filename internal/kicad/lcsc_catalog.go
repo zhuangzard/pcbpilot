@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 // PriceTier is one quantity break of the catalog price list.
@@ -315,13 +316,15 @@ func LookupMPN(fields map[string]string) string {
 }
 
 // NormMPN is the comparison key of an MPN: upper case, without spaces, '-' and
-// '_'. '.', '+' and '/' stay: AMS1117-3.3 and AMS1117-33 are different parts.
+// '_'. Every other character stays: AMS1117-3.3 and AMS1117-33, or parts that
+// differ only in '#', ',' or parentheses, are different parts.
 func NormMPN(s string) string {
 	var b strings.Builder
 	for _, r := range strings.ToUpper(s) {
-		if (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '.' || r == '+' || r == '/' {
-			b.WriteRune(r)
+		if r == '-' || r == '_' || unicode.IsSpace(r) {
+			continue
 		}
+		b.WriteRune(r)
 	}
 	return b.String()
 }
