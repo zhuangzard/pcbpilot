@@ -712,7 +712,7 @@ func (r *kicadRun) run() error {
 		so.report, _ = rep["json"].(string)
 	}
 	r.add(signoffGate(so, r.waivers, r.stderr))
-	r.add(gateSetGate(r.gates))
+	r.add(kicadGateSetGate(r.gates))
 	r.lap("signoff")
 	return nil
 }

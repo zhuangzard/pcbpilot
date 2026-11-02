@@ -11,12 +11,14 @@ import (
 	"strings"
 )
 
-// mandatoryRouteGates: category → the gate names that satisfy it (the DRC
-// gate is named after its host).
-var mandatoryRouteGates = []struct {
+type routeGateCategory struct {
 	category string
 	names    []string
-}{
+}
+
+// mandatoryRouteGates: category → the gate names that satisfy it (the DRC
+// gate is named after its host).
+var mandatoryRouteGates = []routeGateCategory{
 	{"design-review", []string{"design-review"}},
 	{"drc", []string{"native-drc", "kicad-drc"}},
 	{"pad-net-diff", []string{"pad-net-diff"}},
@@ -35,14 +37,24 @@ var mandatoryRouteGates = []struct {
 	{"signoff", []string{"signoff"}},
 }
 
+// kicadOnlyRouteGates: gates only kicad route can run, on top of the set every
+// path shares (via-audit needs KiCad's rules readback and the final board).
+var kicadOnlyRouteGates = []routeGateCategory{
+	{"via-audit", []string{"via-audit"}},
+}
+
 // missingRouteGates lists the mandatory categories gates does not cover.
 func missingRouteGates(gates []gateResult) []string {
+	return missingGatesOf(mandatoryRouteGates, gates)
+}
+
+func missingGatesOf(set []routeGateCategory, gates []gateResult) []string {
 	have := map[string]bool{}
 	for _, g := range gates {
 		have[g.Gate] = true
 	}
 	var miss []string
-	for _, m := range mandatoryRouteGates {
+	for _, m := range set {
 		ok := false
 		for _, n := range m.names {
 			ok = ok || have[n]
@@ -56,9 +68,18 @@ func missingRouteGates(gates []gateResult) []string {
 
 // gateSetGate fails when any mandatory gate did not run on this path.
 func gateSetGate(gates []gateResult) gateResult {
-	miss := missingRouteGates(gates)
+	return gateSetGateOf(mandatoryRouteGates, gates)
+}
+
+// kicadGateSetGate is gateSetGate plus the gates only kicad route can run.
+func kicadGateSetGate(gates []gateResult) gateResult {
+	return gateSetGateOf(append(append([]routeGateCategory{}, mandatoryRouteGates...), kicadOnlyRouteGates...), gates)
+}
+
+func gateSetGateOf(set []routeGateCategory, gates []gateResult) gateResult {
+	miss := missingGatesOf(set, gates)
 	g := gateResult{Gate: "gate-set", Pass: len(miss) == 0,
-		Detail: fmt.Sprintf("%d of %d mandatory gate(s) ran", len(mandatoryRouteGates)-len(miss), len(mandatoryRouteGates))}
+		Detail: fmt.Sprintf("%d of %d mandatory gate(s) ran", len(set)-len(miss), len(set))}
 	for _, m := range miss {
 		g.Items = append(g.Items, "mandatory gate not run: "+m)
 	}
