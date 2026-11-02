@@ -153,19 +153,29 @@ func (t *Tools) RunBridge(args ...string) (json.RawMessage, error) {
 
 // RunBridgeEnv is RunBridge with extra environment variables ("K=V").
 func (t *Tools) RunBridgeEnv(env []string, args ...string) (json.RawMessage, error) {
+	return t.runBridge(context.Background(), env, args...)
+}
+
+// runBridge is RunBridgeEnv under parent as well as BridgeTimeout: when parent
+// ends the bridge is killed and the error wraps parent's.
+func (t *Tools) runBridge(parent context.Context, env []string, args ...string) (json.RawMessage, error) {
 	script, err := bridgeScript()
 	if err != nil {
 		return nil, fmt.Errorf("kicad bridge: %w", err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), BridgeTimeout)
+	ctx, cancel := context.WithTimeout(parent, BridgeTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, t.Python, append([]string{script}, args...)...)
+	cmd.WaitDelay = 5 * time.Second // a killed bridge's output pipes never hold the caller
 	if len(env) > 0 {
 		cmd.Env = append(os.Environ(), env...)
 	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	runErr := cmd.Run()
+	if perr := parent.Err(); perr != nil {
+		return nil, fmt.Errorf("kicad bridge %s: %w", args[0], perr)
+	}
 	raw, perr := parseBridgeOutput(stdout.Bytes())
 	if perr != nil {
 		why := perr.Error()
@@ -238,7 +248,12 @@ func Snapshot(pcbPath string) ([]byte, error) {
 
 // Snapshot is the package-level Snapshot with explicit tools.
 func (t *Tools) Snapshot(pcbPath string) ([]byte, error) {
-	raw, err := t.RunBridge("snapshot", pcbPath)
+	return t.SnapshotContext(context.Background(), pcbPath)
+}
+
+// SnapshotContext is Snapshot, killing the bridge when ctx ends.
+func (t *Tools) SnapshotContext(ctx context.Context, pcbPath string) ([]byte, error) {
+	raw, err := t.runBridge(ctx, nil, "snapshot", pcbPath)
 	if err != nil {
 		return nil, err
 	}
@@ -462,6 +477,12 @@ func (t *Tools) Version() (string, error) {
 
 // Edit applies copper / silk edits to pcb (bridge edit) and saves out.
 func (t *Tools) Edit(pcb string, ops map[string]any, out string) (json.RawMessage, error) {
+	return t.EditContext(context.Background(), pcb, ops, out)
+}
+
+// EditContext is Edit, killing the bridge when ctx ends (out is then not a
+// result, and pcb is untouched).
+func (t *Tools) EditContext(ctx context.Context, pcb string, ops map[string]any, out string) (json.RawMessage, error) {
 	path := strings.TrimSuffix(out, filepath.Ext(out)) + fmt.Sprintf("-edit-%d.json", time.Now().UnixNano())
 	b, err := json.MarshalIndent(ops, "", "  ")
 	if err != nil {
@@ -470,7 +491,7 @@ func (t *Tools) Edit(pcb string, ops map[string]any, out string) (json.RawMessag
 	if err := os.WriteFile(path, b, 0o644); err != nil {
 		return nil, err
 	}
-	return t.RunBridge("edit", pcb, path, out)
+	return t.runBridge(ctx, nil, "edit", pcb, path, out)
 }
 
 // NetclassesIso is Netclasses plus insulation pairs: [{a, b, aNets, bNets,

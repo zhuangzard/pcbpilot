@@ -130,6 +130,71 @@ func TestRepairRouterVias(t *testing.T) {
 	}
 }
 
+// A repaired DRC is compared with the one before the repair: a new violation
+// that lists only the neighbour is as much the repair's doing as one naming the
+// via; what the board already reported is not.
+func TestRepairRouterViasDRCBaseline(t *testing.T) {
+	next := func(s string) string { return s + ".kicad_pcb" }
+	farTrack := `{"primitiveId":"t","net":"B","layer":1,"startX":200,"startY":200,"endX":300,"endY":200,"lineWidth":8}`
+	neighbour := kicad.Violation{Rule: "clearance", Message: "actual 0.1 mm", Objs: []string{"t", "p9"}}
+	rep := func(vs ...kicad.Violation) *kicad.DRCReport { return &kicad.DRCReport{Violations: vs} }
+	worse := neighbour
+	worse.Message = "actual 0.05 mm"
+	unconn := kicad.Violation{Rule: "unconnected_items", Section: "unconnected_items", Message: "open"}
+	for _, c := range []struct {
+		name       string
+		base, post *kicad.DRCReport
+		wantBoard  string
+		wantPass   bool
+		want       string
+	}{
+		{"new, neighbour only", rep(), rep(neighbour), "imported", false, "naming no grown via"},
+		{"already on the board", rep(neighbour), rep(neighbour), "vias-repair.kicad_pcb", true, "grown"},
+		{"one more of the same", rep(neighbour), rep(neighbour, neighbour), "imported", false, "naming no grown via"},
+		{"worse than before", rep(neighbour), rep(worse), "imported", false, "naming no grown via"},
+		{"unconnected is not the repair's", rep(), rep(unconn), "vias-repair.kicad_pcb", true, "grown"},
+	} {
+		f := fakeRepairTools(farTrack, c.post, nil)
+		f.base = c.base
+		board, gates := sizeRouterVias(f, "classed", "imported", next, map[string]any{}, io.Discard)
+		if board != c.wantBoard || len(gates) != 1 || gates[0].Pass != c.wantPass || gates[0].CannotCheck {
+			t.Fatalf("%s: board %s gates %+v", c.name, board, gates)
+		}
+		if !strings.Contains(strings.Join(append(append([]string{}, gates[0].Items...), gates[0].Info...), "|"), c.want) {
+			t.Fatalf("%s: %+v", c.name, gates[0])
+		}
+	}
+	// A DRC that does not run, before or after the write, is cannot-check.
+	f := fakeRepairTools(farTrack, nil, nil)
+	f.baseErr = errors.New("kicad-cli died")
+	board, gates := sizeRouterVias(f, "classed", "imported", next, map[string]any{}, io.Discard)
+	if board != "imported" || f.edited != nil || len(gates) != 1 || gates[0].Pass || !gates[0].CannotCheck {
+		t.Fatalf("baseline: %s %v %+v", board, f.edited, gates)
+	}
+	f = fakeRepairTools(farTrack, nil, errors.New("kicad-cli died"))
+	f.base = rep()
+	board, gates = sizeRouterVias(f, "classed", "imported", next, map[string]any{}, io.Discard)
+	if board != "imported" || len(gates) != 1 || gates[0].Pass || !gates[0].CannotCheck {
+		t.Fatalf("repaired: %s %+v", board, gates)
+	}
+}
+
+// DRC names one via and lists a neighbour: that via leaves, and the retry
+// judges the rest afresh. The vias grown stay on the gate's record.
+func TestRepairRouterViasRetryWithoutNamedVia(t *testing.T) {
+	two := `{"copper":{"lines":[],"vias":[{"primitiveId":"v1","net":"A","x":100,"y":100,"diameter":23.622,"holeDiameter":15.748},{"primitiveId":"v2","net":"A","x":900,"y":900,"diameter":23.622,"holeDiameter":15.748}]}}`
+	f := fakeRepairTools("", nil, nil)
+	f.after, f.base = two, &kicad.DRCReport{}
+	f.drcSeq = []*kicad.DRCReport{{Violations: []kicad.Violation{
+		{Rule: "clearance", Message: "too close", Objs: []string{"v1", "t"}},
+		{Rule: "clearance", Message: "too close", Objs: []string{"t"}},
+	}}, {}}
+	board, gates := sizeRouterVias(f, "classed", "imported", func(s string) string { return s + ".kicad_pcb" }, map[string]any{}, io.Discard)
+	if board != "vias-repair.kicad_pcb" || len(gates) != 1 || gates[0].Pass || gates[0].CannotCheck || len(gates[0].Items) != 1 || !strings.Contains(gates[0].Items[0], "DRC: clearance") || len(gates[0].Info) != 1 {
+		t.Fatalf("%s %+v", board, gates)
+	}
+}
+
 func auditRB() *kicad.RulesReadback {
 	return &kicad.RulesReadback{Nets: map[string]kicad.EffectiveNM{
 		"GND": {Class: "C7", ViaDiameter: 700000, ViaDrill: 400000},
@@ -191,6 +256,104 @@ func TestAuditViasNonThroughAndUnknown(t *testing.T) {
 	}
 	if a = auditVias([]routeVia{auditVia("n", "NOCLASS", 600, 300)}, auditRB(), viaLimits{}, from, viaPolicy{}); len(a.CannotCheck) != 1 {
 		t.Fatalf("%+v", a)
+	}
+}
+
+// Unknown provenance gets no exemption, and only a confirmed through via is
+// judged by the board's limits: any other span is cannot-check unless declared.
+func TestAuditViasSpanAndProvenance(t *testing.T) {
+	pol := viaPolicy{Exceptions: []viaException{{Kind: "blind-buried", Reason: "HDI", MinDrillMm: 0.1, MinAnnularMm: 0.075}}}
+	lim := viaLimits{drill: 250000, annular: 130000}
+	mk := func(from, to int) routeVia {
+		v := auditVia("v", "SIG", 600, 300)
+		v.From, v.To = from, to
+		return v
+	}
+	prov := func(p string) func(routeVia) string { return func(routeVia) string { return p } }
+	for _, c := range []struct {
+		name     string
+		v        routeVia
+		prov     string
+		pol      viaPolicy
+		span     string
+		legal    string
+		excepted bool
+	}{
+		{"both ids missing", mk(0, 0), viaFromRouter, viaPolicy{}, "unknown", "cannot-check", false},
+		{"from zero", mk(0, 2), viaFromRouter, viaPolicy{}, "unknown", "cannot-check", false},
+		{"to zero", mk(1, 0), viaFromRouter, viaPolicy{}, "unknown", "cannot-check", false},
+		{"input board, missing ids", mk(0, 0), viaFromInput, viaPolicy{}, "unknown", "cannot-check", false},
+		{"declared span unknown", mk(0, 0), viaFromRouter, pol, "unknown", "yes", true},
+		{"declared non-through", mk(1, 15), viaFromRouter, pol, "non-through", "yes", true},
+		{"undeclared non-through", mk(1, 15), viaFromRouter, viaPolicy{}, "non-through", "cannot-check", false},
+		{"unknown provenance, non-through, declared", mk(1, 15), viaFromUnknown, pol, "non-through", "cannot-check", false},
+		{"unknown provenance, span unknown, declared", mk(0, 0), viaFromUnknown, pol, "unknown", "cannot-check", false},
+		{"through", mk(1, 2), viaFromRouter, viaPolicy{}, "through", "yes", false},
+		{"through, reversed", mk(2, 1), viaFromRouter, viaPolicy{}, "through", "yes", false},
+		{"through, unknown provenance", mk(1, 2), viaFromUnknown, viaPolicy{}, "through", "yes", false},
+	} {
+		a := auditVias([]routeVia{c.v}, auditRB(), lim, prov(c.prov), c.pol)
+		row := a.Rows[0]
+		if row.Span != c.span || row.Legal != c.legal || (row.Exception != "") != c.excepted || (len(a.CannotCheck) > 0) != (c.legal == "cannot-check") {
+			t.Errorf("%s: %+v cannot-check %v", c.name, row, a.CannotCheck)
+		}
+	}
+	// A missing id never decodes as through, from the snapshot's own JSON.
+	var snap boardSnapshot
+	if err := json.Unmarshal([]byte(`{"copper":{"vias":[{"primitiveId":"v","net":"SIG","diameter":23.622,"holeDiameter":11.811}]}}`), &snap); err != nil {
+		t.Fatal(err)
+	}
+	vias, err := snapshotVias(&snap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a := auditVias(vias, auditRB(), lim, prov(viaFromRouter), viaPolicy{}); a.Rows[0].Span != "unknown" || len(a.CannotCheck) != 1 {
+		t.Fatalf("%+v", a)
+	}
+}
+
+// via-audit.json states millimetres: a 600 um via is 0.6, not 600.
+func TestViaAuditRowUnits(t *testing.T) {
+	a := auditVias([]routeVia{auditVia("v", "GND", 600, 300), auditVia("w", "GND", 700, 400)}, auditRB(), viaLimits{}, func(routeVia) string { return viaFromRouter }, viaPolicy{})
+	b, err := json.Marshal(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out struct {
+		Vias []map[string]any `json:"vias"`
+	}
+	if err := json.Unmarshal(b, &out); err != nil {
+		t.Fatal(err)
+	}
+	for k, want := range map[string]float64{"diameterMm": 0.6, "drillMm": 0.3, "annularMm": 0.15} {
+		if got, _ := out.Vias[0][k].(float64); got != want {
+			t.Errorf("%s = %v, want %v", k, out.Vias[0][k], want)
+		}
+	}
+	if got, _ := out.Vias[1]["diameterMm"].(float64); got != 0.7 {
+		t.Errorf("diameterMm = %v", out.Vias[1]["diameterMm"])
+	}
+	if !strings.Contains(strings.Join(a.NonConform, "|"), "0.6000/0.3000 mm differs from class C7 via 0.7000/0.4000 mm") {
+		t.Errorf("%v", a.NonConform)
+	}
+}
+
+// The audit's preferred size uses the same 100 nm as the sizing step.
+func TestAuditViasPreferredToleranceBoundary(t *testing.T) {
+	via := func(dDia, dDrill float64) routeVia {
+		return routeVia{ID: "v", Net: "GND", Dia: (700000 + dDia) / nmPerMil, Drill: (400000 + dDrill) / nmPerMil, From: 1, To: 2}
+	}
+	for _, c := range []struct {
+		d, h float64
+		want string
+	}{
+		{0, 0, "conforms"}, {-100, 0, "conforms"}, {100, 100, "conforms"}, {0, -100, "conforms"},
+		{-101, 0, "differs"}, {101, 0, "differs"}, {0, -101, "differs"}, {-300, 0, "differs"}, {-499, -499, "differs"},
+	} {
+		a := auditVias([]routeVia{via(c.d, c.h)}, auditRB(), viaLimits{}, func(routeVia) string { return viaFromRouter }, viaPolicy{})
+		if a.Rows[0].Preferred != c.want || (len(a.NonConform) > 0) != (c.want == "differs") {
+			t.Errorf("%v/%v: %+v", c.d, c.h, a.Rows[0])
+		}
 	}
 }
 

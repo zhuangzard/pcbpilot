@@ -37,8 +37,8 @@ const (
 	viaFromArray   = "via-array"
 	viaFromUnknown = "unknown"
 
-	viaAuditTolNM  = 5   // snapshot rounding
-	viaPreferTolNM = 500 // as viaNotReachable
+	viaAuditTolNM  = 5             // snapshot rounding
+	viaPreferTolNM = viaExactTolNM // as viaNotReachable
 )
 
 // viaProvenance records the vias sizeRouterVias saw. The methods accept nil.
@@ -158,7 +158,8 @@ type viaAudit struct {
 	PreExisting []string      `json:"preExistingOffSize,omitempty"`
 }
 
-func viaMM(mil float64) float64 { return math.Round(mil*25.4*1e6) / 1e6 }
+// viaMM converts mil to mm, to the nm.
+func viaMM(mil float64) float64 { return math.Round(mil*nmPerMil) / 1e6 }
 
 // auditVias judges every via. Pure: all inputs are read by the caller.
 func auditVias(vias []routeVia, rb *kicad.RulesReadback, lim viaLimits, prov func(routeVia) string, pol viaPolicy) viaAudit {
@@ -174,17 +175,29 @@ func auditVias(vias []routeVia, rb *kicad.RulesReadback, lim viaLimits, prov fun
 			*list = append(*list, tag+": "+msg)
 		}
 
-		// Legality: a non-through via is judged by its declared minimums only.
+		// Legality: only a confirmed through via is judged by the board's
+		// limits. Any other span needs declared minimums, and a via of unknown
+		// origin gets no declaration.
 		use := lim
-		if row.Span == "non-through" {
-			ex := findViaException(pol, v.Net, "microvia", "blind-buried")
-			if ex == nil {
-				row.Legal = "cannot-check"
-				add(&a.CannotCheck, fmt.Sprintf("non-through via (layers %d-%d) with no declared microvia / blind-buried minimums", v.From, v.To))
-			} else {
+		if row.Span != "through" {
+			var ex *viaException
+			if row.Provenance != viaFromUnknown {
+				ex = findViaException(pol, v.Net, "microvia", "blind-buried")
+			}
+			switch {
+			case ex != nil:
 				row.Exception = ex.Kind + ": " + ex.Reason
 				a.Excepted = append(a.Excepted, tag+": "+row.Exception)
 				use = viaLimits{drill: int64(ex.MinDrillMm * 1e6), annular: int64(ex.MinAnnularMm * 1e6)}
+			case row.Provenance == viaFromUnknown:
+				row.Legal = "cannot-check"
+				add(&a.CannotCheck, fmt.Sprintf("%s via (layers %d-%d) of unknown provenance: no exception applies", row.Span, v.From, v.To))
+			case row.Span == "unknown":
+				row.Legal = "cannot-check"
+				add(&a.CannotCheck, fmt.Sprintf("via span unknown (layers %d-%d), not confirmed through, with no declared microvia / blind-buried minimums", v.From, v.To))
+			default:
+				row.Legal = "cannot-check"
+				add(&a.CannotCheck, fmt.Sprintf("non-through via (layers %d-%d) with no declared microvia / blind-buried minimums", v.From, v.To))
 			}
 		}
 		if row.Legal == "yes" {
@@ -337,6 +350,7 @@ func viaAuditPolicy(file string, lim *viaLimits) (viaPolicy, error) {
 func (r *kicadRun) viaAuditGate(routed string, snap *boardSnapshot) gateResult {
 	g := gateResult{Gate: "via-audit"}
 	cannot := func(what string, err error) gateResult {
+		g.CannotCheck = true
 		g.Detail = "cannot check: " + what + ": " + err.Error()
 		r.summary["viaAudit"] = map[string]any{"error": g.Detail}
 		return g
@@ -372,7 +386,7 @@ func (r *kicadRun) viaAuditGate(routed string, snap *boardSnapshot) gateResult {
 		"cannotCheck": len(a.CannotCheck), "excepted": len(a.Excepted), "preExistingOffSize": len(a.PreExisting)}
 	viaAuditVerdict(&g, a)
 	if werr != nil {
-		g.Pass = false
+		g.Pass, g.CannotCheck = false, len(a.Illegal)+len(a.NonConform) == 0
 		g.Items = append(g.Items, "via-audit.json could not be written: "+werr.Error())
 	}
 	return g
@@ -383,6 +397,7 @@ func viaAuditVerdict(g *gateResult, a viaAudit) {
 	g.Items = append(append(append([]string{}, a.Illegal...), a.NonConform...), a.CannotCheck...)
 	g.Info = append(append([]string{}, a.Excepted...), a.PreExisting...)
 	g.Pass = len(g.Items) == 0
+	g.CannotCheck = len(a.CannotCheck) > 0 && len(a.Illegal)+len(a.NonConform) == 0
 	switch {
 	case len(a.Illegal)+len(a.NonConform) > 0:
 		g.Detail = fmt.Sprintf("%d of %d via(s) break a manufacturing minimum, %d off their class size, %d cannot be checked", len(a.Illegal), len(a.Rows), len(a.NonConform), len(a.CannotCheck))

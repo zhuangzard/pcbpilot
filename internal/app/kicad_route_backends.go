@@ -100,6 +100,7 @@ func (r *kicadRun) routeBackends(classed string, reqs map[string]kicad.NetRequir
 func (r *kicadRun) rerunCandidate(c *routeCandidate) error {
 	fmt.Fprintf(r.stderr, "router %s: rerunning (it was stopped when another router passed the quick check)\n", c.Name)
 	res, err := c.exec(context.Background())
+	r.lap(c.Name + " (route)")
 	if err != nil {
 		c.Err = err
 		return err

@@ -138,12 +138,15 @@ func statusMark(s gate.Status) string {
 }
 
 // toRecord converts a legacy gateResult to a GateRecord. The caller provides
-// evidence paths, scope, and duration; status is inferred from Pass (fail for
-// false, pass for true). Use toRecordCC for explicit cannot-check.
+// evidence paths, scope, and duration; status is Pass when g passed, else
+// CannotCheck when g says it could not judge, else Fail.
 func toRecord(g gateResult, evidence []string, scope string, dur time.Duration) GateRecord {
 	st := gate.Fail
-	if g.Pass {
+	switch {
+	case g.Pass:
 		st = gate.Pass
+	case g.CannotCheck:
+		st = gate.CannotCheck
 	}
 	return GateRecord{
 		ID: g.Gate, Status: st, Reason: g.Detail,

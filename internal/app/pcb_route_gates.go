@@ -33,6 +33,9 @@ type gateResult struct {
 	// Info lists what passed by a rule worth seeing (silkscreen: hidden
 	// designators covered by a group label).
 	Info []string `json:"info,omitempty"`
+	// CannotCheck: the check could not judge (Pass stays false). kicad route's
+	// registry reports it as cannot-check (exit 5), not as a failure (exit 6).
+	CannotCheck bool `json:"cannotCheck,omitempty"`
 }
 
 // gateWaiver is a human decision to accept one known failure: every failing
@@ -65,7 +68,7 @@ func applyWaivers(g *gateResult, ws []gateWaiver) {
 		}
 		waived = append(waived, hit)
 	}
-	g.Pass, g.Waived = true, waived
+	g.Pass, g.Waived, g.CannotCheck = true, waived, false
 }
 
 // widthViolation is a routed track that does not meet its net's intent.

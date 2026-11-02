@@ -12,6 +12,7 @@ package app
 // reads (snapshot) and writes (edit / pours / netclasses) the board.
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -59,17 +60,17 @@ type kicadRouteOpts struct {
 	noSilkPlace             bool
 	// silkMode: auto | on | off (D4).
 	// auto: defer silk when routing is incomplete; on: always with budget; off: skip.
-	silkMode    string
-	silkBudget  time.Duration
-	pourCredit              bool
-	noManual                bool
-	viaPolicy               string
-	projectConfig           string
-	requirements            []string
-	reviewers               string
-	noReview                bool
-	reviewTimeout           time.Duration
-	projectName, customer   string
+	silkMode              string
+	silkBudget            time.Duration
+	pourCredit            bool
+	noManual              bool
+	viaPolicy             string
+	projectConfig         string
+	requirements          []string
+	reviewers             string
+	noReview              bool
+	reviewTimeout         time.Duration
+	projectName, customer string
 }
 
 func newKicadRouteCmd(stdout, stderr io.Writer) *cobra.Command {
@@ -157,6 +158,9 @@ Exits non-zero when any gate fails; --waivers takes signed {gate,match,reason,by
 			if o.silkMode != "auto" && o.silkMode != "on" && o.silkMode != "off" {
 				return fmt.Errorf("--silk must be auto, on or off")
 			}
+			if o.silkBudget < 0 {
+				return fmt.Errorf("--silk-time-budget must be >= 0 (0 = unlimited)")
+			}
 			kicad.PadNeckFloorMil = o.padNeckFloor
 			return runKicadRoute(o, stdout, stderr)
 		},
@@ -217,6 +221,9 @@ const noReviewMatch = "--no-review"
 // kicadRun is one kicad route execution.
 type kicadRun struct {
 	viaProv *viaProvenance // which via came from where (kicad_route_via_audit.go)
+	// silkAutoDeferred: why --silk=auto did not place this board's labels; its
+	// silkscreen gate is then not satisfied, whatever the labels look like.
+	silkAutoDeferred string
 	// stepGates: cannot-check gates from post-route steps whose own check
 	// did not run (postRoute resets them, qualityGates reports them).
 	stepGates []gateResult
@@ -293,12 +300,20 @@ func (r *kicadRun) snapshot(pcb string) (*boardSnapshot, []byte, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	s, err := decodeKicadSnapshot(raw)
+	if err != nil {
+		return nil, nil, err
+	}
+	return s, raw, nil
+}
+
+func decodeKicadSnapshot(raw []byte) (*boardSnapshot, error) {
 	var s boardSnapshot
 	if err := json.Unmarshal(raw, &s); err != nil {
-		return nil, nil, fmt.Errorf("decode KiCad snapshot: %w", err)
+		return nil, fmt.Errorf("decode KiCad snapshot: %w", err)
 	}
 	s.sanitizeOutline()
-	return &s, raw, nil
+	return &s, nil
 }
 
 func runKicadRoute(o kicadRouteOpts, stdout, stderr io.Writer) error {
@@ -355,24 +370,31 @@ func runKicadRoute(o kicadRouteOpts, stdout, stderr io.Writer) error {
 	return nil
 }
 
+// routerStage: the stages the routers ran in, "<backend> (route)" (a rerun
+// too) and "routers (both)". "router <backend> (committed)" is the import of
+// their result, which is post-processing.
+func routerStage(stage string) bool {
+	return strings.HasSuffix(stage, " (route)") || strings.HasPrefix(stage, "routers (")
+}
+
 // timingRollup computes router vs post-processing vs total seconds from stage
-// timing entries.
+// timing entries: post-processing is everything after the first router stage
+// that is not itself one.
 func timingRollup(times []stageTime, totalS float64) map[string]any {
 	var routerS, postS float64
 	inRouter := false
 	for _, t := range times {
-		if strings.HasPrefix(t.Stage, "router ") {
+		switch {
+		case routerStage(t.Stage):
 			routerS += t.Seconds
 			inRouter = true
-		} else {
-			if inRouter {
-				postS += t.Seconds
-			}
+		case inRouter:
+			postS += t.Seconds
 		}
 	}
 	return map[string]any{
-		"routerSeconds":         routerS,
-		"postProcessingSeconds": postS,
+		"routerSeconds":         math.Round(routerS*10) / 10,
+		"postProcessingSeconds": math.Round(postS*10) / 10,
 		"totalSeconds":          totalS,
 	}
 }
@@ -631,6 +653,7 @@ func (r *kicadRun) run() error {
 					if b2, err := c.commit(c.Res); err == nil {
 						c.Board = b2
 						r.useCandidate(c, cands)
+						r.lap("router " + c.Name + " (committed)")
 						if nb2, ok2, err := r.postRoute(b2, inSnap); err == nil {
 							board, pass, c.FullPass = nb2, ok2, ok2
 							ok = ok2
@@ -776,35 +799,16 @@ func (r *kicadRun) postRoute(board string, inSnap *boardSnapshot) (string, bool,
 	}
 	r.lap("widen nets")
 	// D4: silk placement respects --silk mode.
-	silkDeferred, silkReason := false, ""
-	switch {
-	case o.noSilkPlace:
-		silkDeferred, silkReason = true, "skipped by --no-silk-place"
-	case o.silkMode == "off":
-		silkDeferred, silkReason = true, "skipped by --silk=off"
-	case o.silkMode == "auto" && r.route != nil && r.route.UnroutedCount != 0:
-		// UnroutedCount > 0: known unrouted; < 0: partial/unknown (the
-		// router was stopped before it could report). Either way silk is
-		// deferred because the routing is not complete.
-		silkDeferred = true
-		if r.route.UnroutedCount < 0 {
-			silkReason = "deferred: routing incomplete (unrouted count unknown — partial result)"
-		} else {
-			silkReason = fmt.Sprintf("deferred: routing incomplete (%d unrouted connection(s))", r.route.UnroutedCount)
-		}
-	default:
-		// D4: --silk=on uses the time budget; auto (routing complete) has no budget.
-		budget := time.Duration(0)
-		if o.silkMode == "on" {
-			budget = o.silkBudget
-		}
-		if board, err = r.silkPlace(board, budget); err != nil {
-			return board, false, err
-		}
+	silkReason, silkAuto, silkBudget := r.silkDecision()
+	r.silkAutoDeferred = ""
+	if silkAuto {
+		r.silkAutoDeferred = silkReason
 	}
-	if silkDeferred {
+	if silkReason != "" {
 		r.summary["silk"] = map[string]any{"deferred": true, "reason": silkReason}
 		fmt.Fprintf(r.stderr, "silk: %s\n", silkReason)
+	} else if board, err = r.silkPlace(board, silkBudget); err != nil {
+		return board, false, err
 	}
 
 	r.lap("silkscreen placement")
@@ -1126,21 +1130,109 @@ func (r *kicadRun) widen(board, what string, plan func([]specctra.Track, []widen
 	return ops, out, nil
 }
 
+// silkDecision says whether this board's labels get placed: why not (reason ""
+// = place them, under budget; 0 = unlimited). auto marks --silk=auto holding
+// them back because the routing is not complete, which unlike a user's skip
+// leaves the silkscreen gate unsatisfied.
+func (r *kicadRun) silkDecision() (reason string, auto bool, budget time.Duration) {
+	o := r.o
+	switch {
+	case o.noSilkPlace:
+		return "skipped by --no-silk-place", false, 0
+	case o.silkMode == "off":
+		return "skipped by --silk=off", false, 0
+	case o.silkMode == "auto" && r.route != nil && (r.route.Partial || r.route.UnroutedCount != 0):
+		switch {
+		case r.route.UnroutedCount < 0:
+			reason = "deferred: routing incomplete (unrouted count unknown — partial result)"
+		case r.route.Partial:
+			reason = fmt.Sprintf("deferred: routing incomplete (partial result, %d unrouted at the router's last count)", r.route.UnroutedCount)
+		default:
+			reason = fmt.Sprintf("deferred: routing incomplete (%d unrouted connection(s))", r.route.UnroutedCount)
+		}
+		return reason, true, 0
+	}
+	// D4: --silk=on uses the time budget; auto (routing complete) has no budget.
+	if o.silkMode == "on" {
+		budget = o.silkBudget
+	}
+	return "", false, budget
+}
+
+// silkDeferredGate: the silkscreen gate of a board whose labels --silk=auto did
+// not place is cannot-check, even when the labels as routed are clean.
+func silkDeferredGate(g gateResult, reason string) gateResult {
+	if g.Gate != "silkscreen" {
+		return g
+	}
+	g.Items = append([]string{"silk placement " + reason + "; route the rest, or place anyway with --silk=on"}, g.Items...)
+	g.Detail = "cannot check: silk placement " + reason + "; labels as routed: " + g.Detail
+	g.Pass, g.CannotCheck, g.Waived = false, true, nil
+	return g
+}
+
+// addTailGate records one of tailGates' results (they carry their waivers).
+func (r *kicadRun) addTailGate(g gateResult) {
+	if r.silkAutoDeferred != "" {
+		g = silkDeferredGate(g, r.silkAutoDeferred)
+	}
+	r.gates = append(r.gates, g)
+	// D3: register on the registry (which handles stderr).
+	if r.reg != nil {
+		r.reg.Add(toRecord(g, nil, "board", 0))
+	} else {
+		fmt.Fprintf(r.stderr, "gate %-16s %v  %s\n", g.Gate, map[bool]string{true: "PASS", false: "FAIL"}[g.Pass], g.Detail)
+	}
+}
+
+// silkTools are the KiCad calls silk placement makes (*kicad.Tools).
+type silkTools interface {
+	SnapshotContext(ctx context.Context, pcb string) ([]byte, error)
+	EditContext(ctx context.Context, pcb string, ops map[string]any, out string) (json.RawMessage, error)
+}
+
 // silkPlace moves designators next to their parts with the shared planner
 // (planSilkTight + group labels), at most 3 rounds, until the silkscreen
 // gate passes.
 func (r *kicadRun) silkPlace(board string, budget time.Duration) (string, error) {
+	return r.silkPlaceWith(r.kt, board, budget)
+}
+
+// silkPlaceWith is silkPlace on t. A budget (--silk=on only; 0 = unlimited)
+// reaches the bridge calls and the planners; when it ends, the last completed
+// board is kept and what happened is in summary.silk.budget.
+func (r *kicadRun) silkPlaceWith(t silkTools, board string, budget time.Duration) (string, error) {
 	opt := r.o.silk
 	rep := &silkTightReport{}
 	prev := ""
 	silkStart := time.Now()
+	ctx := context.Background()
+	if budget > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithDeadline(ctx, silkStart.Add(budget))
+		defer cancel()
+		opt.deadline = silkStart.Add(budget)
+	}
+	stoppedAt := ""
+	expired := func(at string) bool {
+		if ctx.Err() == nil {
+			return false
+		}
+		stoppedAt = at
+		return true
+	}
 	for round := 1; round <= 3; round++ {
-		// D4: enforce the time budget (--silk=on only; 0 = unlimited).
-		if budget > 0 && time.Since(silkStart) >= budget {
-			fmt.Fprintf(r.stderr, "silk: time budget reached (%s); stopped after %d round(s)\n", budget, round-1)
+		if expired(fmt.Sprintf("before round %d", round)) {
 			break
 		}
-		s, _, err := r.snapshot(board)
+		raw, err := t.SnapshotContext(ctx, board)
+		if err != nil {
+			if expired(fmt.Sprintf("round %d: snapshot", round)) {
+				break
+			}
+			return board, err
+		}
+		s, err := decodeKicadSnapshot(raw)
 		if err != nil {
 			return board, err
 		}
@@ -1152,11 +1244,15 @@ func (r *kicadRun) silkPlace(board string, budget time.Duration) (string, error)
 		}
 		placed, notes := planSilkTight(labels, sc, opt)
 		var groups []silkGroup
+		var gnotes []string
 		if !opt.NoGroups {
-			var gnotes []string
 			groups, placed, gnotes = planSilkGroups(labels, sc, placed, opt)
-			rep.GroupNotes = append(rep.GroupNotes, gnotes...)
 		}
+		if expired(fmt.Sprintf("round %d: planning", round)) { // an incomplete plan
+			break
+		}
+		last := *rep
+		rep.GroupNotes = append(rep.GroupNotes, gnotes...)
 		rep.Placed, rep.Notes, rep.Rounds = placed, notes, round
 		byID := map[string]silkLabel{}
 		for _, l := range labels {
@@ -1192,7 +1288,6 @@ func (r *kicadRun) silkPlace(board string, budget time.Duration) (string, error)
 			}
 			add = append(add, map[string]any{"text": g.Text, "x": g.Box.cx(), "y": g.Box.cy(), "layer": g.Layer, "rotation": g.Rot, "fontSize": gf, "lineWidth": gw})
 			hide = append(hide, g.IDs...)
-			rep.Groups = append(rep.Groups, g)
 		}
 		fmt.Fprintf(r.stderr, "silk round %d: %d designator(s) moved, %d group label(s)\n", round, len(set), len(groups))
 		if len(set)+len(add) == 0 {
@@ -1206,12 +1301,27 @@ func (r *kicadRun) silkPlace(board string, budget time.Duration) (string, error)
 			break
 		}
 		prev = string(key)
-		rep.Moved += len(set)
 		out := r.next("silk")
-		if _, err := r.kt.Edit(board, map[string]any{"setText": set, "addTexts": add, "hideTexts": hide}, out); err != nil {
+		if _, err := t.EditContext(ctx, board, map[string]any{"setText": set, "addTexts": add, "hideTexts": hide}, out); err != nil {
+			if expired(fmt.Sprintf("round %d: edit", round)) {
+				*rep = last // this round's plan never reached a board
+				break
+			}
 			return board, err
 		}
+		rep.Moved += len(set)
+		rep.Groups = append(rep.Groups, groups...)
 		board = out
+	}
+	if budget > 0 {
+		elapsed := time.Since(silkStart)
+		rep.Budget = &silkBudgetReport{BudgetS: budget.Seconds(), ElapsedS: elapsed.Seconds(), Expired: stoppedAt != "" || elapsed > budget, StoppedAt: stoppedAt}
+		if elapsed > budget {
+			rep.Budget.OverrunS = (elapsed - budget).Seconds()
+		}
+		if rep.Budget.Expired {
+			fmt.Fprintf(r.stderr, "silk: time budget %s ended (%s, %.1f s over); the last completed board is kept\n", budget, stoppedAt, rep.Budget.OverrunS)
+		}
 	}
 	r.summary["silk"] = rep
 	return board, nil
@@ -1321,13 +1431,7 @@ func (r *kicadRun) qualityGates(board string) (bool, error) {
 	qo.routeGate = &rc
 	r.lap("gate: intent / safety snapshot gates")
 	for _, g := range tailGates(snap, boardPath, postOut, qo, o.projectName, "", r.summary, r.stderr) {
-		r.gates = append(r.gates, g) // tailGates applied the waivers
-		// D3: register on the registry (which handles stderr).
-		if r.reg != nil {
-			r.reg.Add(toRecord(g, nil, "board", 0))
-		} else {
-			fmt.Fprintf(r.stderr, "gate %-16s %v  %s\n", g.Gate, map[bool]string{true: "PASS", false: "FAIL"}[g.Pass], g.Detail)
-		}
+		r.addTailGate(g)
 	}
 	r.lap("gate: route-complete, silkscreen, board manual")
 	pass := true
@@ -1957,8 +2061,18 @@ func defaultRouteThreads(cpus int, both bool) int {
 // boardConnections counts the connections routing has to make: per net,
 // its pads minus one.
 func boardConnections(s *boardSnapshot) int {
+	n := 0
+	for _, k := range boardNetConnections(s) {
+		n += k
+	}
+	return n
+}
+
+// boardNetConnections: connections per net with at least one (pads - 1).
+func boardNetConnections(s *boardSnapshot) map[string]int {
+	out := map[string]int{}
 	if s == nil {
-		return 0
+		return out
 	}
 	pads := map[string]int{}
 	for _, c := range s.Components {
@@ -1968,13 +2082,12 @@ func boardConnections(s *boardSnapshot) int {
 			}
 		}
 	}
-	n := 0
-	for _, k := range pads {
+	for net, k := range pads {
 		if k > 1 {
-			n += k - 1
+			out[net] = k - 1
 		}
 	}
-	return n
+	return out
 }
 
 // fastrouteAutoMaxTime is kicad route's default fastroute --max-time:

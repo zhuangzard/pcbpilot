@@ -2,9 +2,11 @@ package app
 
 // kicad_route_via_repair.go — growing a via to its class via, only as an
 // explicit repair: per via, in one transaction, followed by a geometry check
-// before the write and KiCad DRC after it. A via that fails keeps its size
-// and carries its evidence. Nothing is ripped up and nothing loops: at most
-// one retry without the vias DRC rejected, otherwise the board is untouched.
+// before the write and KiCad DRC after it, compared with the DRC before it. A
+// via that fails keeps its size and carries its evidence. Nothing is ripped up
+// and nothing loops: at most one retry without the vias DRC rejected, and a new
+// violation that names no grown via drops the transaction; otherwise the board
+// is untouched.
 
 import (
 	"encoding/json"
@@ -22,12 +24,14 @@ type viaGrow struct {
 	classDia, drill int64 // nm
 }
 
-// viaRepairResult: grown via ids; evidence for every via left as it was; info
-// for every via that was grown.
+// viaRepairResult: grown via ids; evidence for every via rejected on a known
+// reason; unchecked for every via whose repair could not be judged; info for
+// every via that was grown.
 type viaRepairResult struct {
-	grown    []string
-	evidence []string
-	info     []string
+	grown     []string
+	evidence  []string
+	unchecked []string
+	info      []string
 }
 
 // viaGrowCandidates: the router vias shrinking cannot bring to their class via.
@@ -117,28 +121,37 @@ func repairRouterVias(t routerViaTools, board string, cands []viaGrow, rb *kicad
 	reject := func(g viaGrow, why string) {
 		res.evidence = append(res.evidence, g.describe()+"; repair rejected: "+why)
 	}
+	unchecked := func(g viaGrow, why string) {
+		res.unchecked = append(res.unchecked, g.describe()+"; repair rejected: cannot check: "+why)
+	}
 	allReject := func(gs []viaGrow, why string) {
 		for _, g := range gs {
 			reject(g, why)
 		}
 	}
+	allUnchecked := func(gs []viaGrow, why string) {
+		for _, g := range gs {
+			unchecked(g, why)
+		}
+	}
 	defer func() {
 		sort.Strings(res.evidence)
-		stats["grownToClass"], stats["repairRejected"] = len(res.grown), len(res.evidence)
+		sort.Strings(res.unchecked)
+		stats["grownToClass"], stats["repairRejected"] = len(res.grown), len(res.evidence)+len(res.unchecked)
 	}()
 	raw, err := t.Snapshot(board)
 	if err != nil {
-		allReject(cands, "cannot check: board snapshot: "+err.Error())
+		allUnchecked(cands, "board snapshot: "+err.Error())
 		return board, res
 	}
 	var s boardSnapshot
 	if err := json.Unmarshal(raw, &s); err != nil {
-		allReject(cands, "cannot check: decode the board snapshot: "+err.Error())
+		allUnchecked(cands, "decode the board snapshot: "+err.Error())
 		return board, res
 	}
 	tracks, vias, pads, err := copperOf(&s)
 	if err != nil {
-		allReject(cands, "cannot check: board copper: "+err.Error())
+		allUnchecked(cands, "board copper: "+err.Error())
 		return board, res
 	}
 	grownAt := map[[2]float64]float64{}
@@ -149,12 +162,23 @@ func repairRouterVias(t routerViaTools, board string, cands []viaGrow, rb *kicad
 	for _, g := range cands {
 		if why, unknown := viaGrowConflict(g, tracks, vias, pads, rb, grownAt); why != "" {
 			if unknown {
-				why = "cannot check: " + why
+				unchecked(g, why)
+			} else {
+				reject(g, why)
 			}
-			reject(g, why)
 			continue
 		}
 		pass = append(pass, g)
+	}
+	if len(pass) == 0 {
+		return board, res
+	}
+	// What the board already reports is not the repair's doing; the DRC of a
+	// large board is slow, so it runs only when a repair will be written.
+	base, err := t.DRC(board, board+".drc-baseline.json")
+	if err != nil || base == nil {
+		allUnchecked(pass, fmt.Sprintf("DRC of the board before the repair: %v", err))
+		return board, res
 	}
 	// One transaction, one retry: each writes a new board from the input.
 	for try := 0; try < 2 && len(pass) > 0; try++ {
@@ -169,10 +193,17 @@ func repairRouterVias(t routerViaTools, board string, cands []viaGrow, rb *kicad
 		}
 		rep, err := t.DRC(out, out+".drc.json")
 		if err != nil || rep == nil {
-			allReject(pass, fmt.Sprintf("cannot check: DRC of the repaired board: %v", err))
+			allUnchecked(pass, fmt.Sprintf("DRC of the repaired board: %v", err))
 			return board, res
 		}
 		bad := viasNamedByDRC(rep, pass)
+		fresh := newDRCViolations(base, rep)
+		if len(bad) == 0 && len(fresh) > 0 {
+			// A violation on a neighbour only: no way to tell which via caused
+			// it, so none of them is kept.
+			allReject(pass, fmt.Sprintf("DRC: %d new violation(s) naming no grown via, first %s: transaction dropped", len(fresh), fresh[0]))
+			return board, res
+		}
 		if len(bad) == 0 {
 			for _, g := range pass {
 				res.grown = append(res.grown, g.v.ID)
@@ -194,6 +225,40 @@ func repairRouterVias(t routerViaTools, board string, cands []viaGrow, rb *kicad
 	return board, res
 }
 
+// drcRelevant: a violation a via repair answers for (connectivity is not).
+func drcRelevant(v kicad.Violation) bool {
+	return !strings.HasPrefix(v.Rule, "unconnected") && v.Section != "unconnected_items"
+}
+
+// newDRCViolations lists the relevant violations of rep beyond those of base,
+// counted per rule, message and objects (rule: message). A violation whose
+// measured value changed is a new one.
+func newDRCViolations(base, rep *kicad.DRCReport) []string {
+	key := func(v kicad.Violation) string {
+		objs := append([]string{}, v.Objs...)
+		sort.Strings(objs)
+		return v.Rule + "|" + v.Message + "|" + strings.Join(objs, ",")
+	}
+	had := map[string]int{}
+	for _, v := range base.Violations {
+		if drcRelevant(v) {
+			had[key(v)]++
+		}
+	}
+	var out []string
+	for _, v := range rep.Violations {
+		if !drcRelevant(v) {
+			continue
+		}
+		if k := key(v); had[k] > 0 {
+			had[k]--
+		} else {
+			out = append(out, v.Rule+": "+v.Message)
+		}
+	}
+	return out
+}
+
 // viasNamedByDRC: the candidates a design-rule violation names (rule: message).
 func viasNamedByDRC(rep *kicad.DRCReport, gs []viaGrow) map[string]string {
 	ids := map[string]bool{}
@@ -202,7 +267,7 @@ func viasNamedByDRC(rep *kicad.DRCReport, gs []viaGrow) map[string]string {
 	}
 	out := map[string]string{}
 	for _, v := range rep.Violations {
-		if strings.HasPrefix(v.Rule, "unconnected") || v.Section == "unconnected_items" {
+		if !drcRelevant(v) {
 			continue
 		}
 		for _, o := range v.Objs {

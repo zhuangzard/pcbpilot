@@ -1,8 +1,12 @@
 package app
 
 import (
+	"context"
+	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/zhuangzard/pcbpilot/internal/kicad"
@@ -78,7 +82,7 @@ func TestNetClassBreakdown(t *testing.T) {
 		{Name: "PP1_W10", Nets: []string{"GND"}},
 		{Name: "PP2_W20", Nets: []string{"VCC"}},
 	}
-	stats := netClassBreakdown(res, classes)
+	stats := netClassBreakdown(res, classes, nil)
 	if len(stats) == 0 {
 		t.Fatal("expected net class stats")
 	}
@@ -102,10 +106,10 @@ func TestRegionBreakdown(t *testing.T) {
 		Outline: &boardOutline{BBox: layoutBBox{MinX: 0, MinY: 0, MaxX: 100, MaxY: 100}},
 		Components: []boardComp{
 			{Designator: "U1", Pads: []boardPad{
-				{Number: "1", X: 25, Y: 75},  // NW
-				{Number: "2", X: 75, Y: 75},  // NE
-				{Number: "3", X: 25, Y: 25},  // SW
-				{Number: "4", X: 75, Y: 25},  // SE
+				{Number: "1", X: 25, Y: 75}, // NW
+				{Number: "2", X: 75, Y: 75}, // NE
+				{Number: "3", X: 25, Y: 25}, // SW
+				{Number: "4", X: 75, Y: 25}, // SE
 			}},
 		},
 	}
@@ -153,5 +157,122 @@ func TestFileSHA256(t *testing.T) {
 	// Missing file → empty.
 	if filePathSHA256(filepath.Join(dir, "nope")) != "" {
 		t.Error("missing file should return empty SHA")
+	}
+}
+
+// netSnap has pads[net] pads on each net.
+func netSnap(pads map[string]int) *boardSnapshot {
+	c := boardComp{Designator: "U1"}
+	for net, n := range pads {
+		for range n {
+			c.Pads = append(c.Pads, boardPad{Number: "x", Net: net})
+		}
+	}
+	return &boardSnapshot{Components: []boardComp{c}}
+}
+
+// One unrouted connection in a class with 100 routed is 1 of 101, not 1 of 1;
+// a class with nothing unrouted is still listed.
+func TestBreakdownTotals(t *testing.T) {
+	res := &routeResult{UnroutedCount: 1, Unrouted: []routeConn{{Net: "BIG", From: "U1.1", To: "U1.2"}}}
+	classes := []kicad.NetClass{{Name: "PP1", Nets: []string{"BIG"}}, {Name: "PPD_HV", Nets: []string{"HV"}}}
+	snap := netSnap(map[string]int{"BIG": 102, "HV": 3, "OTHER": 2, "LONE": 1})
+	ri := buildRouteInstrumentation(res, boardConnections(snap), "", classes, snap)
+	if ri.Connections != 104 || ri.Completed != 103 {
+		t.Fatalf("%+v", ri)
+	}
+	b, err := json.Marshal(ri)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`{"name":"PP1","total":101,"completed":100,"unrouted":1}`,
+		`{"name":"PPD_HV","total":2,"completed":2,"unrouted":0}`,
+		`{"name":"Default","total":1,"completed":1,"unrouted":0}`,
+		`{"domain":"HV","total":2,"completed":2,"unrouted":0}`,
+		`{"domain":"(none)","total":102,"completed":101,"unrouted":1}`,
+	} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("missing %s in %s", want, b)
+		}
+	}
+}
+
+// What is not known is absent, never a made-up number.
+func TestBreakdownUnknownTotalsOmitted(t *testing.T) {
+	classes := []kicad.NetClass{{Name: "PP1", Nets: []string{"BIG"}}, {Name: "PPD_HV", Nets: []string{"HV"}}}
+	snap := netSnap(map[string]int{"BIG": 102, "HV": 3})
+	listed := []routeConn{{Net: "BIG", From: "U1.1", To: "U1.2"}}
+	for name, c := range map[string]struct {
+		res  *routeResult
+		snap *boardSnapshot
+	}{
+		"no snapshot":     {&routeResult{UnroutedCount: 1, Unrouted: listed}, nil},
+		"partial":         {&routeResult{UnroutedCount: -1, Partial: true}, snap},
+		"partial, listed": {&routeResult{UnroutedCount: 1, Partial: true, Unrouted: listed}, snap},
+		"list incomplete": {&routeResult{UnroutedCount: 5, Unrouted: listed}, snap},
+	} {
+		b, err := json.Marshal(struct {
+			C []NetClassStats
+			D []DomainStats
+		}{netClassBreakdown(c.res, classes, c.snap), domainBreakdown(c.res, classes, c.snap)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(b), "total") || strings.Contains(string(b), "completed") {
+			t.Errorf("%s: %s", name, b)
+		}
+	}
+	// Regions: a routed connection has no region, so no totals at all.
+	b, err := json.Marshal(RegionStats{Region: "NW", Unrouted: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(b) != `{"region":"NW","unrouted":1}` {
+		t.Errorf("%s", b)
+	}
+}
+
+// The stage list of a real run: router time is the routing stage, not the
+// import that follows it.
+func TestTimingRollupRouterStages(t *testing.T) {
+	roll := func(stages ...stageTime) (router, post float64) {
+		m := timingRollup(stages, 2751)
+		if m["totalSeconds"] != 2751.0 {
+			t.Fatalf("%v", m)
+		}
+		return m["routerSeconds"].(float64), m["postProcessingSeconds"].(float64)
+	}
+	pre := []stageTime{{"setup (KiCad, fastroute, schematic netlist)", 5}, {"DSN export", 7}, {"DSN prepare (requirements, keep-outs)", 3}}
+	post := []stageTime{{"via arrays", 10}, {"pours + zone fill + thermals", 800.5}, {"gates", 40}}
+	for _, c := range []struct {
+		name   string
+		stages []stageTime
+		router float64
+		post   float64
+	}{
+		{"fastroute", []stageTime{{"fastroute (route)", 1819.6}, {"router fastroute (committed)", 34}}, 1819.6, 884.5},
+		{"tracemaker", []stageTime{{"tracemaker (route)", 600.2}, {"router tracemaker (committed)", 12}}, 600.2, 862.5},
+		{"race", []stageTime{{"routers (both)", 900}, {"router fastroute (committed)", 34}}, 900, 884.5},
+		{"race, then a rerun", []stageTime{{"routers (both)", 900}, {"tracemaker (route)", 100.5}, {"router tracemaker (committed)", 12}}, 1000.5, 862.5},
+	} {
+		stages := append(append(append([]stageTime{}, pre...), c.stages...), post...)
+		if r, p := roll(stages...); r != c.router || p != c.post {
+			t.Errorf("%s: router %v post %v", c.name, r, p)
+		}
+	}
+}
+
+// A candidate run again is timed as a router stage of its own.
+func TestRerunCandidateTimedAsRouterStage(t *testing.T) {
+	r := &kicadRun{summary: map[string]any{}, stderr: io.Discard}
+	c := &routeCandidate{Name: routerTracemaker, exec: func(context.Context) (*routeResult, error) {
+		return &routeResult{}, nil
+	}}
+	if err := r.rerunCandidate(c); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.times) != 1 || !routerStage(r.times[0].Stage) || r.times[0].Stage != "tracemaker (route)" {
+		t.Fatalf("%+v", r.times)
 	}
 }

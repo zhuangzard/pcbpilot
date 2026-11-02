@@ -33,28 +33,30 @@ type RouteInstrumentation struct {
 	Checkpoints []RouteCheckpoint `json:"checkpoints,omitempty"`
 }
 
-// NetClassStats counts connections in one netclass.
+// NetClassStats counts connections in one netclass. Total and Completed are
+// absent when they are not known (no input snapshot, a partial router result).
 type NetClassStats struct {
 	Name      string `json:"name"`
-	Total     int    `json:"total"`
-	Completed int    `json:"completed"`
+	Total     *int   `json:"total,omitempty"`
+	Completed *int   `json:"completed,omitempty"`
 	Unrouted  int    `json:"unrouted"`
 }
 
-// DomainStats counts connections in one insulation domain.
+// DomainStats counts connections in one insulation domain; Total and Completed
+// as in NetClassStats.
 type DomainStats struct {
 	Domain    string `json:"domain"`
-	Total     int    `json:"total"`
-	Completed int    `json:"completed"`
+	Total     *int   `json:"total,omitempty"`
+	Completed *int   `json:"completed,omitempty"`
 	Unrouted  int    `json:"unrouted"`
 }
 
-// RegionStats counts connections in one coarse board region (quadrant).
+// RegionStats counts unrouted connections in one coarse board region
+// (quadrant). Only the router's unrouted list has endpoints, so the region of
+// a routed connection is not known and there is no total here.
 type RegionStats struct {
-	Region    string `json:"region"` // "NW" | "NE" | "SW" | "SE"
-	Total     int    `json:"total"`
-	Completed int    `json:"completed"`
-	Unrouted  int    `json:"unrouted"`
+	Region   string `json:"region"` // "NW" | "NE" | "SW" | "SE"
+	Unrouted int    `json:"unrouted"`
 }
 
 // RouteCheckpoint is a periodic progress snapshot from the router.
@@ -89,8 +91,8 @@ func buildRouteInstrumentation(
 		RouterVersion:   res.Version,
 		InputSHA256:     filePathSHA256(dsnPath),
 	}
-	ri.ByNetClass = netClassBreakdown(res, classes)
-	ri.ByDomain = domainBreakdown(res, classes)
+	ri.ByNetClass = netClassBreakdown(res, classes, snap)
+	ri.ByDomain = domainBreakdown(res, classes, snap)
 	ri.ByRegion = regionBreakdown(res, snap)
 	return ri
 }
@@ -105,51 +107,86 @@ func filePathSHA256(path string) string {
 	return hex.EncodeToString(h[:])
 }
 
-// netClassBreakdown classifies unrouted connections by their net's netclass.
-func netClassBreakdown(res *routeResult, classes []kicad.NetClass) []NetClassStats {
+// connGroup is one group's connection counts; total < 0 means not known.
+type connGroup struct {
+	name            string
+	total, unrouted int
+}
+
+// connGroups counts connections per group of nets. Totals use the input board's
+// pads per net (as boardConnections) and need a result whose unrouted list is
+// complete; otherwise only the groups with listed unrouted connections come
+// back, with total -1. A group with more unrouted than connections is not known
+// either.
+func connGroups(res *routeResult, snap *boardSnapshot, groupOf func(net string) string) []connGroup {
+	totals := map[string]int{}
+	known := snap != nil && !res.Partial && res.UnroutedCount >= 0 && len(res.Unrouted) >= res.UnroutedCount
+	if known {
+		for net, n := range boardNetConnections(snap) {
+			totals[groupOf(net)] += n
+		}
+	}
+	unrouted := map[string]int{}
+	for _, u := range res.Unrouted {
+		unrouted[groupOf(u.Net)]++
+	}
+	names := make([]string, 0, len(totals))
+	for g := range totals {
+		names = append(names, g)
+	}
+	for g := range unrouted {
+		if _, ok := totals[g]; !ok {
+			names = append(names, g)
+		}
+	}
+	sort.Strings(names)
+	out := make([]connGroup, 0, len(names))
+	for _, g := range names {
+		c := connGroup{name: g, total: -1, unrouted: unrouted[g]}
+		if known && totals[g] >= unrouted[g] {
+			c.total = totals[g]
+		}
+		out = append(out, c)
+	}
+	return out
+}
+
+// counts are the Total and Completed fields of c (nil when not known).
+func (c connGroup) counts() (total, completed *int) {
+	if c.total < 0 {
+		return nil, nil
+	}
+	t, d := c.total, c.total-c.unrouted
+	return &t, &d
+}
+
+// netClassBreakdown classifies connections by their net's netclass.
+func netClassBreakdown(res *routeResult, classes []kicad.NetClass, snap *boardSnapshot) []NetClassStats {
 	if res == nil || len(classes) == 0 {
 		return nil
 	}
-	// Build net → class name lookup.
 	netToClass := map[string]string{}
 	for _, c := range classes {
 		for _, n := range c.Nets {
 			netToClass[strings.ToUpper(n)] = c.Name
 		}
 	}
-	type counts struct{ total, unrouted int }
-	byClass := map[string]*counts{}
-	// Count unrouted per class.
-	for _, u := range res.Unrouted {
-		cn := netToClass[strings.ToUpper(u.Net)]
-		if cn == "" {
-			cn = "Default"
-		}
-		c := byClass[cn]
-		if c == nil {
-			c = &counts{}
-			byClass[cn] = c
-		}
-		c.unrouted++
-	}
-	// We don't have the total connections per class, so report only the
-	// unrouted breakdown. Total is set to unrouted (we know at least this many).
-	names := make([]string, 0, len(byClass))
-	for name := range byClass {
-		names = append(names, name)
-	}
-	sort.Strings(names)
 	var out []NetClassStats
-	for _, name := range names {
-		c := byClass[name]
-		out = append(out, NetClassStats{Name: name, Unrouted: c.unrouted, Total: c.unrouted, Completed: 0})
+	for _, c := range connGroups(res, snap, func(net string) string {
+		if cn := netToClass[strings.ToUpper(net)]; cn != "" {
+			return cn
+		}
+		return "Default"
+	}) {
+		total, completed := c.counts()
+		out = append(out, NetClassStats{Name: c.name, Total: total, Completed: completed, Unrouted: c.unrouted})
 	}
 	return out
 }
 
-// domainBreakdown classifies unrouted connections by insulation domain.
-func domainBreakdown(res *routeResult, classes []kicad.NetClass) []DomainStats {
-	if res == nil || len(classes) == 0 || len(res.Unrouted) == 0 {
+// domainBreakdown classifies connections by insulation domain.
+func domainBreakdown(res *routeResult, classes []kicad.NetClass, snap *boardSnapshot) []DomainStats {
+	if res == nil || len(classes) == 0 {
 		return nil
 	}
 	// Insulation domain classes are PPD_<domain>.
@@ -165,29 +202,15 @@ func domainBreakdown(res *routeResult, classes []kicad.NetClass) []DomainStats {
 	if len(netToDomain) == 0 {
 		return nil
 	}
-	type counts struct{ total, unrouted int }
-	byDomain := map[string]*counts{}
-	for _, u := range res.Unrouted {
-		d := netToDomain[strings.ToUpper(u.Net)]
-		if d == "" {
-			d = "(none)"
-		}
-		c := byDomain[d]
-		if c == nil {
-			c = &counts{}
-			byDomain[d] = c
-		}
-		c.unrouted++
-	}
-	domains := make([]string, 0, len(byDomain))
-	for d := range byDomain {
-		domains = append(domains, d)
-	}
-	sort.Strings(domains)
 	var out []DomainStats
-	for _, d := range domains {
-		c := byDomain[d]
-		out = append(out, DomainStats{Domain: d, Unrouted: c.unrouted, Total: c.unrouted})
+	for _, c := range connGroups(res, snap, func(net string) string {
+		if d := netToDomain[strings.ToUpper(net)]; d != "" {
+			return d
+		}
+		return "(none)"
+	}) {
+		total, completed := c.counts()
+		out = append(out, DomainStats{Domain: c.name, Total: total, Completed: completed, Unrouted: c.unrouted})
 	}
 	return out
 }
@@ -208,8 +231,7 @@ func regionBreakdown(res *routeResult, snap *boardSnapshot) []RegionStats {
 			padLoc[key] = [2]float64{p.X, p.Y}
 		}
 	}
-	type counts struct{ total, unrouted int }
-	byRegion := map[string]*counts{}
+	byRegion := map[string]int{}
 	for _, u := range res.Unrouted {
 		loc, ok := padLoc[u.From]
 		if !ok {
@@ -227,17 +249,12 @@ func regionBreakdown(res *routeResult, snap *boardSnapshot) []RegionStats {
 		case loc[0] < cx && loc[1] >= cy:
 			region = "NW"
 		}
-		c := byRegion[region]
-		if c == nil {
-			c = &counts{}
-			byRegion[region] = c
-		}
-		c.unrouted++
+		byRegion[region]++
 	}
 	var out []RegionStats
 	for _, r := range []string{"NW", "NE", "SW", "SE"} {
-		if c, ok := byRegion[r]; ok {
-			out = append(out, RegionStats{Region: r, Unrouted: c.unrouted, Total: c.unrouted})
+		if n, ok := byRegion[r]; ok {
+			out = append(out, RegionStats{Region: r, Unrouted: n})
 		}
 	}
 	return out

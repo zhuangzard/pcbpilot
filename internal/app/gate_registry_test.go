@@ -2,12 +2,15 @@ package app
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/zhuangzard/pcbpilot/internal/gate"
+	"github.com/zhuangzard/pcbpilot/internal/kicad"
 )
 
 func TestGateRegistryPassFailCannotCheck(t *testing.T) {
@@ -338,5 +341,121 @@ func TestGateRegistryExitCodePrecedence(t *testing.T) {
 				t.Errorf("exit = %d, want %d", got, tt.wantExit)
 			}
 		})
+	}
+}
+
+func statusOf(t *testing.T, reg *gateRegistry, id string) gate.Status {
+	t.Helper()
+	for _, g := range reg.Records() {
+		if g.ID == id {
+			return g.Status
+		}
+	}
+	t.Fatalf("no record %s in %+v", id, reg.Records())
+	return ""
+}
+
+// The cannot-check results production makes reach the registry typed: exit 5,
+// until a real failure joins them (exit 6). The gates come from the functions
+// that make them, through r.add and the router-gate adapter.
+func TestRouteCannotCheckExitCodes(t *testing.T) {
+	newRun := func() (*kicadRun, *bytes.Buffer) {
+		var stderr bytes.Buffer
+		return &kicadRun{stderr: &stderr, summary: map[string]any{}, reg: newGateRegistry(&stderr, nil)}, &stderr
+	}
+	prov := func(routeVia) string { return viaFromRouter }
+	spanless := auditVia("v", "SIG", 600, 300)
+	spanless.From, spanless.To = 0, 0
+
+	// via-audit: a via whose span is not known.
+	r, stderr := newRun()
+	var span gateResult
+	span.Gate = "via-audit"
+	viaAuditVerdict(&span, auditVias([]routeVia{spanless}, auditRB(), viaLimits{}, prov, viaPolicy{}))
+	r.add(span)
+	if got := r.reg.ExitCode(); got != 5 || statusOf(t, r.reg, "via-audit") != gate.CannotCheck || !strings.Contains(stderr.String(), "CANNOT-CHECK") {
+		t.Fatalf("span: exit %d %s", got, stderr)
+	}
+
+	// via-audit: a custom rule on via size that cannot be resolved per via.
+	r, _ = newRun()
+	a := auditVias([]routeVia{auditVia("v", "SIG", 600, 300)}, auditRB(), viaLimits{}, prov, viaPolicy{})
+	var lim viaLimits
+	v := int64(1)
+	a.CannotCheck = append(a.CannotCheck, viaLimitsFromDRU([]kicad.DRURule{{Name: "x", Condition: "A.NetClass == 'y'", Constraints: []kicad.DRUConstraint{{Type: "via_diameter", Min: &v}}}}, &lim)...)
+	rules := gateResult{Gate: "via-audit"}
+	viaAuditVerdict(&rules, a)
+	r.add(rules)
+	if got := r.reg.ExitCode(); got != 5 {
+		t.Fatalf("custom rule: exit %d", got)
+	}
+
+	// router-vias, each through the adapter qualityGates uses.
+	repairDRC := fakeRepairTools(`{"primitiveId":"t","net":"B","layer":1,"startX":200,"startY":200,"endX":300,"endY":200,"lineWidth":8}`, nil, errors.New("kicad-cli died"))
+	repairDRC.base = &kicad.DRCReport{}
+	next := func(s string) string { return s + ".kicad_pcb" }
+	for name, f := range map[string]*fakeViaTools{
+		"missing class": {after: `{"copper":{"vias":[{"primitiveId":"v1","net":"NOCLASS","diameter":31.4961,"holeDiameter":15.748}]}}`},
+		"no readback":   {failOn: "rules-read"},
+		"repair DRC":    repairDRC,
+	} {
+		_, gates := sizeRouterVias(f, "classed", "imported", next, map[string]any{}, io.Discard)
+		r, _ = newRun()
+		if len(gates) != 1 {
+			t.Fatalf("%s: %+v", name, gates)
+		}
+		r.reg.Add(toRecord(gates[0], nil, "board", 0))
+		if got := r.reg.ExitCode(); got != 5 {
+			t.Fatalf("%s: exit %d %+v", name, got, gates)
+		}
+	}
+
+	// Known-wrong vias stay failures.
+	_, gates := sizeRouterVias(&fakeViaTools{failOn: "edit"}, "classed", "imported", next, map[string]any{}, io.Discard)
+	r, _ = newRun()
+	r.reg.Add(toRecord(gates[0], nil, "board", 0))
+	if got := r.reg.ExitCode(); got != 6 {
+		t.Fatalf("resize not written: exit %d", got)
+	}
+
+	// Mixed: cannot-check plus failure is a failure, and neither hides the other.
+	r, _ = newRun()
+	r.add(span)
+	illegal := gateResult{Gate: "route-complete"}
+	illegal.Items = []string{"1 connection(s) unrouted"}
+	r.add(illegal)
+	if got := r.reg.ExitCode(); got != 6 || statusOf(t, r.reg, "via-audit") != gate.CannotCheck || statusOf(t, r.reg, "route-complete") != gate.Fail {
+		t.Fatalf("mixed: exit %d %+v", got, r.reg.Records())
+	}
+	if err := (exitCodeError{r.reg.ExitCode()}); err.code != 6 {
+		t.Fatal(err)
+	}
+
+	// A via-audit with an illegal via and an unknown span is a failure itself.
+	r, _ = newRun()
+	both := gateResult{Gate: "via-audit"}
+	viaAuditVerdict(&both, auditVias([]routeVia{spanless, auditVia("ring", "GND", 600, 400)}, auditRB(), viaLimits{annular: 130000}, prov, viaPolicy{}))
+	r.add(both)
+	if got := r.reg.ExitCode(); got != 6 {
+		t.Fatalf("both: exit %d", got)
+	}
+
+	// A signed waiver over every item of a cannot-check gate still passes it.
+	var werr bytes.Buffer
+	r = &kicadRun{stderr: &werr, summary: map[string]any{}, waivers: []gateWaiver{{Gate: "via-audit", Match: "via span unknown", Reason: "declared by hand", By: "test"}}}
+	r.reg = newGateRegistry(&werr, r.waivers)
+	r.add(span)
+	if got := r.reg.ExitCode(); got != 0 || r.gates[0].CannotCheck {
+		t.Fatalf("waived: exit %d %+v", got, r.gates[0])
+	}
+}
+
+// A kicad-cli DRC that did not run is cannot-check on the registry.
+func TestKicadDRCCannotCheckRecord(t *testing.T) {
+	var stderr bytes.Buffer
+	r := &kicadRun{stderr: &stderr, summary: map[string]any{}, reg: newGateRegistry(&stderr, nil)}
+	r.add(kicadDRCCannotCheck(errors.New("timed out")))
+	if r.reg.ExitCode() != 5 {
+		t.Fatalf("%+v", r.reg.Records())
 	}
 }

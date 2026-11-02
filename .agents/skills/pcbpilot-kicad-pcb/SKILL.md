@@ -144,7 +144,7 @@ post-layout 仿真 → 签核 → 保存（复制回工程）。板框、层叠�
 
 ## 读结果与报告
 
-- 每个门禁逐条报：`gate`、PASS/FAIL、`detail`、`info`；退出码非零 = 至少一个门禁失败。`kicad-drc` 只计 error 级，
+- 每个门禁逐条报：`gate`、PASS/FAIL、`detail`、`info`；退出码 6 = 至少一个门禁失败，5 = 没有失败但有门禁 cannot-check（`status` 字段；via-audit、router-vias、kicad-drc 没跑成，或 `--silk auto` 因未布完推迟丝印）。`kicad-drc` 只计 error 级，
   警告在 `summary.drc.warnings`，评审仍要列出；`info` 标出**输入板原本就有**的违规（布局/封装问题，不是布线造成的）。
   它看不到 KiCad 的排除项和设成 `ignore` 的规则：按 [§6.4](../pcbpilot/references/evidence-and-verdicts.md#64-drc-排除项与被关掉的规则) 另查，触及短路/间距/未连接即 FAIL。
 - `kicad-drc` 的 detail 以 `cannot check:` 开头（kicad-cli 没写报告、报告截断或格式不对），或 `summary.inputDrc.error`

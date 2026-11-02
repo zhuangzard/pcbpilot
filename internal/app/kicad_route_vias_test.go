@@ -3,6 +3,7 @@ package app
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"strings"
@@ -114,9 +115,27 @@ type fakeViaTools struct {
 	rb     *kicad.RulesReadback
 	drc    *kicad.DRCReport
 	drcErr error
+	// base / baseErr, when set, answer the DRC of the board before the repair
+	// (a path without "repair"); drcSeq answers the repaired boards in turn.
+	base    *kicad.DRCReport
+	baseErr error
+	drcSeq  []*kicad.DRCReport
 }
 
 func (f *fakeViaTools) DRC(pcb, out string) (*kicad.DRCReport, error) {
+	if !strings.Contains(pcb, "repair") {
+		if f.baseErr != nil {
+			return nil, f.baseErr
+		}
+		if f.base != nil {
+			return f.base, nil
+		}
+	}
+	if len(f.drcSeq) > 0 {
+		r := f.drcSeq[0]
+		f.drcSeq = f.drcSeq[1:]
+		return r, nil
+	}
 	return f.drc, f.drcErr
 }
 
@@ -227,5 +246,133 @@ func TestSnapshotViasExplicitEmpty(t *testing.T) {
 		if _, err := snapshotVias(&s); err == nil {
 			t.Fatalf("%s accepted as empty", j)
 		}
+	}
+}
+
+// The class via tolerance is 100 nm everywhere: reachability, the shrink plan
+// and the repair's candidates agree at the boundary, in both dimensions.
+func TestClassViaToleranceBoundary(t *testing.T) {
+	const cd, ch = int64(700000), int64(400000)
+	eff := func(string) (int64, int64, bool) { return cd, ch, true }
+	via := func(dia, drill int64) routeVia {
+		return routeVia{ID: "v", Net: "A", Dia: float64(dia) / nmPerMil, Drill: float64(drill) / nmPerMil}
+	}
+	for _, c := range []struct {
+		name          string
+		dia, drill    int64
+		ops, fail, gr int
+	}{
+		{"exact", cd, ch, 0, 0, 0},
+		{"100 nm short in diameter", cd - 100, ch, 0, 0, 0},
+		{"101 nm short in diameter", cd - 101, ch, 0, 1, 1},
+		{"100 nm short in drill", cd, ch - 100, 0, 0, 0},
+		{"101 nm short in drill", cd, ch - 101, 0, 1, 1},
+		{"300 nm short", cd - 300, ch - 300, 0, 1, 1},
+		{"100 nm over", cd + 100, ch + 100, 0, 0, 0},
+		{"101 nm over shrinks", cd + 101, ch, 1, 0, 0},
+		{"rounded up to whole um shrinks", 701000, 401000, 1, 0, 0},
+	} {
+		v := []routeVia{via(c.dia, c.drill)}
+		ops, fail, unknown, _ := classViaPlan(v, nil, eff)
+		gr := viaGrowCandidates(v, nil, eff)
+		if len(ops) != c.ops || len(fail) != c.fail || len(unknown) != 0 || len(gr) != c.gr {
+			t.Errorf("%s: ops %v fail %v unknown %v grow %d", c.name, ops, fail, unknown, len(gr))
+		}
+	}
+	// A fractional class via after its shrink, read back at the snapshot's 4
+	// decimals of a mil, is the class via: no further op, no failure.
+	round := func(nm int64) float64 { return math.Round(float64(nm)/nmPerMil*1e4) / 1e4 }
+	for _, c := range [][2]int64{{609600, 304800}, {700024, 400050}, {599999, 299999}} {
+		v := []routeVia{{ID: "v", Net: "A", Dia: round(c[0]), Drill: round(c[1])}}
+		ops, fail, _, _ := classViaPlan(v, nil, func(string) (int64, int64, bool) { return c[0], c[1], true })
+		if len(ops)+len(fail) != 0 {
+			t.Errorf("%v read back: ops %v fail %v", c, ops, fail)
+		}
+	}
+}
+
+// A via 300 nm short used to pass unnoticed; it now goes through the checked
+// repair like any other via below its class.
+func TestSizeRouterViasRepairsSmallShortfall(t *testing.T) {
+	f := fakeRepairTools("", &kicad.DRCReport{}, nil)
+	f.after = fmt.Sprintf(`{"copper":{"lines":[],"vias":[{"primitiveId":"v1","net":"A","x":100,"y":100,"diameter":%v,"holeDiameter":%v}]}}`, 699700/nmPerMil, 400000/nmPerMil)
+	board, gates := sizeRouterVias(f, "classed", "imported", func(s string) string { return s + ".kicad_pcb" }, map[string]any{}, io.Discard)
+	if board != "vias-repair.kicad_pcb" || len(gates) != 1 || !gates[0].Pass || f.edited == nil {
+		t.Fatalf("%s %+v %v", board, gates, f.edited)
+	}
+}
+
+// Each circle is rounded on its own: a layer-specific padstack keeps its larger
+// inner shape, and a smaller shape is not blown up to the name's diameter.
+func TestDSNWholeUmViasPerLayerShapes(t *testing.T) {
+	dsn := `(pcb x
+  (structure (via "Via[0-3]_609.6:304.8_um"))
+  (library
+    (padstack "Via[0-3]_609.6:304.8_um"
+      (shape (circle F.Cu 609.6))
+      (shape (circle In1.Cu 800))
+      (shape (circle In2.Cu 750.2))
+      (shape (circle B.Cu 500.5))
+      (attach off)
+    )
+  )
+)
+`
+	out := dsnWholeUmVias(dsn)
+	for _, want := range []string{`(padstack "Via[0-3]_610:305_um"`, "(circle F.Cu 610)", "(circle In1.Cu 800)", "(circle In2.Cu 751)", "(circle B.Cu 501)"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in\n%s", want, out)
+		}
+	}
+	// The router via built from it keeps the inner shape too.
+	routed, _, top := dsnRouterVia(dsn)
+	if top == nil || !strings.Contains(routed, "(circle In1.Cu 800)") {
+		t.Fatalf("%+v\n%s", top, routed)
+	}
+}
+
+// A padstack merged into another on the same whole-um name never shrinks: the
+// one left has the larger circle on each layer, and the layers only it had.
+func TestDSNWholeUmViasMergeKeepsLargerShapes(t *testing.T) {
+	dsn := `(pcb x
+  (structure (via "Via[0-3]_609.6:304.8_um" "Via[0-3]_609.9:304.9_um" "Via[0-3]_610:305_um"))
+  (library
+    (padstack "Via[0-3]_609.6:304.8_um"
+      (shape (circle F.Cu 609.6))
+      (shape (circle In1.Cu 800))
+      (attach off)
+    )
+    (padstack "Via[0-3]_609.9:304.9_um"
+      (shape (circle F.Cu 609.9))
+      (shape (circle B.Cu 900))
+      (attach off)
+    )
+    (padstack "Via[0-3]_610:305_um"
+      (shape (circle F.Cu 610))
+      (shape (circle In1.Cu 610))
+      (attach off)
+    )
+  )
+)
+`
+	out := dsnWholeUmVias(dsn)
+	if strings.Count(out, "(padstack ") != 1 {
+		t.Fatalf("not merged:\n%s", out)
+	}
+	for _, want := range []string{"(circle F.Cu 610)", "(circle In1.Cu 800)", "(circle B.Cu 900)"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in\n%s", want, out)
+		}
+	}
+	// Two fractional padstacks and no whole-um one: the first holds the name.
+	dsn2 := strings.Replace(dsn, `    (padstack "Via[0-3]_610:305_um"
+      (shape (circle F.Cu 610))
+      (shape (circle In1.Cu 610))
+      (attach off)
+    )
+`, "", 1)
+	out = dsnWholeUmVias(dsn2)
+	if strings.Count(out, "(padstack ") != 1 || !strings.Contains(out, `(padstack "Via[0-3]_610:305_um"`) || !strings.Contains(out, "(circle In1.Cu 800)") || !strings.Contains(out, "(circle B.Cu 900)") {
+		t.Fatalf("%s", out)
 	}
 }
