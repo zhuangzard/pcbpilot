@@ -52,8 +52,12 @@ func sheetNetTexts(path string) map[string]bool {
 }
 
 // netIdentities rewrites every net name to its identity. files maps sheet
-// paths to their sheet files (label evidence; may be empty).
-func (nl *SchNetlist) netIdentities(files map[string]string) error {
+// paths to their sheet files (label evidence; may be empty); escSheets maps
+// each XML sheet path to its escaped form (netname.EscapedSheetPaths: a
+// sheet named "I/O (1/2)" is "/I{slash}O (1{slash}2)/" on the board —
+// sch-build's own page split titles hold '/'); a path missing from it is
+// used as written.
+func (nl *SchNetlist) netIdentities(files, escSheets map[string]string) error {
 	cache := map[string]map[string]bool{}
 	texts := func(sheet string) map[string]bool {
 		f, ok := files[sheet]
@@ -83,7 +87,15 @@ func (nl *SchNetlist) netIdentities(files map[string]string) error {
 				continue
 			}
 		}
-		id := netname.Join(prefix, n.Name)
+		esc := prefix
+		if e, ok := escSheets[prefix]; ok {
+			if e == "" {
+				errs = append(errs, fmt.Sprintf("net %s %q: sheet path %q names two sheets", n.Code, n.Name, prefix))
+				continue
+			}
+			esc = e
+		}
+		id := netname.JoinEscaped(prefix, esc, n.Name)
 		if code, dup := byID[id]; dup {
 			errs = append(errs, fmt.Sprintf("nets %s and %s both read as %q", code, n.Code, id))
 			continue

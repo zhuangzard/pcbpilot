@@ -134,13 +134,7 @@ func runLcscCheck(stdout, stderr io.Writer, pcb, sch string, asJSON bool) error 
 		for _, w := range warns {
 			fmt.Fprintln(stderr, "warning:", w)
 		}
-		assembled := 0
-		for _, p := range parts {
-			if p.Assembled() {
-				assembled++
-			}
-		}
-		fmt.Fprintf(stdout, "%d footprints, %d assembled, %d missing LCSC, %d invalid\n", len(parts), assembled, len(missing), len(invalid))
+		fmt.Fprintf(stdout, "%s, %d missing LCSC, %d invalid\n", lcscAssemblySummary(parts), len(missing), len(invalid))
 		printLCSCProblems(stdout, missing, invalid)
 	}
 	if len(missing)+len(invalid) > 0 {
@@ -290,4 +284,29 @@ func runLcscImport(stdout io.Writer, imports []string, libDir, libName string) e
 	}
 	fmt.Fprintln(stdout, "note: converted by KiCad's EasyEDA importers; no 3D model; check pins/pads against the datasheet")
 	return nil
+}
+
+// lcscAssemblySummary counts the board's footprints and the assembled ones,
+// naming why the rest are not (the same parts fab leaves out): the LCSC
+// check covers assembled parts only, while signoff-parts checks every
+// designator except holes, fiducials, test points and logos.
+func lcscAssemblySummary(parts []kicad.Part) string {
+	assembled, dnp, bom, pos := 0, 0, 0, 0
+	for _, p := range parts {
+		switch {
+		case p.Assembled():
+			assembled++
+		case p.DNP:
+			dnp++
+		case p.ExcludeBOM:
+			bom++
+		default:
+			pos++
+		}
+	}
+	s := fmt.Sprintf("%d footprints, %d assembled", len(parts), assembled)
+	if n := len(parts) - assembled; n > 0 {
+		s += fmt.Sprintf(" (%d not assembled: %d DNP, %d excluded from BOM, %d excluded from the position file)", n, dnp, bom, pos)
+	}
+	return s
 }

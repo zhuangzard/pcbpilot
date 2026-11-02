@@ -136,9 +136,12 @@ func (p *Pad) OnLayer(id int) bool { return p.Layer == LayerMulti || p.Layer == 
 type Part struct {
 	Ref    string
 	Device string
-	Side   int // 1 top, 2 bottom
-	BBox   Rect
-	Pads   []*Pad
+	// Value is the dump's value field when it carries one (a KiCad
+	// snapshot, whose device is that same value).
+	Value string
+	Side  int // 1 top, 2 bottom
+	BBox  Rect
+	Pads  []*Pad
 }
 
 // Track is one straight copper segment.
@@ -190,19 +193,24 @@ type Rules struct {
 
 // Board is the copper model read from a `pcb dump --include-copper`.
 type Board struct {
-	Outline   []Point
-	Box       Rect
-	Layers    []int // copper layer ids in stack order, top first
-	Parts     []*Part
-	Tracks    []Track
-	Vias      []Via
-	Areas     []Area
-	Holes     []Hole
-	Rules     Rules
-	Copper    bool     // copper was captured
-	Notes     []string // parse-time assumptions
-	Semantic  string   // semanticSha256 of the dump
-	Project   string
+	Outline  []Point
+	Box      Rect
+	Layers   []int // copper layer ids in stack order, top first
+	Parts    []*Part
+	Tracks   []Track
+	Vias     []Via
+	Areas    []Area
+	Holes    []Hole
+	Rules    Rules
+	Copper   bool     // copper was captured
+	Notes    []string // parse-time assumptions
+	Semantic string   // semanticSha256 of the dump
+	Project  string
+	// KiCad: the dump is a `kicad snapshot` (top-level "source": "kicad",
+	// written by every KiCad snapshot): component device and value are the
+	// footprint value. Otherwise an EasyEDA dump, whose device is the
+	// manufacturer id.
+	KiCad     bool
 	spokes    int
 	byRefPin  map[string]*Pad
 	layerHas  map[int]int // copper objects per layer
@@ -240,10 +248,12 @@ func LayerName(id int) string {
 }
 
 type dumpDoc struct {
+	Source     string `json:"source"`
 	Components []struct {
 		ID         string         `json:"primitiveId"`
 		Designator string         `json:"designator"`
 		Device     string         `json:"device"`
+		Value      string         `json:"value"`
 		Layer      int            `json:"layer"`
 		BBox       map[string]any `json:"bbox"`
 		Pads       []struct {
@@ -300,7 +310,7 @@ func ParseBoard(raw []byte) (*Board, error) {
 		return nil, fmt.Errorf("board dump: %w", err)
 	}
 	b := &Board{byRefPin: map[string]*Pad{}, layerHas: map[int]int{}, netLayers: map[string]map[int]bool{},
-		Semantic: d.SemanticSHA256, Project: d.Project}
+		Semantic: d.SemanticSHA256, Project: d.Project, KiCad: d.Source == "kicad"}
 	b.Rules = Rules{ClearanceMil: 6, CopperToEdgeMil: 10, ViaDrillMil: 12, ViaDiameterMil: 24}
 	if d.Rules != nil {
 		if d.Rules.ClearanceMil > 0 {
@@ -324,7 +334,7 @@ func ParseBoard(raw []byte) (*Board, error) {
 	b.Layers = StackLayers(n)
 	tht := 0
 	for _, c := range d.Components {
-		p := &Part{Ref: c.Designator, Device: c.Device, Side: LayerTop, BBox: emptyRect()}
+		p := &Part{Ref: c.Designator, Device: c.Device, Value: c.Value, Side: LayerTop, BBox: emptyRect()}
 		if c.Layer == LayerBottom {
 			p.Side = LayerBottom
 		}

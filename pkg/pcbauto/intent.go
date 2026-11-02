@@ -26,6 +26,9 @@ type Intent struct {
 	// Copper is the stackup/sizing assumptions (ΔT, copper weights, via
 	// plating and margin) the currents were sized with.
 	Copper *IntentCopper `json:"copper,omitempty"`
+	// Windings are the declared winding pin pairs of multi-winding
+	// inductors (common-mode chokes), ref → [[pin, pin], …].
+	Windings map[string][][2]string `json:"windings,omitempty"`
 }
 
 // IntentCopper is the subset of intent.copper the engine reads.

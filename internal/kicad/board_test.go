@@ -350,6 +350,11 @@ func TestParseStats(t *testing.T) {
 	if _, err := ParseStats([]byte(`{}`)); err == nil {
 		t.Error("report without board accepted")
 	}
+	// KiCad 10 writes null sizes for a board without an outline.
+	s, err = ParseStats([]byte(`{"board":{"has_outline":false,"width":null,"height":null,"board_thickness":"1.6000 mm"},"pads":{}}`))
+	if err != nil || s.HasOutline || s.Width != 0 || s.Thickness != 1.6 {
+		t.Fatalf("board without outline: %v %+v", err, s)
+	}
 }
 
 func TestBoardPayloadJSON(t *testing.T) {

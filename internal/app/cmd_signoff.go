@@ -30,6 +30,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -339,7 +340,11 @@ func runSignoff(o signoffOpts, waivers []gateWaiver, stderr io.Writer) (*signoff
 		}
 	}
 	pg.Pass = len(pg.Items) == 0 && nBOM > 0
-	pg.Detail = fmt.Sprintf("%d BOM component(s), %d without a valid LCSC number", nBOM, len(pg.Items))
+	// Scope: every designator from the schematic and the board except holes,
+	// fiducials, test points and logos; DNP and BOM / position-file
+	// exclusions are not known here, so this can count more parts than
+	// `kicad lcsc --check` (assembled parts only).
+	pg.Detail = fmt.Sprintf("%d BOM component(s) checked (every schematic/board designator except H/MH/FID/TP/LOGO…; DNP and BOM/position-file exclusions not applied — `kicad lcsc --check` counts assembled parts only), %d without a valid LCSC number", nBOM, len(pg.Items))
 	add(pg)
 
 	// 3–4. Safety, copper, IR: the shared snapshot gates on the sim run.
@@ -380,6 +385,26 @@ func runSignoff(o signoffOpts, waivers []gateWaiver, stderr io.Writer) (*signoff
 			g.Info = append(g.Info, x.Info...)
 		}
 		g.Detail = strings.Join(details, " | ")
+		if name == "signoff-copper" {
+			if why, nets := boardCopperMissing(snap); why != "" {
+				// Nothing below the width or via floor is no evidence for a
+				// net with nothing routed: cannot check, never a pass.
+				g.Pass = false
+				var items []string
+				for i, n := range nets {
+					if i == 30 {
+						items = append(items, fmt.Sprintf("cannot check: … %d more unrouted net(s)", len(nets)-30))
+						break
+					}
+					items = append(items, "cannot check: "+n)
+				}
+				if len(nets) == 0 {
+					items = []string{"cannot check: " + why}
+				}
+				g.Items = append(items, g.Items...)
+				g.Detail = "cannot check: " + why + " | " + g.Detail
+			}
+		}
 		add(g)
 	}
 	combine("signoff-safety", "isolation", "copper-to-edge")
@@ -637,4 +662,71 @@ func signoffMarkdown(r *signoffResult) string {
 		}
 	}
 	return b.String()
+}
+
+// boardCopperMissing names the nets signoff-copper cannot judge: every net
+// with two or more physically distinct pads but no track, arc, via or
+// filled copper of its own. Copper on other nets (a GND pour, one stray
+// track) is no evidence for an unrouted VCC or signal net, and the pads of
+// one part count too (an IC's several supply or ground pins). Pads that
+// share a number within one footprint are one pad: KiCad connects them
+// internally. Footprint jumper pad groups are not in the snapshot (pcbnew's
+// SWIG returns JumperPadGroups as an opaque object), so they are judged.
+// "" when every judged net has copper.
+func boardCopperMissing(snap *boardSnapshot) (string, []string) {
+	c := snap.Copper
+	if a := c.Availability["routing"]; a != "" && a != "available" && len(c.Lines)+len(c.Arcs) == 0 {
+		return "the board snapshot carries no routing (copper availability " + a + "): take it with the copper included", nil
+	}
+	nk := netCaseKey(snap.kicadNames())
+	copper := map[string]bool{}
+	for _, list := range [][]any{c.Lines, c.Arcs, c.Vias, c.Poured, c.Fills} {
+		for _, it := range list {
+			if m, ok := it.(map[string]any); ok {
+				if n, _ := m["net"].(string); n != "" {
+					copper[nk(n)] = true
+				}
+			}
+		}
+	}
+	type netPads struct {
+		name  string
+		pads  map[string]bool // footprint index + "|" + pad number: one per internally connected group
+		parts map[string]bool
+	}
+	nets := map[string]*netPads{}
+	for ci, comp := range snap.Components {
+		for _, p := range comp.Pads {
+			if p.Net == "" {
+				continue
+			}
+			k := nk(p.Net)
+			np := nets[k]
+			if np == nil {
+				np = &netPads{name: p.Net, pads: map[string]bool{}, parts: map[string]bool{}}
+				nets[k] = np
+			}
+			// Keyed by the footprint itself (its index in the snapshot), not
+			// its designator: two footprints both named R1 are two parts.
+			part := strconv.Itoa(ci)
+			np.pads[part+"|"+p.Number] = true
+			np.parts[part] = true
+		}
+	}
+	var missing []string
+	judged := 0
+	for k, np := range nets {
+		if len(np.pads) < 2 {
+			continue
+		}
+		judged++
+		if !copper[k] {
+			missing = append(missing, fmt.Sprintf("%s: %d pads on %d part(s), no track, via or filled copper", np.name, len(np.pads), len(np.parts)))
+		}
+	}
+	if len(missing) == 0 {
+		return "", nil
+	}
+	sort.Strings(missing)
+	return fmt.Sprintf("%d of %d multi-pad net(s) have no copper on the board: route them before sign-off", len(missing), judged), missing
 }

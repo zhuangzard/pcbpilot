@@ -90,6 +90,8 @@ var (
 	defEN      = []string{"EN", "CE", "SHDN", "ON/OFF", "EN/UVLO", "RUN"}
 	defAnode   = []string{"A", "+", "ANODE", "AN", "A1"}
 	defCathode = []string{"K", "-", "C", "CATHODE", "KA", "K1"}
+	defDrain   = []string{"D", "DRAIN"}
+	defSource  = []string{"S", "SOURCE"}
 	// Bridge rectifiers (MB10S, GBU, DB10x, KBP): AC inputs and DC outputs.
 	defBridgeAC    = []string{"~", "~1", "~2", "AC", "AC1", "AC2", "AC~", "IN1", "IN2"}
 	defBridgePlus  = []string{"+", "DC+", "V+", "PLUS", "OUT+"}
@@ -117,6 +119,9 @@ func (e *Engine) bindAll() {
 			}
 			if mr.By == "nameRegex" && p.MPN == "" {
 				key = p.Value
+			}
+			if mr.By == "ref" {
+				key = p.Ref
 			}
 			b.why = fmt.Sprintf("%s %s → model %s", mr.By, key, mr.Model.ID)
 		} else {
@@ -218,7 +223,7 @@ func (e *Engine) bindGeneric(b *binding) {
 		}
 	case prefix == "Q" && has("mosfet", "n-ch", "p-ch", "nmos", "pmos"):
 		set(KindOpen, "MOSFET not modelled (open)")
-		e.warnf("%s: MOSFET %s is not modelled — treated as open", p.Ref, p.MPN)
+		e.warnf("%s: MOSFET %s is not modelled — treated as open (a pass FET: add a {\"kind\":\"mosfet\",\"match\":{\"refs\":[\"%s\"]}} model, on by default)", p.Ref, p.MPN, p.Ref)
 	case prefix == "Q":
 		set(KindBJT, "BJT by ref prefix Q")
 		if has("pnp") {

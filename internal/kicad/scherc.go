@@ -124,12 +124,11 @@ func ParseERCReport(data []byte, opt ERCParseOptions) (*ERCReport, error) {
 	if ver == "" && opt.CLIVersion != nil {
 		ver = opt.CLIVersion()
 	}
-	u := ercUnitMM(x.CoordinateUnits)
 	var pos []ercPos
 	for _, s := range x.Sheets {
 		for _, v := range s.Violations {
 			for _, it := range v.Items {
-				pos = append(pos, ercPos{opt.Files[s.UUIDPath], Pt{it.Pos.X * u, it.Pos.Y * u}})
+				pos = append(pos, ercPos{opt.Files[s.UUIDPath], Pt{it.Pos.X, it.Pos.Y}})
 			}
 		}
 	}
@@ -143,7 +142,7 @@ func ParseERCReport(data []byte, opt ERCParseOptions) (*ERCReport, error) {
 		for _, v := range s.Violations {
 			ev := ERCViolation{Sheet: s.Path, UUIDPath: s.UUIDPath, File: opt.Files[s.UUIDPath], Type: v.Type, Severity: v.Severity, Description: v.Description}
 			for _, it := range v.Items {
-				at := Pt{round4mm(it.Pos.X * u * k), round4mm(it.Pos.Y * u * k)}
+				at := Pt{round4mm(it.Pos.X * k), round4mm(it.Pos.Y * k)}
 				ev.Items = append(ev.Items, ERCItem{Description: it.Description, Pos: at, UUID: it.UUID})
 			}
 			switch v.Severity {
@@ -156,19 +155,6 @@ func ParseERCReport(data []byte, opt ERCParseOptions) (*ERCReport, error) {
 		}
 	}
 	return r, nil
-}
-
-// ercUnitMM is the factor from a report's "coordinate_units" to mm
-// (kicad-cli sch erc --units in|mils); "mm", none or unknown is 1. It is
-// applied before ercPosScale, which works in (possibly 1/100) mm.
-func ercUnitMM(units string) float64 {
-	switch strings.ToLower(strings.TrimSpace(units)) {
-	case "in", "inch", "inches":
-		return 25.4
-	case "mils", "mil":
-		return 0.0254
-	}
-	return 1
 }
 
 // ercPos is a reported item position and its sheet file.

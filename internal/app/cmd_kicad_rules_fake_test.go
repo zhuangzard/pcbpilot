@@ -276,7 +276,7 @@ func (f *rulesFakeKiCad) NetclassesReq(pcb string, req kicad.NetclassRequest, ou
 		if v, _ := pr["clearanceMm"].(float64); v > 0 {
 			cons = append(cons, fmt.Sprintf("(constraint clearance (min %gmm))", v))
 		}
-		if v, _ := pr["creepageMm"].(float64); v > 0 {
+		if v, _ := pr["creepageMm"].(float64); v > 0 && isoCreepageWritten(fakeNum(pr["clearanceMm"]), v) {
 			cons = append(cons, fmt.Sprintf("(constraint creepage (min %gmm))", v))
 		}
 		rules = append(rules, fmt.Sprintf("(rule \"pcbpilot isolation %s|%s\"\n  (condition \"(A.hasNetclass('%s') && B.hasNetclass('%s')) || (A.hasNetclass('%s') && B.hasNetclass('%s'))\")\n  %s)", da, db, da, db, db, da, strings.Join(cons, "\n  ")))
@@ -435,3 +435,5 @@ func (f *rulesFakeKiCad) DRC(pcb, out string) (*kicad.DRCReport, error) {
 	rep.Total = len(rep.Violations)
 	return rep, nil
 }
+
+func fakeNum(v any) float64 { f, _ := v.(float64); return f }

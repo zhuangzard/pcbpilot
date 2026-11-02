@@ -54,6 +54,13 @@ type routeResult struct {
 	Report            string  `json:"report,omitempty"` // the backend's own report (evidence only)
 	Round             int     `json:"round"`
 	Seconds           float64 `json:"seconds"`
+	// Partial: the router stopped at its time limit and only its last
+	// checkpoint session exists (no report): incomplete by definition,
+	// UnroutedCount unknown (-1) — the board's connectivity counts it.
+	Partial bool `json:"partial,omitempty"`
+	// Gates: checks of this result made while committing it (router-vias),
+	// reported with the board's gates.
+	Gates []gateResult `json:"-"`
 }
 
 // fastrouteResult turns the kept fastroute run into a routeResult.
@@ -65,6 +72,7 @@ func fastrouteResult(run *fastrouteRun, o fastrouteOpts, dsn string) *routeResul
 		Fixable: run.Fixable, FixableList: run.FixableList, Report: run.Report, Round: run.Round, Seconds: run.Seconds,
 		Args: fastrouteArgs(o, dsn, run.Session, run.Report, ""), Version: run.Version, PatchSHA: executableSHA256(o.bin)}
 	r.Unrouted, r.Blocked = run.UnroutedList, run.BlockedConns
+	r.Partial = partialRun(*run)
 	return r
 }
 

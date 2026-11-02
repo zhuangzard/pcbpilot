@@ -21,9 +21,9 @@ import (
 // nothing from the global tables. A sheet whose symbols resolve only through
 // the user's global libraries can opt out with PCBPILOT_KICAD_ISOLATE=0.
 //
-// An explicitly set KICAD_CONFIG_HOME always wins. PCB/fab runs keep the
-// inherited environment: user boards may resolve footprints through the
-// global fp-lib-table.
+// An explicitly set KICAD_CONFIG_HOME always wins. Board DRC runs use
+// BoardCLIEnv instead (boardenv.go): the user's global fp-lib-table cut down
+// to the board's own libraries, so the library checks stay correct.
 const EnvIsolateConfig = "PCBPILOT_KICAD_ISOLATE"
 
 // SchCLITimeout bounds one schematic kicad-cli run, so a hang becomes an

@@ -148,6 +148,42 @@ def lcsc_of(fp):
 PAD_KIND = {}
 
 
+def local_clearance(item):
+    """A pad's or footprint's clearance override (mil), None when unset:
+    KiCad 9+ returns an optional (None), older versions 0 for "none"."""
+    try:
+        v = item.GetLocalClearance()
+    except Exception:
+        return None
+    if v is None:
+        return None
+    try:
+        v = int(v)
+    except (TypeError, ValueError):
+        return None
+    return mil(v) if v > 0 else None
+
+
+def net_tie_groups(fp):
+    """A net-tie footprint's pad groups ([["1", "2"], ...]): pads in one
+    group may short different nets on purpose. [] when none. (The SWIG
+    binding returns GetNetTiePadGroups as an opaque vector; GetNetTiePads
+    gives each pad's group as a tuple.)"""
+    try:
+        if not fp.IsNetTie():
+            return []
+        fp.BuildNetTieCache()
+        seen, out = set(), []
+        for p in fp.Pads():
+            g = sorted({q.GetNumber() for q in fp.GetNetTiePads(p)} | {p.GetNumber()})
+            if len(g) > 1 and tuple(g) not in seen:
+                seen.add(tuple(g))
+                out.append(g)
+        return out
+    except Exception:
+        return []
+
+
 def pad_kind(shape):
     if not PAD_KIND:
         PAD_KIND.update({
@@ -291,6 +327,12 @@ def snapshot(board):
         }
         if ref in dup:
             comp["duplicateDesignator"] = True
+        lc = local_clearance(fp)
+        if lc is not None:
+            comp["localClearance"] = lc
+        ties = net_tie_groups(fp)
+        if ties:
+            comp["netTiePadGroups"] = ties
         if is_placeholder(ref):
             comp["placeholder"] = True
         lcsc = lcsc_of(fp)
@@ -348,6 +390,9 @@ def snapshot(board):
             }
             if lid == 12:
                 pad["holeDiameter"] = mil(min(drill.x, drill.y))
+            lc = local_clearance(p)
+            if lc is not None:
+                pad["localClearance"] = lc
             comp["pads"].append(pad)
         snap["components"].append(comp)
     if holes:
@@ -924,7 +969,12 @@ def netclasses(pcb, reqs_path, out):
         cons = []
         if pr.get("clearanceMm"):
             cons.append("(constraint clearance (min %smm))" % ("%.4f" % pr["clearanceMm"]).rstrip("0").rstrip("."))
-        if pr.get("creepageMm"):
+        # A creepage minimum not above the clearance minimum is implied by
+        # it (a surface path is never shorter than the straight line between
+        # the same copper; KiCad 10's DRC flags every such creepage pair as a
+        # clearance violation too) and KiCad's creepage test costs most of a
+        # DRC run on a large board: written only when it adds a constraint.
+        if pr.get("creepageMm") and float(pr["creepageMm"]) > float(pr.get("clearanceMm") or 0) + 1e-6:
             cons.append("(constraint creepage (min %smm))" % ("%.4f" % pr["creepageMm"]).rstrip("0").rstrip("."))
         if not cons:
             continue
@@ -1059,7 +1109,14 @@ def rules_probe(pcb, spec_path, out):
     """Probe tracks for kicad rules (on a scratch copy only): {"tracks": [{net,
     layer (pcbpilot id), startX, startY, endX, endY (mil, y-up), widthNm}]}.
     Exact nm widths, no zone fill; OUT is saved and the new tracks' uuids are
-    returned in order."""
+    returned in order.
+
+    The probe board keeps only what the probes' rules resolve from: the
+    project (classes, patterns, minimums, .kicad_dru travel with the board),
+    the outline and rule areas. Footprints, tracks, vias and copper zones are
+    removed: only the probes' own violations are read, and kicad-cli DRC of a
+    large placed board costs minutes per run (a probe net stays on the board
+    through its probe track)."""
     with open(spec_path, encoding="utf-8") as f:
         spec = json.load(f)
     L, bad = op_lists("rules-probe", spec, ("tracks",))
@@ -1070,6 +1127,7 @@ def rules_probe(pcb, spec_path, out):
     bad += check_layers(board, [op.get("layer") for op in obj])
     if bad:
         return reject("rules-probe", bad)
+    strip_for_probes(board)
     ids = []
     for op in obj:
         t = pcbnew.PCB_TRACK(board)
@@ -1082,6 +1140,19 @@ def rules_probe(pcb, spec_path, out):
         ids.append(t.m_Uuid.AsString())
     save_board(board, pcb, out)
     return {"ok": True, "out": out, "ids": ids}
+
+
+def strip_for_probes(board):
+    """Remove footprints, tracks, vias and copper zones (rule areas stay:
+    custom-rule conditions may name them)."""
+    # Collect everything first (the containers change while items leave),
+    # then Delete: Remove hands the C++ objects to Python proxies SWIG
+    # cannot destroy, which breaks SWIG's type mapping for the rest of the
+    # run (a new track's m_Uuid comes back as a bare SwigPyObject).
+    items = list(board.GetFootprints()) + list(board.GetTracks()) + [z for z in board.Zones() if not z.GetIsRuleArea()]
+    for item in items:
+        board.Delete(item)
+    del items
 
 
 def list_patterns(pcb):
@@ -1120,7 +1191,7 @@ def ripup(pcb, out):
     before = counts(board)
     dead = [t for t in board.GetTracks() if not t.IsLocked()]
     for t in dead:
-        board.Remove(t)
+        detach(board, t)
     save_board(board, pcb, out)
     return {"ok": True, "out": out, "before": before, "after": counts(board), "removed": len(dead)}
 
@@ -1210,7 +1281,7 @@ def pours(pcb, spec_path, out):
         return reject("pours", bad)
     for z in list(board.Zones()):
         if z.GetZoneName().startswith(POUR_PREFIX):
-            board.Remove(z)
+            detach(board, z)
     ps = pcbnew.SHAPE_POLY_SET()
     try:
         ok = board.GetBoardPolygonOutlines(ps, False)
@@ -1226,10 +1297,13 @@ def pours(pcb, spec_path, out):
         net = board.FindNet(zs["net"])
         # A pour clipped to its insulation domain arrives as polygons (mil, y-up),
         # merged into ONE zone (separate touching zones are KiCad zones_intersect
-        # errors: 166 on Board-C); otherwise the board outline.
+        # errors: 166 on a field board); otherwise the board outline.
         z = make_pour_zone(board, zs, net, board_pts)
         if zs.get("polys"):
-            merged = pcbnew.SHAPE_POLY_SET()
+            # Built in the zone's own outline: ZONE.SetOutline takes ownership
+            # of a SHAPE_POLY_SET Python still frees (pcbnew crashed, 0xc0000005).
+            merged = z.Outline()
+            merged.RemoveAllContours()
             for poly in zs["polys"]:
                 merged.NewOutline()
                 for x, y in poly:
@@ -1238,7 +1312,6 @@ def pours(pcb, spec_path, out):
                 merged.Simplify()
             except TypeError:
                 merged.Simplify(pcbnew.SHAPE_POLY_SET.PM_FAST)
-            z.SetOutline(merged)
         board.Add(z)
         made.append(z.GetZoneName())
     zones = fill_zones(board)
@@ -1246,56 +1319,16 @@ def pours(pcb, spec_path, out):
     return {"ok": True, "out": out, "pours": made, "zonesFilled": zones}
 
 
-def make_pour_zone(board, zs, net, pts):
-    """One pcbpilot pour zone on pts (KiCad nm, y-down)."""
-    z = pcbnew.ZONE(board)
-    z.SetLayer(kicad_layer(int(zs["layer"])))
-    z.SetNetCode(net.GetNetCode())
-    z.SetZoneName("%s %s L%d" % (POUR_PREFIX, zs["net"], int(zs["layer"])))
-    outline = z.Outline()
-    outline.NewOutline()
-    for x, y in pts:
-        outline.Append(x, y)
-    if zs.get("clearanceMil"):
-        z.SetLocalClearance(nm(zs["clearanceMil"]))
-    if zs.get("minWidthMil"):
-        z.SetMinThickness(nm(zs["minWidthMil"]))
-    # SMD pads solid, through-hole pads thermal: a one-spoke SMD thermal
-    # is a KiCad starved_thermal error (Board-B V5 A: U8.115, C50.2).
-    z.SetPadConnection(pcbnew.ZONE_CONNECTION_THT_THERMAL)
-    return z
-
-
 def validate_pours(board, spec):
     """Every problem of a pours spec {"zones": [{net, layer, clearanceMil,
-    minWidthMil, polys}]}, before any change."""
+    minWidthMil}]}, before any change."""
     lists, bad = op_lists("pours", spec, ("zones",))
     zs = lists["zones"]
     bad += check_fields("zones", zs, opt=("clearanceMil", "minWidthMil"), positive=("clearanceMil", "minWidthMil"))
-    for i, z in enumerate(zs):
-        if isinstance(z, dict):
-            bad += check_polys("zones[%d].polys" % i, z.get("polys"))
     zs = [z for z in zs if isinstance(z, dict)]
+    for i, z in enumerate(zs):
+        bad += check_polys("zones[%d].polys" % i, z.get("polys"))
     return bad + check_nets(board, [z.get("net") for z in zs]) + check_layers(board, [z.get("layer") for z in zs])
-
-
-def check_polys(what, polys):
-    """Problems with a pour's optional clip polygons (mil, y-up): null or a
-    list of polygons, each a list of at least 3 [x, y] finite numbers."""
-    if polys is None:
-        return []
-    if not isinstance(polys, list):
-        return ["%s: a %s, not a list of polygons" % (what, type(polys).__name__)]
-    bad = []
-    for j, poly in enumerate(polys):
-        if not isinstance(poly, list) or len(poly) < 3:
-            bad.append("%s[%d]: not a list of at least 3 points" % (what, j))
-            continue
-        for k, pt in enumerate(poly):
-            if not (isinstance(pt, list) and len(pt) == 2 and is_num(pt[0]) and is_num(pt[1])):
-                bad.append("%s[%d][%d]: %r is not an [x, y] pair of numbers" % (what, j, k, pt))
-                break
-    return bad
 
 
 def check_nets(board, names):
@@ -1428,6 +1461,45 @@ def reject(what, bad):
             "problems": bad}
 
 
+def check_polys(what, polys):
+    """Problems with optional pour polygons (mil, y-up): a list of polygons,
+    each at least 3 finite [x, y] points."""
+    if polys is None:
+        return []
+    if not isinstance(polys, list):
+        return ["%s: a %s, not a list" % (what, type(polys).__name__)]
+    bad = []
+    for j, poly in enumerate(polys):
+        if not isinstance(poly, list) or len(poly) < 3:
+            bad.append("%s[%d]: not a polygon of 3 or more points" % (what, j))
+            continue
+        for q in poly:
+            if not (isinstance(q, list) and len(q) == 2 and is_num(q[0]) and is_num(q[1])):
+                bad.append("%s[%d]: point %r is not [x, y]" % (what, j, q))
+                break
+    return bad
+
+
+def make_pour_zone(board, zs, net, pts):
+    """One pcbpilot pour zone on pts (KiCad nm, y-down)."""
+    z = pcbnew.ZONE(board)
+    z.SetLayer(kicad_layer(zs["layer"]))
+    z.SetNetCode(net.GetNetCode())
+    z.SetZoneName("%s %s L%d" % (POUR_PREFIX, zs["net"], zs["layer"]))
+    outline = z.Outline()
+    outline.NewOutline()
+    for x, y in pts:
+        outline.Append(x, y)
+    if zs.get("clearanceMil"):
+        z.SetLocalClearance(nm(zs["clearanceMil"]))
+    if zs.get("minWidthMil"):
+        z.SetMinThickness(nm(zs["minWidthMil"]))
+    # SMD pads solid, through-hole pads thermal: a one-spoke SMD thermal
+    # is a KiCad starved_thermal error (Board-B V5 A: U8.115, C50.2).
+    z.SetPadConnection(pcbnew.ZONE_CONNECTION_THT_THERMAL)
+    return z
+
+
 def set_via_width(v, w):
     try:
         v.SetWidth(pcbnew.F_Cu, w)
@@ -1443,7 +1515,7 @@ def copper_by_uuid(board):
     return out
 
 
-EDIT_OPS = ("setWidth", "addVias", "addTracks", "setText", "addTexts", "hideTexts", "padZoneNone")
+EDIT_OPS = ("setWidth", "setVia", "addVias", "addTracks", "setText", "addTexts", "hideTexts", "padZoneNone")
 
 
 def validate_edit(board, ops):
@@ -1461,6 +1533,7 @@ def validate_edit(board, ops):
     texts = {it[0]: it[1] for it in text_index_cache}
     plan = {"lists": L, "tracks": tracks, "texts": texts, "zonePads": []}
     bad += check_fields("setWidth", L["setWidth"], need=("width",), positive=("width",))
+    bad += check_fields("setVia", L["setVia"], need=("diameter", "drill"), positive=("diameter", "drill"))
     bad += check_fields("addVias", L["addVias"], need=("x", "y"), opt=("diameter", "drill"), positive=("diameter", "drill"))
     bad += check_fields("addTracks", L["addTracks"], need=("startX", "startY", "endX", "endY", "lineWidth"), positive=("lineWidth",))
     bad += check_fields("setText", L["setText"], need=("x", "y"), opt=("rotation", "fontSize", "lineWidth"), positive=("fontSize", "lineWidth"))
@@ -1469,6 +1542,14 @@ def validate_edit(board, ops):
     bad += check_fields("padZoneNone", L["padZoneNone"])
     obj = {k: [op for op in L[k] if isinstance(op, dict)] for k in EDIT_OPS if k != "hideTexts"}
     bad += check_text_layers([op.get("layer", 3) for op in obj["addTexts"]])
+    for i, op in enumerate(L["setVia"]):
+        if not isinstance(op, dict):
+            continue
+        vid = op.get("id")
+        if not isinstance(vid, str) or not vid or len(copper.get(vid, [])) != 1 or copper[vid][0].Type() != pcbnew.PCB_VIA_T:
+            bad.append("setVia[%d]: %r is not exactly one via" % (i, vid))
+        elif isinstance(op.get("drill"), (int, float)) and isinstance(op.get("diameter"), (int, float)) and op["drill"] >= op["diameter"]:
+            bad.append("setVia[%d]: drill must be smaller than the diameter" % i)
     for i, op in enumerate(L["setWidth"]):
         if not isinstance(op, dict):
             continue
@@ -1513,7 +1594,7 @@ def validate_edit(board, ops):
 
 def edit(pcb, ops_path, out):
     """Apply copper/silk edits (mil, y-up), fill the zones and save:
-    {"setWidth":[{"id","width"}], "addVias":[{"net","x","y","diameter","drill"}],
+    {"setWidth":[{"id","width"}], "setVia":[{"id","diameter","drill"}], "addVias":[{"net","x","y","diameter","drill"}],
      "addTracks":[{"net","layer","startX","startY","endX","endY","lineWidth"}],
      "setText":[{"id","x","y","rotation","fontSize","lineWidth"}],  (x, y = text centre)
      "addTexts":[{"text","x","y","layer","rotation","fontSize","lineWidth"}],
@@ -1530,10 +1611,15 @@ def edit(pcb, ops_path, out):
     L, tracks, texts, zone_pads = plan["lists"], plan["tracks"], plan["texts"], plan["zonePads"]
 
     # 2. Apply.
-    done = {"setWidth": 0, "addVias": 0, "addTracks": 0, "setText": 0}
+    done = {"setWidth": 0, "setVia": 0, "addVias": 0, "addTracks": 0, "setText": 0}
     for op in L["setWidth"]:
         tracks[op["id"]].SetWidth(nm(op["width"]))
         done["setWidth"] += 1
+    for op in L["setVia"]:
+        v = tracks[op["id"]]
+        set_via_width(v, nm(op["diameter"]))
+        v.SetDrill(nm(op["drill"]))
+        done["setVia"] += 1
 
     def pos(x, y):
         return pcbnew.VECTOR2I(nm(x), -nm(y))
@@ -1596,7 +1682,7 @@ def edit(pcb, ops_path, out):
     for p in zone_pads:
         p.SetLocalZoneConnection(pcbnew.ZONE_CONNECTION_NONE)
     done["padZoneNone"] = len(L["padZoneNone"])
-    zones = fill_zones(board) if (done["setWidth"] or done["addVias"] or done["addTracks"] or done["padZoneNone"]) else 0
+    zones = fill_zones(board) if (done["setWidth"] or done["setVia"] or done["addVias"] or done["addTracks"] or done["padZoneNone"]) else 0
     save_board(board, pcb, out)
     return {"ok": True, "error": "", "out": out, "done": done, "zonesFilled": zones}
 

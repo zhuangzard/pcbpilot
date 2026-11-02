@@ -116,6 +116,7 @@ func AutoFrame(b *Board, an *Analysis, c *Circuit, spec *MechSpec, opt PlaceOpti
 	restore()
 	refSpec := *spec
 	refSpec.Board.AutoSize = false
+	refSpec.Board.ReplaceOutline = true // the search sizes the frame
 	refSpec.Board.Width, refSpec.Board.Height = refW/k, refH/k
 	refMc, err := ApplyMech(b, &refSpec)
 	if err != nil {
@@ -143,6 +144,7 @@ func AutoFrame(b *Board, an *Analysis, c *Circuit, spec *MechSpec, opt PlaceOpti
 			restore()
 			trial := *spec
 			trial.Board.AutoSize = false
+			trial.Board.ReplaceOutline = true
 			trial.Board.Width, trial.Board.Height = w/k, h/k
 			mc, err := ApplyMech(b, &trial)
 			if err != nil {
@@ -179,6 +181,7 @@ func AutoFrame(b *Board, an *Analysis, c *Circuit, spec *MechSpec, opt PlaceOpti
 	}
 	out := *spec
 	out.Board.AutoSize = false
+	out.Board.ReplaceOutline = true // the chosen frame replaces whatever outline the board had
 	out.Board.Width, out.Board.Height = round2(chosen.w/k), round2(chosen.h/k)
 	fs.Width, fs.Height = out.Board.Width, out.Board.Height
 	sort.SliceStable(fs.Trials, func(i, j int) bool {

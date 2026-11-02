@@ -21,6 +21,12 @@ const (
 	KindESD       = "esd"
 	KindBJT       = "bjt"
 	KindSwitch    = "switch"
+	// KindMOSFET is a MOSFET used as a power switch (reverse-polarity
+	// P-FET, over-voltage / load-switch N-FET): drain–source is ronOhm when
+	// on, open when off; the gate is not solved. On by default (the model
+	// declares a pass element); "on": false or --switch REF=open turns it
+	// off.
+	KindMOSFET    = "mosfet"
 	KindResistor  = "resistor"
 	KindCapacitor = "capacitor"
 	KindInductor  = "inductor"
@@ -33,6 +39,10 @@ const (
 
 // Match selects the parts a model applies to.
 type Match struct {
+	// Refs binds the model to designators: two parts with one MPN can take
+	// different models (one FET on, one off). A ref match beats LCSC, MPN
+	// and name matches in the same file.
+	Refs      []string `json:"refs,omitempty"`
 	MPN       []string `json:"mpn,omitempty"`
 	LCSC      []string `json:"lcsc,omitempty"`
 	NameRegex string   `json:"nameRegex,omitempty"`
@@ -105,13 +115,15 @@ type Model struct {
 	// supplyPins/returnPins/voltageV (each output has its own return).
 	Outputs []SourceOutput `json:"outputs,omitempty"`
 	// Passives / switches / resistive parts.
-	RsOhm     float64 `json:"rsOhm,omitempty"`
-	DCROhm    float64 `json:"dcrOhm,omitempty"`
+	RsOhm  float64 `json:"rsOhm,omitempty"`
+	DCROhm float64 `json:"dcrOhm,omitempty"`
 	// Windings of a multi-winding inductor (common-mode choke): pin pairs,
 	// each a series DCR. A 4-pin inductor without it uses 1–4 / 2–3.
-	Windings [][2]string `json:"windings,omitempty"`
-	RonOhm    float64 `json:"ronOhm,omitempty"`
-	Momentary *bool   `json:"momentary,omitempty"`
+	Windings  [][2]string `json:"windings,omitempty"`
+	RonOhm    float64     `json:"ronOhm,omitempty"`
+	Momentary *bool       `json:"momentary,omitempty"`
+	// On is a mosfet model's state in every scenario (default true).
+	On *bool `json:"on,omitempty"`
 	// Leakage for esd/tvs (typ / peak scenario).
 	LeakTypA  float64 `json:"leakTypA,omitempty"`
 	LeakPeakA float64 `json:"leakPeakA,omitempty"`
@@ -283,7 +295,7 @@ func mergeDefaults(d *Defaults, o Defaults) {
 // MatchResult is the model chosen for a part and why.
 type MatchResult struct {
 	Model *Model
-	By    string // lcsc | mpn | nameRegex
+	By    string // ref | lcsc | mpn | nameRegex
 	Lib   string
 }
 
@@ -299,10 +311,15 @@ func eqFold(list []string, v string) bool {
 	return false
 }
 
-// Match finds the best model: earlier libraries win; within one library LCSC
-// beats MPN beats name regex.
+// Match finds the best model: earlier libraries win; within one library a
+// designator beats LCSC beats MPN beats name regex.
 func (ls Libraries) Match(p *Part) *MatchResult {
 	for _, lib := range ls {
+		for i := range lib.Models {
+			if m := &lib.Models[i]; eqFold(m.Match.Refs, p.Ref) {
+				return &MatchResult{Model: m, By: "ref", Lib: lib.Origin}
+			}
+		}
 		for i := range lib.Models {
 			if m := &lib.Models[i]; eqFold(m.Match.LCSC, p.LCSC) {
 				return &MatchResult{Model: m, By: "lcsc", Lib: lib.Origin}

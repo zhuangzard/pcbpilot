@@ -169,3 +169,50 @@ func TestSchNetlistSameXMLNameTwoNets(t *testing.T) {
 		t.Fatalf("no evidence: want ErrNetAmbiguous, got %v", err)
 	}
 }
+
+// A sheet name with '/' (sch-build's own page split titles "… (1/2)"):
+// kicad-cli's XML writes the sheet path unescaped ("/I/O (1/2)/"), the
+// board and KiCad's parity check carry "/I{slash}O (1{slash}2)/" (KiCad
+// 10.0.6; its kicadsexpr netlist writes that too). The identity escapes
+// every sheet name of the path, nested ones included, telling the names
+// apart by the UUID path — never by guessing where a '/' belongs.
+func TestSchNetlistSlashInSheetName(t *testing.T) {
+	const xmlText = `<?xml version="1.0" encoding="utf-8"?>
+<export version="E">
+  <design>
+    <source>ROOT</source>
+    <sheet number="1" name="/" tstamps="/"><title_block><source>root.kicad_sch</source></title_block></sheet>
+    <sheet number="2" name="/I/O (1/2)/" tstamps="/a/"><title_block><source>io.kicad_sch</source></title_block></sheet>
+    <sheet number="3" name="/I/O (1/2)/A/B/" tstamps="/a/b/"><title_block><source>sub.kicad_sch</source></title_block></sheet>
+  </design>
+  <components>
+    <comp ref="R1"><value>1k</value><libsource lib="Device" part="R"/><sheetpath names="/I/O (1/2)/" tstamps="/a/"/></comp>
+    <comp ref="R2"><value>1k</value><libsource lib="Device" part="R"/><sheetpath names="/I/O (1/2)/A/B/" tstamps="/a/b/"/></comp>
+  </components>
+  <libparts>
+    <libpart lib="Device" part="R"><pins><pin num="1" name="~" type="passive"/><pin num="2" name="~" type="passive"/></pins></libpart>
+  </libparts>
+  <nets>
+    <net code="1" name="/I/O (1/2)/MID"><node ref="R1" pin="1"/><node ref="R1" pin="2"/></net>
+    <net code="2" name="/I/O (1/2)/A/B/X/Y"><node ref="R2" pin="1"/><node ref="R2" pin="2"/></net>
+  </nets>
+</export>`
+	x := writeSheets(t, xmlText, map[string]string{
+		"root.kicad_sch": `(label "OTHER" (at 0 0 0))`,
+		"io.kicad_sch":   `(label "MID" (at 0 0 0))`,
+		"sub.kicad_sch":  `(label "X{slash}Y" (at 0 0 0))`,
+	})
+	nl, err := ParseSchNetlist([]byte(x))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pn := nl.PinNets()
+	for pin, want := range map[string]string{
+		"R1.1": "/I{slash}O (1{slash}2)/MID",
+		"R2.1": "/I{slash}O (1{slash}2)/A{slash}B/X{slash}Y",
+	} {
+		if pn[pin] != want {
+			t.Errorf("PinNets[%s] = %q, want %q", pin, pn[pin], want)
+		}
+	}
+}

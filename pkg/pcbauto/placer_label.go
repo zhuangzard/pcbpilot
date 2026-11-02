@@ -34,9 +34,15 @@ func (ls *LabelSpec) labelSize(p *Part) (float64, float64) {
 // labelSlots lists p's candidate label boxes: the four sides of its body at
 // Gap, lying (w×h) and standing (h×w), centred and flush with either end.
 func (ls *LabelSpec) labelSlots(p *Part) []Rect {
+	var buf [24]Rect
+	return ls.appendLabelSlots(buf[:0], p)
+}
+
+// appendLabelSlots appends labelSlots' boxes to out (the anneal asks for
+// them on every move: a stack buffer saves the allocation).
+func (ls *LabelSpec) appendLabelSlots(out []Rect, p *Part) []Rect {
 	bd := p.Body()
 	ln, ht := ls.labelSize(p)
-	var out []Rect
 	for _, wh := range [2][2]float64{{ln, ht}, {ht, ln}} {
 		w, h := wh[0], wh[1]
 		for _, x := range []float64{bd.Center().X - w/2, bd.MinX, bd.MaxX - w} {
@@ -57,16 +63,19 @@ func (ls *LabelSpec) labelSlots(p *Part) []Rect {
 // region and clear of every other part's body (grown by Clear).
 func (pl *placer) labelFree(p *Part) bool {
 	ls := pl.opt.Labels
-	for _, s := range ls.labelSlots(p) {
+	var buf [24]Rect
+	for _, s := range ls.appendLabelSlots(buf[:0], p) {
 		if s.MinX < pl.region.MinX || s.MinY < pl.region.MinY || s.MaxX > pl.region.MaxX || s.MaxY > pl.region.MaxY {
 			continue
 		}
 		g := s.Expand(ls.Clear)
 		free := true
-		pl.forBuckets(g, func(q *Part) {
-			if free && q != p && q.Body().OverlapArea(g) > 1e-6 {
+		// Any one body in the slot blocks it: stop at the first.
+		pl.forBucketsOnce(g, func(q *Part) bool {
+			if q != p && q.Body().OverlapArea(g) > 1e-6 {
 				free = false
 			}
+			return free
 		})
 		if free {
 			return true

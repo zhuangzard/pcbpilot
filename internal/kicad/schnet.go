@@ -18,6 +18,7 @@ import (
 
 	"github.com/zhuangzard/pcbpilot/internal/connectivity"
 	"github.com/zhuangzard/pcbpilot/pkg/netname"
+	"github.com/zhuangzard/pcbpilot/pkg/population"
 )
 
 // KicadCLI locates kicad-cli ($KICAD_CLI, PATH, the macOS bundle).
@@ -47,7 +48,8 @@ type SchNetlist struct {
 // SchNetComp is one component (all units merged by KiCad).
 type SchNetComp struct {
 	Ref, Value, Footprint, Lib, Part, Sheet string
-	DNP                                     bool // <property name="dnp"/>
+	DNP                                     bool // <property name="dnp"/>: KiCad's flag, the population rule (pkg/population)
+	ExcludeBOM                              bool // <property name="exclude_from_bom"/>
 	Fields                                  map[string]string
 	Pins                                    []SchNetPin // library pins (libparts)
 }
@@ -69,8 +71,9 @@ type SchNetNode struct{ Ref, Pin, Function, Type string }
 type schNetXML struct {
 	Source string `xml:"design>source"` // the root sheet file
 	Sheets []struct {
-		Name   string `xml:"name,attr"`
-		Source string `xml:"title_block>source"` // relative to the root's directory
+		Name    string `xml:"name,attr"`
+		Tstamps string `xml:"tstamps,attr"`
+		Source  string `xml:"title_block>source"` // relative to the root's directory
 	} `xml:"design>sheet"`
 	Comps []struct {
 		Ref       string `xml:"ref,attr"`
@@ -142,8 +145,10 @@ func parseSchNetlist(data []byte, rootDir string) (*SchNetlist, error) {
 		rootDir = filepath.Dir(x.Source)
 	}
 	files := map[string]string{}
+	var sheets []netname.Sheet
 	for _, s := range x.Sheets {
 		addSheet(s.Name)
+		sheets = append(sheets, netname.Sheet{Name: s.Name, Tstamps: s.Tstamps})
 		if s.Source != "" && rootDir != "" {
 			files[s.Name] = filepath.Join(rootDir, s.Source)
 		}
@@ -158,8 +163,11 @@ func parseSchNetlist(data []byte, rootDir string) (*SchNetlist, error) {
 			sc.Fields[f.Name] = strings.TrimSpace(f.Value)
 		}
 		for _, pr := range c.Props {
-			if pr.Name == "dnp" {
+			switch pr.Name {
+			case "dnp":
 				sc.DNP = true
+			case "exclude_from_bom":
+				sc.ExcludeBOM = true
 			}
 		}
 		nl.Components = append(nl.Components, sc)
@@ -171,7 +179,7 @@ func parseSchNetlist(data []byte, rootDir string) (*SchNetlist, error) {
 		}
 		nl.Nets = append(nl.Nets, sn)
 	}
-	if err := nl.netIdentities(files); err != nil {
+	if err := nl.netIdentities(files, netname.EscapedSheetPaths(sheets)); err != nil {
 		return nil, err
 	}
 	return nl, nil
@@ -183,6 +191,11 @@ func ExportSchNetlist(sch string) (*SchNetlist, error) {
 	if err != nil {
 		return nil, err
 	}
+	return exportSchNetlistWith(cli, sch)
+}
+
+// exportSchNetlistWith is ExportSchNetlist with the kicad-cli to use.
+func exportSchNetlistWith(cli, sch string) (*SchNetlist, error) {
 	dir, err := os.MkdirTemp("", "pcbpilot-net-")
 	if err != nil {
 		return nil, err
@@ -241,6 +254,9 @@ func (nl *SchNetlist) ToConnectivityDoc(projectID string) (*connectivity.Documen
 			}
 		}
 		comp := connectivity.Component{ID: "cmp-" + c.Ref, Ref: c.Ref, Device: dev, Footprint: c.Footprint, PageName: c.Sheet, DNP: c.DNP, Pins: []connectivity.Pin{}}
+		if f := population.Field(c.Fields); population.Conflict(c.Ref, f, c.DNP) != "" {
+			comp.DNPField = f // fitted; consumers warn (population.Conflict)
+		}
 		pinIdx[c.Ref] = map[string]int{}
 		for _, p := range c.Pins {
 			if _, dup := pinIdx[c.Ref][p.Number]; dup {

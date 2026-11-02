@@ -1473,8 +1473,8 @@ func ParseStats(data []byte) (*BoardStats, error) {
 	var err error
 	for k, dst := range map[string]*float64{"width": &s.Width, "height": &s.Height, "board_thickness": &s.Thickness} {
 		v, ok := raw.Board[k]
-		if !ok {
-			continue // a board without an outline has no size
+		if !ok || v == nil {
+			continue // a board without an outline has no size (KiCad 10 writes null)
 		}
 		if *dst, err = num(v); err != nil {
 			return nil, fmt.Errorf("stats report board.%s: %w", k, err)
@@ -1496,22 +1496,33 @@ func ParseStats(data []byte) (*BoardStats, error) {
 // that differ only by the op's objects, so the library checks (warnings)
 // do not take part.
 func (t *Tools) BoardDRC(pcb, out string) (*DRCReport, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), BridgeTimeout)
+	limit := DRCTimeoutFor(pcb, BridgeTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), limit)
 	defer cancel()
 	if err := os.Remove(out); err != nil && !os.IsNotExist(err) {
 		return nil, fmt.Errorf("%w: cannot remove the previous report: %v", ErrDRCReport, err)
 	}
-	cmd := exec.CommandContext(ctx, t.CLI, "pcb", "drc", "--format", "json", "--severity-error", "-o", out, pcb)
+	// --all-track-errors: without it kicad-cli reports one error per track,
+	// and which partner it names varies between runs of the same board
+	// (multithreaded DRC); the before/after comparison then sees errors
+	// that are not new. With it the reported set is the full one, and the
+	// same board gives the same set (measured on a 1443-part board with 521
+	// errors: 4 pairs differed between two runs without it, none with it,
+	// at the same run time).
+	cmd := exec.CommandContext(ctx, t.CLI, "pcb", "drc", "--format", "json", "--severity-error", "--all-track-errors", "-o", out, pcb)
 	cmd.Env = SchCLIEnv()
 	var buf bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &buf, &buf
 	err := cmd.Run()
 	data, rerr := os.ReadFile(out)
 	if err != nil || rerr != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return nil, drcTimeoutError(pcb, limit)
+		}
 		if err == nil {
 			err = rerr
 		}
-		return nil, fmt.Errorf("%w: kicad-cli pcb drc: %v: %s", ErrDRCReport, err, strings.TrimSpace(buf.String()))
+		return nil, fmt.Errorf("%w: kicad-cli pcb drc on %s: %v: %s", ErrDRCReport, pcb, err, strings.TrimSpace(buf.String()))
 	}
 	return ParseDRC(data)
 }

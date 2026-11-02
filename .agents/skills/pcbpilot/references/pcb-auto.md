@@ -44,8 +44,16 @@ typed action，符合“禁止手工操作 EDA 工程”准则。
 `kicad place` 用 KiCad 自带 Python 读板（板框、孔、keep-out rule area、courtyard、位号尺寸），并行跑
 `--place-seeds`（默认 6）个种子取最优，用 pcbnew 写回：`--out` 为最优解，其余 `--candidates`（默认共 3）写成
 `<out>.seed-N.kicad_pcb`，指标在 `<out>.report.json`。输入 `--pcb` 不被修改；`--mech` 只约束模型，输出文件的板框和孔
-仍是 KiCad 原值；锁定封装与安装孔不动。移动器件会使铜失效：输出里走线与过孔被删除、铺铜未填充，之后用 `kicad route`
+仍是 KiCad 原值（`--mech` 的 board 尺寸须与 KiCad 板框一致，坐标从其左下角起算；尺寸不同或设了 `board.replaceOutline` 都会被拒绝：先用 `kicad board outline` 改板框）；输入工程的 `.kicad_pro` 与 `.kicad_dru`（网络类、自定义规则）随每块输出板一起复制；锁定封装与安装孔不动。移动器件会使铜失效：输出里走线与过孔被删除、铺铜未填充，之后用 `kicad route`
 布线。KiCad 侧的整体流程见 [kicad.md](kicad.md)。
+`--time-budget`（默认 8m，0 = 不限）限定布局搜索的墙钟时间：所有种子并行共用同一截止时间，到点即交出当前最优解，
+报告里 `budgetHit: true`、每个种子的 `metrics.timeBudgetHit` 写明被截断的阶段（`aesthetics` = 电气布局已完成、只差美观整理），
+stderr 打 WARNING；进度（种子、阶段、已用时间）实时并每 30 s 打到 stderr。1500 件级的大板请先看进度，必要时加大预算。
+最优种子仍有非法摆放（courtyard 重叠、出板、出域）时 `verdict: fail`、退出码 6（与 `kicad drc` 一致）：板照写供检查，
+但不要拿去布线。报告 `illegal` 逐条列出（如 `overlap D7 R8 (120 mil²)`），`zoneFill` 给每个布局域的面积账（`needMm2` 器件所需、
+`fixedMm2` 其中固定件/桥接件所占、`offerMm2` 域可用、`fill`）；`fill > 1` 或 > 0.85 且有非法件 = 域装不下，扩大该域/板子或把器件移出该域；
+fill 不高仍有非法件 = 局部冲突（隔离、禁布区、固定件），按 `illegal` 处理。合法化之后还有一道严格收尾：重叠件只在本域内、
+不恶化隔离/禁布/板边项的前提下挪开（先挪小件）。
 
 `pcb route-short`、`route-critical`、`layout-plan` 等既有命令仍适用于逐模块、逐网的精细控制；
 `pcb auto` 负责整板级决策。二者可组合：先 `pcb auto analyze` 取线宽/层数/域，再用既有命令

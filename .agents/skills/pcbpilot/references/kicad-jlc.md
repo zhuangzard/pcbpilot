@@ -179,7 +179,7 @@ pcbpilot kicad fab --preflight --pcb b.kicad_pcb --sch b.kicad_sch --contract fa
 
 | 检查 | 内容 |
 |---|---|
-| `kicad-drc` / `kicad-drc-policy` / `schematic-parity` | 与 [`kicad drc`](kicad.md#drc-门禁kicad-drc) 相同（副本上跑）。一致性总是做：根原理图取 `.kicad_pro` 同名的 `<工程>.kicad_sch`（不给 `--sch` 时 BOM 字段也从它读）；没有 `.kicad_pro` 或根图 → cannot-check |
+| `kicad-drc` / `kicad-drc-policy` / `schematic-parity` | 与 [`kicad drc`](kicad.md#drc-门禁kicad-drc) 相同（副本上跑）。一致性总是做：根原理图取 `.kicad_pro` 同名的 `<工程>.kicad_sch`（不给 `--sch` 时 BOM 字段也从它读）；板旁没有根图时，给出的 `--sch` 若是某工程的根图（旁边有同名 `.kicad_pro`）就用它比对（v0.12.2，板在 `place/` 等别的目录时）；子图或无工程的 `--sch` → cannot-check 并写明原因；没有 `.kicad_pro` 或根图且没给 `--sch` → cannot-check |
 | `schematic-root` | 给了 `--sch` 时，它必须是工程层次里的一张图（子图也行，此时 BOM 按整个层次读），否则 fail——一致性与 BOM 不能来自两份原理图 |
 | `board-outline` | Edge.Cuts 有图形，且 KiCad DRC 内置的轮廓测试没有 `invalid_outline`（被排除也算失败；该规则设成 ignore → cannot-check） |
 | `contract` | 契约文件合法（字段、日期、来源 URL）；没给 → cannot-check |

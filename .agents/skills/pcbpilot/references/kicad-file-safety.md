@@ -73,6 +73,12 @@ KiCad 配置，不由 Agent 修改。添加库表条目属于修改工程文件�
 - `kicad-cli` 与 pcbnew 加载慢或卡住时（全局库表很大），sch-build 的 ERC 使用隔离的空 KiCad 配置；用户自设的
   `KICAD_CONFIG_HOME` 优先，`PCBPILOT_KICAD_ISOLATE=0` 关闭隔离。隔离配置下的 `lib_*` / `footprint_link_issues`
   是环境类结果（[drc-triage.md](drc-triage.md)）。
+- **板级 DRC**（`kicad drc`、`kicad fab --preflight`、`kicad route` 的各次 DRC）用板专属的私有配置：用户自己的全局
+  `fp-lib-table` 只保留本板封装引用到的库（条目原样、嵌套的 Table 展开），复制用户的 `kicad_common.json`（路径变量），
+  工程自己的 `fp-lib-table` 不动。`lib_footprint_issues` / `lib_footprint_mismatch` 与用户配置下**完全相同**（实测），
+  不再加载整张官方库表；v0.12.0 的 `kicad drc` 用空库表，会把每个官方库封装报成“库不在表里”（实板 199 条，应为 13 条）。
+  `kicad board` 前后两次 DRC 只比较差异、只看 error，仍用空库表；`kicad rules` 的探针板没有封装，同样用空配置。
+  `KICAD_CONFIG_HOME` / `PCBPILOT_KICAD_ISOLATE=0` 同样优先。
 - KiCad 安装/升级途中 `kicad-cli` 会被系统杀掉（退出码 137），等安装完成再跑。
 
 ## 4. pcbpilot 自己做的文本修改

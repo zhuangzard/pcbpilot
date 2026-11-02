@@ -121,6 +121,32 @@ type intentPair struct {
 	// Bridges: parts that span the barrier on purpose (optocouplers,
 	// transformers, Y capacitors).
 	Bridges []string `json:"bridges,omitempty"`
+	// Additive (pkg/intent declared distances): which number won, the
+	// standard's or the spec's declared one ("derived" | "declared").
+	ClearanceSource     string  `json:"clearanceSource,omitempty"`
+	CreepageSource      string  `json:"creepageSource,omitempty"`
+	DerivedClearanceMm  float64 `json:"derivedClearanceMm,omitempty"`
+	DeclaredClearanceMm float64 `json:"declaredClearanceMm,omitempty"`
+}
+
+// intentDomainID is the domain a pair end names: intent pairs say
+// "domain:<id>" (pkg/intent), domains[] carry the bare id. A pair end
+// looked up by its raw text finds no domain — and no nets.
+func intentDomainID(end string) string {
+	end = strings.TrimSpace(end)
+	if i := strings.Index(end, ":"); i >= 0 && strings.EqualFold(end[:i], "domain") {
+		return strings.TrimSpace(end[i+1:])
+	}
+	return end
+}
+
+// domainNets maps each domain id to its nets.
+func (in *designIntent) domainNets() map[string][]string {
+	nets := map[string][]string{}
+	for _, d := range in.Domains {
+		nets[d.ID] = append(nets[d.ID], d.Nets...)
+	}
+	return nets
 }
 
 type intentNetClass struct {

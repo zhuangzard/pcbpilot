@@ -79,11 +79,24 @@ func runFabPreflight(o fabPreflightOptions) *fabPreflightReport {
 		o.sch, rep.Sch = root, root
 		rep.Notes = append(rep.Notes, "no --sch: using the project's root schematic "+root)
 	}
-	rep.DRC = runKicadDRC(kicadDRCOptions{pcb: o.pcb, cli: o.cli, parity: parity, waivers: o.waivers, tolMm: 0.5})
+	// No root schematic beside the board (e.g. kicad place --out wrote it
+	// to another directory): a --sch that is a project's root sheet is what
+	// parity compares with (v0.12.2; before, parity was cannot-check
+	// although --sch was given).
+	foreign := ""
+	if !parity && o.sch != "" {
+		if why := foreignRootSchematic(o.sch); why == "" {
+			foreign, parity = o.sch, true
+			rep.Notes = append(rep.Notes, "no root schematic beside the board: schematic parity compares with --sch "+o.sch)
+		} else {
+			rootErr = fmt.Errorf("%v; and --sch %s cannot stand in for it: %s", rootErr, o.sch, why)
+		}
+	}
+	rep.DRC = runKicadDRC(kicadDRCOptions{pcb: o.pcb, cli: o.cli, parity: parity, sch: foreign, waivers: o.waivers, tolMm: 0.5})
 	rep.Checks = append(rep.Checks, rep.DRC.Checks...)
 	if !parity {
 		add(cannotCheck("schematic-parity", rootErr.Error()))
-	} else if o.sch != root {
+	} else if foreign == "" && o.sch != root {
 		c := schematicRootCheck(o.sch, root)
 		add(c)
 		if c.Status == gate.Pass {
@@ -150,6 +163,20 @@ func projectRootSchematic(pcb string) (string, error) {
 		return "", fmt.Errorf("the project's root schematic %s is missing, so KiCad cannot compare the board with it (fix: keep the schematic in the project)", filepath.Base(root))
 	}
 	return root, nil
+}
+
+// foreignRootSchematic: why sch cannot be the root compared with ("" =
+// it can): it must be the root sheet of a KiCad project (its own
+// <name>.kicad_pro beside it), so a sub-sheet never stands for the design.
+func foreignRootSchematic(sch string) string {
+	if _, err := os.Stat(sch); err != nil {
+		return err.Error()
+	}
+	pro := strings.TrimSuffix(sch, filepath.Ext(sch)) + ".kicad_pro"
+	if _, err := os.Stat(pro); err != nil {
+		return "no " + filepath.Base(pro) + " beside it, so it is not known to be a project's root sheet (fix: pass the project's root schematic)"
+	}
+	return ""
 }
 
 // schematicRootCheck: --sch must belong to the project's hierarchy, so

@@ -11,8 +11,11 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/zhuangzard/pcbpilot/internal/gate"
 	"github.com/zhuangzard/pcbpilot/internal/kicad"
 	"github.com/zhuangzard/pcbpilot/pkg/pcbauto"
 )
@@ -24,7 +27,9 @@ type kicadPlaceOpts struct {
 	groups                   []string
 	placeSeeds, candidates   int
 	seed                     int64
+	timeBudget               time.Duration
 	haloMil, haloICMil       float64
+	haloICSet                bool // --halo-ic-mil given explicitly (0 then means no halo on ICs)
 }
 
 // kicadPlaceSeed is one placement seed in the report.
@@ -45,7 +50,17 @@ type kicadPlaceReport struct {
 	Fixed     []string           `json:"fixed,omitempty"` // locked, mounting holes, --mech fixed/edge
 	Seeds     []kicadPlaceSeed   `json:"seeds"`
 	Mechanics *pcbauto.Mechanics `json:"mechanics,omitempty"`
-	Notes     []string           `json:"notes,omitempty"`
+	// TimeBudget is --time-budget; BudgetHit is set when any seed's
+	// placement was cut short by it (see each seed's metrics.timeBudgetHit).
+	TimeBudget string `json:"timeBudget,omitempty"`
+	BudgetHit  bool   `json:"budgetHit,omitempty"`
+	// Verdict is fail when the best seed has an illegal placement (exit 6,
+	// as kicad drc): Illegal names each one, ZoneFill shows whether its
+	// zone has the room (best seed).
+	Verdict  gate.Status        `json:"verdict"`
+	Illegal  []string           `json:"illegal,omitempty"`
+	ZoneFill []pcbauto.ZoneFill `json:"zoneFill,omitempty"`
+	Notes    []string           `json:"notes,omitempty"`
 
 	path string // where the report was written
 }
@@ -72,15 +87,33 @@ of --place-seeds seeds) and writes the poses back with pcbnew:
   Y.report.json                        metrics per seed, labelBlocked, loopIR
 
 --mech constrains the model only (fixed / edge parts, keep-outs, zones,
-holes); the board outline and holes in the written file stay KiCad's.
-Locked footprints and mounting holes stay put, and so do footprints whose
+holes, in mm from the KiCad outline's lower-left corner); the board outline
+and holes in the written file stay KiCad's. A --mech board size must match
+the KiCad outline (0.1 mm); board.replaceOutline is refused (change the
+outline with kicad board outline first).
+The input's .kicad_pro and .kicad_dru (net classes, custom rules) are
+copied beside every written board. Locked footprints and mounting holes stay put, and so do footprints whose
 designator is shared (two H1) or a placeholder (empty, REF**, G***, R?): they are
 fixed obstacles, listed in the report notes. Moving parts invalidates the
-copper: tracks and vias are removed and zones unfilled in the output.`,
+copper: tracks and vias are removed and zones unfilled in the output.
+
+--time-budget bounds the placement search in wall time (all seeds run in
+parallel against the same deadline; snapshot and board writing come on
+top). A seed the budget cuts short keeps its best placement so far, with
+metrics as measured; the report flags it (budgetHit, per seed
+metrics.timeBudgetHit) and stderr says so. Progress (seed, phase,
+elapsed) goes to stderr as it happens and every 30 s.
+
+An illegal placement in the best seed (courtyard overlap, outside the
+board or its zone) fails the run: the boards are still written, the
+report lists each one (illegal) and every zone's room (zoneFill: area
+its parts need vs. what it offers), stderr warns, and the exit code is
+6 like a failed kicad drc.`,
 		Example: `  pcbpilot kicad place --pcb board.kicad_pcb --out placed/board.kicad_pcb
   pcbpilot kicad place --pcb board.kicad_pcb --out placed/board.kicad_pcb --mech mech.json --intent intent.json --place-seeds 8`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			o.haloICSet = cmd.Flags().Changed("halo-ic-mil")
 			rep, err := runKicadPlace(o, kicadPlaceDeps{snapshot: kicad.Snapshot, place: kicad.Place}, stderr)
 			if err != nil {
 				return err
@@ -91,6 +124,11 @@ copper: tracks and vias are removed and zones unfilled in the output.`,
 				}
 			}
 			fmt.Fprintf(stdout, "report: %s\n", rep.path)
+			if code := rep.Verdict.ExitCode(); code != 0 {
+				// The boards are written (to inspect or hand-fix), but an
+				// illegal placement is a failed gate, like kicad drc's.
+				return exitCodeError{code}
+			}
 			return nil
 		},
 	}
@@ -105,6 +143,7 @@ copper: tracks and vias are removed and zones unfilled in the output.`,
 	c.Flags().IntVar(&o.placeSeeds, "place-seeds", 6, "run this many seeds (from --seed) in parallel and keep the best")
 	c.Flags().IntVar(&o.candidates, "candidates", 3, "boards to write, best included (runners-up as <out>.seed-N.kicad_pcb)")
 	c.Flags().Int64Var(&o.seed, "seed", 1, "first placement seed")
+	c.Flags().DurationVar(&o.timeBudget, "time-budget", 8*time.Minute, "wall-time budget of the placement search (0 = none); a seed cut short returns its best so far, flagged in the report")
 	c.Flags().Float64Var(&o.haloMil, "halo-mil", 0, "extra keep-clear around every movable part (mil per side): routing room on dense boards (the placer otherwise packs for wirelength only)")
 	c.Flags().Float64Var(&o.haloICMil, "halo-ic-mil", 0, "keep-clear for parts with 6 or more pads (mil per side; replaces --halo-mil for them): room for the fan-out via ring")
 	return c
@@ -155,7 +194,16 @@ func runKicadPlace(o kicadPlaceOpts, deps kicadPlaceDeps, stderr io.Writer) (*ki
 		if pcbauto.NeedsAutoFrame(mech) {
 			return nil, fmt.Errorf("--mech autoSize: kicad place keeps the KiCad outline — give the board's size or drop autoSize")
 		}
-		if mc, err = pcbauto.ApplyMechAnchored(b, mech); err != nil {
+		if mech.Board.ReplaceOutline {
+			// The written board keeps its Edge.Cuts, and legality is judged
+			// on the model: a replaced model outline would pass parts that
+			// sit outside the delivered board.
+			return nil, fmt.Errorf("--mech board.replaceOutline: kicad place writes the KiCad outline unchanged — change the outline with `pcbpilot kicad board outline` first, then drop replaceOutline (a --mech board size must match the KiCad outline)")
+		}
+		if mc, err = pcbauto.ApplyMech(b, mech); err != nil {
+			if strings.Contains(err.Error(), "differs from the board's outline") {
+				return nil, fmt.Errorf("%w — kicad place keeps the KiCad outline: change it with `pcbpilot kicad board outline` first, or fix the --mech board size", err)
+			}
 			return nil, err
 		}
 		for ref := range mc.Fixed {
@@ -166,7 +214,7 @@ func runKicadPlace(o kicadPlaceOpts, deps kicadPlaceDeps, stderr io.Writer) (*ki
 		slices.Sort(rep.Fixed)
 		rep.Mechanics = mc
 		if len(mech.Board.Outline) >= 3 || mech.Board.Width > 0 {
-			rep.Notes = append(rep.Notes, "--mech outline constrains the model only; the written board keeps its KiCad Edge.Cuts")
+			rep.Notes = append(rep.Notes, "--mech board matches the KiCad outline: kept; --mech coordinates count from its lower-left corner")
 		}
 	}
 	understand := func(bc *pcbauto.Board, an *pcbauto.Analysis) (*pcbauto.Circuit, error) {
@@ -187,7 +235,7 @@ func runKicadPlace(o kicadPlaceOpts, deps kicadPlaceDeps, stderr io.Writer) (*ki
 	// The same options as `pcb auto run --place --no-route`.
 	popt := pcbauto.PlaceOptions{Seed: o.seed}
 	if o.haloMil > 0 || o.haloICMil > 0 {
-		popt.Halo = kicadPlaceHalo(b, o.haloMil, o.haloICMil)
+		popt.Halo = kicadPlaceHalo(b, o.haloMil, o.haloICMil, o.haloICSet || o.haloICMil > 0)
 		rep.Notes = append(rep.Notes, fmt.Sprintf("halo: %.1f mil per side on every part, %.1f mil on parts with 6+ pads", o.haloMil, o.haloICMil))
 	}
 	if ls := kicadLabelSpec(raw); ls != nil {
@@ -201,7 +249,26 @@ func runKicadPlace(o kicadPlaceOpts, deps kicadPlaceDeps, stderr io.Writer) (*ki
 		c, err := understand(bc, a)
 		return a, c, err
 	}
+	prog := newPlaceProgress(stderr, placeProgressEvery)
+	popt.Progress = prog.phase
+	if o.timeBudget > 0 {
+		// The anneal keeps its own 90 s clock, so a board that placed before
+		// places the same; the budget is only the outer cap. A board above
+		// placeLargeBoard movable parts is the exception: its anneal used
+		// to outlive that clock altogether (legalisation took longer than
+		// 90 s, which switched the clock off) and stops at 90 s now — far
+		// short of its moves on 1443 parts (decaps a mean 970 mil from their
+		// pins) — so it may run to 65 % of the budget instead. 75 % was
+		// tried: on a loaded machine legalise-2 and polish then ran into the
+		// deadline (decaps a mean 1355 mil out in one seed).
+		if len(b.Parts)-len(rep.Fixed) > placeLargeBoard {
+			popt.Timeout = max(90*time.Second, o.timeBudget*65/100)
+		}
+		popt.Deadline = time.Now().Add(o.timeBudget)
+		rep.TimeBudget = o.timeBudget.String()
+	}
 	outs, trials, err := pcbauto.PlaceSeeds(b, prep, mc, popt, o.placeSeeds)
+	prog.stop()
 	if err != nil {
 		return nil, err
 	}
@@ -222,6 +289,9 @@ func runKicadPlace(o kicadPlaceOpts, deps kicadPlaceDeps, stderr io.Writer) (*ki
 	if err := os.MkdirAll(filepath.Dir(o.out), 0o755); err != nil {
 		return nil, err
 	}
+	if n := kicadPlaceLibNote(o.pcb, o.out); n != "" {
+		rep.Notes = append(rep.Notes, n)
+	}
 	for _, t := range trials {
 		s := kicadPlaceSeed{SeedTrial: t, LabelBlocked: t.Metrics.LabelBlocked}
 		if t.Err != "" {
@@ -231,6 +301,10 @@ func runKicadPlace(o kicadPlaceOpts, deps kicadPlaceDeps, stderr io.Writer) (*ki
 		}
 		fmt.Fprintf(stderr, "placement seed %d: wirelength %.1f in, critical excess %.0f mil, illegal %d, labels blocked %d, score %.1f\n",
 			t.Seed, t.Metrics.WirelengthIn, t.Metrics.CriticalExcessMil, t.Illegal, t.Metrics.LabelBlocked, t.Score)
+		if h := t.Metrics.TimeBudgetHit; h != "" {
+			rep.BudgetHit = true
+			fmt.Fprintf(stderr, "placement seed %d: WARNING time budget %s reached during %s: best placement so far, not a finished one\n", t.Seed, o.timeBudget, h)
+		}
 		i, ok := written[t.Seed]
 		if currents != nil {
 			// The trial's own board copy (only successful seeds have one).
@@ -249,11 +323,36 @@ func runKicadPlace(o kicadPlaceOpts, deps kicadPlaceDeps, stderr io.Writer) (*ki
 			if s.Write, err = deps.place(o.pcb, posesFromBoard(outs[i].Board, kept), s.File); err != nil {
 				return nil, err
 			}
-			if err := copyKicadPro(o.pcb, s.File); err != nil {
+			if _, err := copyKicadSidecars(o.pcb, s.File); err != nil {
 				return nil, err
 			}
 		}
 		rep.Seeds = append(rep.Seeds, s)
+	}
+	best := outs[0]
+	rep.Illegal, rep.ZoneFill, rep.Verdict = best.Result.Illegal, best.Result.ZoneFill, gate.Pass
+	for _, z := range rep.ZoneFill {
+		fill := "none usable"
+		if z.Fill != nil {
+			fill = fmt.Sprintf("%.2f", *z.Fill)
+		}
+		if z.OverFull || z.Tight && z.Illegal > 0 {
+			fmt.Fprintf(stderr, "placement: WARNING zone %s: parts need %.0f mm² (fixed parts %.0f), zone offers %.0f mm² (fill %s, %d illegal) — enlarge the zone or move parts out of it\n", z.Domain, z.NeedMm2, z.FixedMm2, z.OfferMm2, fill, z.Illegal)
+		} else if z.Illegal > 0 {
+			fmt.Fprintf(stderr, "placement: WARNING zone %s: %d illegal placement(s) although it has room (need %.0f of %.0f mm², fill %s)\n", z.Domain, z.Illegal, z.NeedMm2, z.OfferMm2, fill)
+		}
+	}
+	if v, n := kicadPlaceVerdict(rep.Illegal, best.Trial.Illegal); v == gate.Fail {
+		rep.Verdict = v
+		show := rep.Illegal
+		if len(show) > 12 {
+			show = append(append([]string(nil), show[:12]...), fmt.Sprintf("… %d more in the report", len(rep.Illegal)-12))
+		}
+		fmt.Fprintf(stderr, "placement: WARNING best seed %d has %d illegal placement(s): %s\n", best.Trial.Seed, n, strings.Join(show, "; "))
+		rep.Notes = append(rep.Notes, fmt.Sprintf("verdict fail: the best seed has %d illegal placement(s) (see illegal, zoneFill); the boards are written for inspection, not for routing", n))
+	}
+	if rep.BudgetHit {
+		rep.Notes = append(rep.Notes, fmt.Sprintf("time budget %s reached: at least one seed returned its best placement so far (metrics.timeBudgetHit names the phase); raise --time-budget for a finished placement", o.timeBudget))
 	}
 	blob, _ := json.MarshalIndent(rep, "", "  ")
 	if err := os.WriteFile(o.report, append(blob, '\n'), 0o644); err != nil {
@@ -583,29 +682,118 @@ func snapshotOfBoard(b *pcbauto.Board) *boardSnapshot {
 	return s
 }
 
-// copyKicadPro copies X.kicad_pro next to out (same base name): KiCad reads
-// the board's design rules and net classes from it.
-func copyKicadPro(pcb, out string) error {
-	src := strings.TrimSuffix(pcb, ".kicad_pcb") + ".kicad_pro"
-	raw, err := os.ReadFile(src)
-	if os.IsNotExist(err) {
-		return nil
+// kicadPlaceLibNote explains the project library tables a placed board in
+// another folder does without: they name ${KIPRJMOD} libraries that are
+// not there. The footprints are embedded in the board, so it opens, DRCs
+// and routes; updating footprints from the library needs the project
+// folder. "" when out shares pcb's folder or pcb has no table.
+func kicadPlaceLibNote(pcb, out string) string {
+	src, dst := filepath.Dir(mustAbs(pcb)), filepath.Dir(mustAbs(out))
+	if src == dst {
+		return ""
 	}
-	if err != nil {
-		return err
+	var have []string
+	for _, t := range []string{"fp-lib-table", "sym-lib-table"} {
+		if _, err := os.Stat(filepath.Join(src, t)); err == nil {
+			have = append(have, t)
+		}
 	}
-	return os.WriteFile(strings.TrimSuffix(out, ".kicad_pcb")+".kicad_pro", raw, 0o644)
+	if len(have) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("the placed board's folder has no %s (the project's tables point at ${KIPRJMOD} libraries in %s): footprints are embedded in the board, so DRC and routing work; to update footprints from the library, place with --out inside the project folder", strings.Join(have, " / "), src)
+}
+
+// kicadPlaceVerdict is the best seed's verdict and illegal count: the named
+// list decides (overlaps, outside the board or the zone, inside a
+// keep-out), the metrics' count is a backstop.
+func kicadPlaceVerdict(illegal []string, metricIllegal int) (gate.Status, int) {
+	if n := max(len(illegal), metricIllegal); n > 0 {
+		return gate.Fail, n
+	}
+	return gate.Pass, 0
+}
+
+// placeLargeBoard is the movable-part count above which kicad place lets
+// the anneal run past its 90 s clock, within --time-budget.
+const placeLargeBoard = 1000
+
+// placeProgressEvery is how often kicad place repeats every running seed's
+// phase on stderr while nothing else is printed.
+var placeProgressEvery = 30 * time.Second
+
+// placeProgress prints each seed's phase changes on stderr (with the time
+// since the placement started) and, every `every`, the phase every seed is
+// still in: a 1500-part board places for minutes.
+type placeProgress struct {
+	mu    sync.Mutex
+	w     io.Writer
+	start time.Time
+	cur   map[int64]string
+	since map[int64]time.Time
+	done  chan struct{}
+	wg    sync.WaitGroup
+}
+
+func newPlaceProgress(w io.Writer, every time.Duration) *placeProgress {
+	pp := &placeProgress{w: w, start: time.Now(), cur: map[int64]string{}, since: map[int64]time.Time{}, done: make(chan struct{})}
+	if every > 0 {
+		pp.wg.Add(1)
+		go func() {
+			defer pp.wg.Done()
+			t := time.NewTicker(every)
+			defer t.Stop()
+			for {
+				select {
+				case <-pp.done:
+					return
+				case <-t.C:
+					pp.tick()
+				}
+			}
+		}()
+	}
+	return pp
+}
+
+func (pp *placeProgress) elapsed() string {
+	return time.Since(pp.start).Round(time.Second).String()
+}
+
+// phase is PlaceOptions.Progress.
+func (pp *placeProgress) phase(seed int64, phase string) {
+	pp.mu.Lock()
+	defer pp.mu.Unlock()
+	pp.cur[seed], pp.since[seed] = phase, time.Now()
+	fmt.Fprintf(pp.w, "placement seed %d: %s (elapsed %s)\n", seed, phase, pp.elapsed())
+}
+
+func (pp *placeProgress) tick() {
+	pp.mu.Lock()
+	defer pp.mu.Unlock()
+	var parts []string
+	for _, s := range slices.Sorted(maps.Keys(pp.cur)) {
+		parts = append(parts, fmt.Sprintf("seed %d %s %s", s, pp.cur[s], time.Since(pp.since[s]).Round(time.Second)))
+	}
+	if len(parts) > 0 {
+		fmt.Fprintf(pp.w, "placement: elapsed %s; %s\n", pp.elapsed(), strings.Join(parts, ", "))
+	}
+}
+
+func (pp *placeProgress) stop() {
+	close(pp.done)
+	pp.wg.Wait()
 }
 
 // kicadPlaceHalo is the uniform routing-room keep-clear of --halo-mil /
-// --halo-ic-mil. Board-C (353 parts, 4 layers): packed for wirelength only, the
+// --halo-ic-mil. a field board (353 parts, 4 layers): packed for wirelength only, the
 // patient side left 140 SMD pins without a fan-out and 131 connections
 // unrouted while a third of the board stayed empty.
-func kicadPlaceHalo(b *pcbauto.Board, all, ic float64) map[string]float64 {
+func kicadPlaceHalo(b *pcbauto.Board, all, ic float64, icSet bool) map[string]float64 {
 	h := map[string]float64{}
 	for _, p := range b.Parts {
 		v := all
-		if ic > 0 && len(p.Pads) >= 6 {
+		if icSet && len(p.Pads) >= 6 {
 			v = ic
 		}
 		if v > 0 {

@@ -5,6 +5,7 @@ import (
 	"math/rand"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -59,6 +60,19 @@ type PlaceOptions struct {
 	// and runs only the aesthetics stage on it: no construction,
 	// legalisation, annealing or polish, no new isolation strips.
 	TidyOnly bool `json:"tidyOnly,omitempty"`
+	// Progress, when set, is told each phase as it starts (construct,
+	// legalise, anneal, polish, aesthetics, metrics …) with the run's seed.
+	// It is called from the placement's own goroutine: PlaceSeeds runs
+	// several at once, so it must be safe for concurrent use.
+	Progress func(seed int64, phase string) `json:"-"`
+	// Deadline bounds the whole placement in wall time (zero = none): the
+	// anneal ends early enough to leave a quarter of the remaining time;
+	// past the deadline legalisation, polish, the decap rescue and the
+	// aesthetics stage stop where they are (aesthetics is skipped when it
+	// would only start then). The result is the best so far, its metrics as
+	// measured, and PlaceMetrics.TimeBudgetHit names the first phase the
+	// deadline cut short ("aesthetics": the electrical placement finished).
+	Deadline time.Time `json:"-"`
 }
 
 // Placement is a part's decided pose (anchor coordinates, like EasyEDA).
@@ -99,6 +113,9 @@ type PlaceMetrics struct {
 	// (PlaceOptions.Labels; 0 when off).
 	LabelBlocked int   `json:"labelBlocked,omitempty"`
 	Millis       int64 `json:"millis"`
+	// TimeBudgetHit is the first phase PlaceOptions.Deadline cut short
+	// ("" = every phase ran to its end).
+	TimeBudgetHit string `json:"timeBudgetHit,omitempty"`
 }
 
 // PlaceResult is the placer output.
@@ -109,6 +126,11 @@ type PlaceResult struct {
 	Outline    []Point      `json:"outline,omitempty"` // set when auto-sized
 	Metrics    PlaceMetrics `json:"metrics"`
 	Notes      []string     `json:"notes,omitempty"`
+	// Illegal names every illegal placement left (overlapping courtyard
+	// pairs, parts outside the board or their zone); ZoneFill is each
+	// placement zone's room.
+	Illegal  []string   `json:"illegal,omitempty"`
+	ZoneFill []ZoneFill `json:"zoneFill,omitempty"`
 	// Aesthetics is what the aesthetics stage moved (nil when skipped).
 	Aesthetics *AesPlaceReport `json:"aesthetics,omitempty"`
 }
@@ -122,14 +144,14 @@ type placer struct {
 	// lastMove is the pose tryMove saved for undo (per placer: concurrent
 	// placements, PlaceBest, must not share it).
 	lastMove savedPose
-	hvReach float64 // largest high-voltage net clearance (0 = no HV nets)
-	b       *Board
-	an      *Analysis
-	c       *Circuit
-	m       *Mechanics
-	opt     PlaceOptions
-	rng     *rand.Rand
-	movable []*Part
+	hvReach  float64 // largest high-voltage net clearance (0 = no HV nets)
+	b        *Board
+	an       *Analysis
+	c        *Circuit
+	m        *Mechanics
+	opt      PlaceOptions
+	rng      *rand.Rand
+	movable  []*Part
 	// Two-stage placement: macro[core] are the critical auxiliaries frozen
 	// to their core after stage 1; they move with it rigidly in the anneal.
 	macro   map[*Part][]*Part
@@ -153,11 +175,17 @@ type placer struct {
 	hardOnly bool            // partCost: constraint terms only (legalisation)
 	apart    [][2]*Part      // core pairs to keep apart (noisy vs sensitive)
 	spacing  float64
-	bucket   map[[2]int][]*Part
+	bucket   *bucketGrid
 	boxes    map[*Part]Rect
 	rudy     *rudy // congestion grid, live during annealing only
 	intimate map[[2]*Part]bool
-	strips   []*Keepout // isolation strips this placement added to the board
+	// intimateOf[p] are p's intimate partners (intimate, indexed by part:
+	// the overlap term asks once per part, not once per neighbour).
+	intimateOf map[*Part]map[*Part]bool
+	// netBuf is localCost's and groupCost's scratch net list (each uses it
+	// to the end before the next call; the anneal calls them per move).
+	netBuf []int
+	strips []*Keepout // isolation strips this placement added to the board
 	// corridors keep intent-declared differential pairs' runs clear of
 	// foreign parts (placer_corridor.go).
 	corridors []*pairCorridor
@@ -172,6 +200,13 @@ type placer struct {
 	// wallClock: the anneal ran past 80 % of its time budget, where cooling
 	// follows the clock — the placement then depends on machine load.
 	wallClock bool
+	// curPhase is the phase running now; budgetHit the first one the
+	// PlaceOptions.Deadline cut short.
+	curPhase, budgetHit string
+	// clock replaces time.Now in rescueOver (tests); rescueEvals counts the
+	// rescue's candidate poses.
+	clock       func() time.Time
+	rescueEvals int
 }
 
 // intimateGap is the courtyard gap kept between parts that connect directly
@@ -212,12 +247,15 @@ func Place(b *Board, an *Analysis, c *Circuit, m *Mechanics, opt PlaceOptions) (
 	pl := &placer{b: b, an: an, c: c, m: m, opt: opt, rng: rand.New(rand.NewSource(opt.Seed + 1)),
 		partNet: map[*Part][]int{}, zoneOf: map[*Part]Rect{}, decap: map[*Part]*Pad{}, spacing: opt.SpacingMil}
 	res := &PlaceResult{}
+	pl.phase("setup")
 	pl.setup(res)
 	res.Metrics.StartWireIn = pl.wirelength() / 1000
 	if !opt.TidyOnly {
 		if !opt.Refine {
+			pl.phase("construct")
 			pl.construct()
 		}
+		pl.phase("legalise")
 		pl.legalise()
 		if opt.Macro && len(opt.Only) == 0 {
 			// Stage 1: seat every critical auxiliary at its pin, then freeze it
@@ -226,19 +264,37 @@ func Place(b *Board, an *Analysis, c *Circuit, m *Mechanics, opt PlaceOptions) (
 			// szpi crystal ended 36 mm from its hub IC when it annealed alone).
 			pl.freezeMacros()
 		}
-		pl.anneal(start.Add(opt.Timeout))
+		pl.phase("anneal")
+		d, short := pl.annealDeadline(start)
+		if pl.anneal(d) && short && pl.budgetHit == "" {
+			// It stopped on the budget's clock before its moves were done.
+			pl.budgetHit = "anneal"
+		}
 		if pl.wallClock {
 			res.Notes = append(res.Notes, "annealing ran past 80 % of its time budget: cooling followed the clock, so this placement depends on machine load (not reproducible move for move)")
 		}
 		pl.unfreezeMacros()
 		// Stage 3: local fine-tune in the gaps the macros left.
+		pl.phase("legalise-2")
 		pl.legalise()
+		pl.phase("polish")
 		pl.polish()
+		pl.phase("rescue")
+		pl.rescueDecaps()
+		pl.phase("tidy")
 		pl.tidyV07()
+		pl.phase("resolve")
+		if n := pl.resolveOverlaps(); n > 0 {
+			res.Notes = append(res.Notes, sprintf("resolve: %d courtyard overlap(s) the legaliser left cleared by moving a part within its own zone (no isolation, keep-out or edge term worse)", n))
+		}
 	}
-	if !opt.NoAesthetics {
+	if !opt.NoAesthetics && pl.overBudget() {
+		pl.phase("aesthetics")
+		res.Notes = append(res.Notes, "time budget reached: aesthetics stage skipped")
+	} else if !opt.NoAesthetics {
 		// The placement before the aesthetics stage: the routed guard
 		// (placeab.go) falls back to it when the aesthetic one routes worse.
+		pl.phase("aesthetics")
 		raw := pl.aesSnapshot(res, nil)
 		prof := pl.resolveAesProfile()
 		// The lighter stages from the same start, the guard's next choices
@@ -285,7 +341,33 @@ func Place(b *Board, an *Analysis, c *Circuit, m *Mechanics, opt PlaceOptions) (
 	if m.AutoSize {
 		res.Outline = pl.autosize()
 	}
+	if !opt.TidyOnly && !opt.NoAesthetics && len(pl.overlapPairs()) > 0 {
+		// The aesthetics stage's moves are judged on the legaliser's terms,
+		// which price a small courtyard overlap instead of forbidding it.
+		pl.phase("resolve-2")
+		if n := pl.resolveOverlaps(); n > 0 {
+			res.Notes = append(res.Notes, sprintf("resolve after aesthetics: %d courtyard overlap(s) cleared", n))
+		}
+	}
+	pl.phase("metrics")
 	pl.metrics(res)
+	pairs := pl.overlapPairs()
+	res.Illegal = pl.illegalList(pairs)
+	res.ZoneFill = pl.zoneFill(res, pairs)
+	for _, z := range res.ZoneFill {
+		switch {
+		case z.OverFull:
+			res.Notes = append(res.Notes, sprintf("zone %s is over-full: its parts need %.0f mm² (fixed parts %.0f), the zone offers %.0f mm² (%d illegal) — enlarge the zone or move parts out of it", z.Domain, z.NeedMm2, z.FixedMm2, z.OfferMm2, z.Illegal))
+		case z.Tight && z.Illegal > 0:
+			res.Notes = append(res.Notes, sprintf("zone %s is practically full: its parts need %.0f mm² (fixed parts %.0f) of the %.0f mm² it offers (fill %.2f, %d illegal) — enlarge the zone or move parts out of it", z.Domain, z.NeedMm2, z.FixedMm2, z.OfferMm2, *z.Fill, z.Illegal))
+		case z.Illegal > 0 && z.Fill != nil:
+			res.Notes = append(res.Notes, sprintf("zone %s: %d illegal placement(s) although it has room (parts need %.0f mm² of %.0f mm², fill %.2f): a local conflict (isolation, keep-out or a fixed part) the placer could not clear — see illegal", z.Domain, z.Illegal, z.NeedMm2, z.OfferMm2, *z.Fill))
+		}
+	}
+	if pl.budgetHit != "" {
+		res.Metrics.TimeBudgetHit = pl.budgetHit
+		res.Notes = append(res.Notes, sprintf("time budget reached during %s: this is the best placement found by then, not a finished one (metrics as measured)", pl.budgetHit))
+	}
 	pl.carveStrips(res)
 	for _, p := range b.Parts {
 		res.Placements = append(res.Placements, Placement{Ref: p.Ref, ID: p.ID, X: round2(p.Pos.X), Y: round2(p.Pos.Y),
@@ -295,7 +377,48 @@ func Place(b *Board, an *Analysis, c *Circuit, m *Mechanics, opt PlaceOptions) (
 	if ar := res.Aesthetics; ar != nil && ar.Moved == 0 {
 		ar.raw, ar.lites, ar.rerun = nil, nil, nil // nothing to fall back to
 	}
+	pl.phase("done")
 	return res, nil
+}
+
+// phase reports the phase starting now (PlaceOptions.Progress).
+func (pl *placer) phase(name string) {
+	pl.curPhase = name
+	if pl.opt.Progress != nil {
+		pl.opt.Progress(pl.opt.Seed, name)
+	}
+}
+
+// overBudget reports whether PlaceOptions.Deadline has passed, and
+// records the phase it first cut short.
+func (pl *placer) overBudget() bool {
+	if pl.opt.Deadline.IsZero() || time.Now().Before(pl.opt.Deadline) {
+		return false
+	}
+	if pl.budgetHit == "" {
+		pl.budgetHit = pl.curPhase
+	}
+	return true
+}
+
+// annealDeadline is the anneal's end: Timeout after the placement started.
+// When legalisation alone took longer (a 1500-part board), that moment is
+// already past — the anneal then had no clock at all and ran its full move
+// count, tens of minutes — so it gets a third of Timeout from now instead.
+// Either way it leaves a quarter of the time to PlaceOptions.Deadline for
+// the phases after it; the flag says the budget shortened it.
+func (pl *placer) annealDeadline(start time.Time) (time.Time, bool) {
+	now := time.Now()
+	d := start.Add(pl.opt.Timeout)
+	if !d.After(now) {
+		d = now.Add(pl.opt.Timeout / 3)
+	}
+	if dl := pl.opt.Deadline; !dl.IsZero() {
+		if last := dl.Add(-dl.Sub(now) / 4); last.Before(d) {
+			return last, true
+		}
+	}
+	return d, false
 }
 
 // ---- setup -------------------------------------------------------------------
@@ -421,10 +544,17 @@ var intimateRoles = map[string]bool{"hot-loop": true, "bootstrap": true, "decap"
 
 func (pl *placer) setupIntimate() {
 	pl.intimate = map[[2]*Part]bool{}
+	pl.intimateOf = map[*Part]map[*Part]bool{}
 	pair := func(a, b *Part) {
 		if a != nil && b != nil && a != b {
 			pl.intimate[[2]*Part{a, b}] = true
 			pl.intimate[[2]*Part{b, a}] = true
+			for _, e := range [][2]*Part{{a, b}, {b, a}} {
+				if pl.intimateOf[e[0]] == nil {
+					pl.intimateOf[e[0]] = map[*Part]bool{}
+				}
+				pl.intimateOf[e[0]][e[1]] = true
+			}
 		}
 	}
 	for _, bl := range pl.c.Blocks {
@@ -564,13 +694,21 @@ func (pl *placer) zones(res *PlaceResult) {
 		for _, k := range ks {
 			total += k.area
 		}
+		ws, ds := make([]float64, len(ks)), make([]*Domain, len(ks))
+		for i, k := range ks {
+			ws[i], ds[i] = (pl.region.W()-pl.gapTotal())*k.area/total, k.d
+		}
+		pl.sizeZonesByOccupancy(ds, ws)
+		if note := pl.widenZones(ds, ws); note != "" {
+			res.Notes = append(res.Notes, note)
+		}
 		x := pl.region.MinX
 		for i, k := range ks {
 			gap := 0.0
 			if i+1 < len(ks) {
 				gap = pl.barrierGap(k.d.ID, ks[i+1].d.ID)
 			}
-			w := (pl.region.W() - pl.gapTotal()) * k.area / total
+			w := ws[i]
 			r := Rect{x, pl.region.MinY, x + w, pl.region.MaxY}
 			userZone[k.d.ID] = r
 			res.Zones = append(res.Zones, Zone{Domain: k.d.ID, Rect: r})
@@ -605,6 +743,154 @@ func (pl *placer) zones(res *PlaceResult) {
 			pl.zoneOf[p] = Rect{s.Center().X - 1, pl.region.MinY, s.Center().X + 1, pl.region.MaxY}
 		}
 	}
+}
+
+// zoneOccupied is the room a strip must hold (mil²): the courtyards plus
+// half the placement spacing of its domain's movable parts (bridges sit on
+// the isolation strip), and of every part that does not move (fixed,
+// mechanical) and every bridge — any domain — as far as it lies inside
+// the strip, plus the keep-outs and holes in it.
+// It is zoneFill's need plus the area zoneFill's offer leaves out, so a
+// strip sized by it reports the fill its neighbours report.
+func (pl *placer) zoneOccupied(d *Domain, strip Rect, movable map[*Part]bool) float64 {
+	occ := 0.0
+	for _, ref := range d.Parts {
+		if p := pl.b.Part(ref); p != nil && movable[p] && !pl.c.IsBridge(ref) {
+			occ += p.Body().Expand(pl.spacing / 2).Area()
+		}
+	}
+	r := pl.region
+	in := Rect{math.Max(strip.MinX, r.MinX), math.Max(strip.MinY, r.MinY), math.Min(strip.MaxX, r.MaxX), math.Min(strip.MaxY, r.MaxY)}
+	for _, q := range pl.b.Parts {
+		if !movable[q] || pl.c.IsBridge(q.Ref) {
+			occ += in.OverlapArea(q.Body().Expand(pl.spacing / 2))
+		}
+	}
+	for _, k := range pl.b.Keepouts {
+		if k.NoParts || k.NoCopper {
+			occ += in.OverlapArea(PolyBounds(k.Poly))
+		}
+	}
+	for _, h := range pl.b.Holes {
+		if h.Owner == "" {
+			occ += in.OverlapArea(h.Bounds().Expand(h.Keep))
+		}
+	}
+	return occ
+}
+
+// sizeZonesByOccupancy re-splits the strip widths ws (same total) in
+// proportion to what each strip must hold (zoneOccupied) instead of its
+// domain's part area alone: fixed mounting holes and mechanically placed
+// edge connectors take a strip's room without being its domain's parts —
+// on a 1443-part board one strip ended 96 % full with overlaps the
+// legaliser could not clear. Strip positions follow the widths, so the
+// split is refined a few times. A board with no fixed part, bridge,
+// keep-out or hole keeps its area-split widths unchanged.
+func (pl *placer) sizeZonesByOccupancy(doms []*Domain, ws []float64) {
+	movable := map[*Part]bool{}
+	for _, p := range pl.movable {
+		movable[p] = true
+	}
+	extra := false
+	for _, q := range pl.b.Parts {
+		if !movable[q] || pl.c.IsBridge(q.Ref) {
+			extra = true
+			break
+		}
+	}
+	extra = extra || len(pl.b.Holes) > 0
+	for _, k := range pl.b.Keepouts {
+		extra = extra || k.NoParts || k.NoCopper
+	}
+	if !extra {
+		return
+	}
+	total := 0.0
+	for _, w := range ws {
+		total += w
+	}
+	occ := make([]float64, len(ws))
+	for it := 0; it < 4; it++ {
+		x, sum := pl.region.MinX, 0.0
+		for i, d := range doms {
+			occ[i] = pl.zoneOccupied(d, Rect{x, pl.region.MinY, x + ws[i], pl.region.MaxY}, movable)
+			sum += occ[i]
+			x += ws[i]
+			if i+1 < len(doms) {
+				x += pl.barrierGap(d.ID, doms[i+1].ID)
+			}
+		}
+		if sum <= 0 {
+			return
+		}
+		for i := range ws {
+			ws[i] = total * occ[i] / sum
+		}
+	}
+}
+
+// widenZones makes every domain's strip (widths ws, split by part area) at
+// least as wide as the narrow side of its widest non-bridge part's box: a
+// small domain holding a big connector got a strip narrower than the
+// connector (183 mil for a 433 mil header on a 1443-part board), so the
+// part could never be legal and every legalisation pass searched its
+// whole spiral for nothing. The width comes from the other strips in
+// proportion to what they have beyond their own need; widths already wide
+// enough are left exactly as they were, and the widths' sum never changes.
+// When the others' slack cannot cover every shortfall, each short strip
+// gets its share of the slack and the returned note says the region is too
+// narrow ("" when every strip fits its widest part).
+func (pl *placer) widenZones(doms []*Domain, ws []float64) string {
+	need := make([]float64, len(doms))
+	short := false
+	for i, d := range doms {
+		for _, ref := range d.Parts {
+			p := pl.b.Part(ref)
+			if p == nil || p.Fixed || pl.c.IsBridge(ref) || pl.c.Kinds[ref] == KindMechanical {
+				continue
+			}
+			bx := pl.box(p)
+			need[i] = math.Max(need[i], math.Min(bx.W(), bx.H())+1)
+		}
+		short = short || ws[i] < need[i]
+	}
+	if !short {
+		return ""
+	}
+	deficit, slack := 0.0, 0.0
+	for i := range ws {
+		if ws[i] < need[i] {
+			deficit += need[i] - ws[i]
+		} else {
+			slack += ws[i] - need[i]
+		}
+	}
+	// give: the share of each shortfall granted; take: the share of each
+	// slack given up. Both ≤ 1, and give·deficit = take·slack.
+	give, take := 1.0, 1.0
+	if deficit <= slack {
+		take = deficit / slack
+	} else {
+		give = slack / deficit // slack 0: nothing to give
+	}
+	for i := range ws {
+		if ws[i] < need[i] {
+			ws[i] += (need[i] - ws[i]) * give
+		} else {
+			ws[i] -= (ws[i] - need[i]) * take
+		}
+	}
+	if give >= 1 {
+		return ""
+	}
+	var short2 []string
+	for i, d := range doms {
+		if ws[i] < need[i]-1e-6 {
+			short2 = append(short2, sprintf("%s (%.0f of %.0f mil)", d.ID, ws[i], need[i]))
+		}
+	}
+	return sprintf("domain zones too narrow: the board's placement width cannot give every domain strip its widest part — %s; enlarge the board or move the wide parts to another domain", strings.Join(short2, ", "))
 }
 
 func (pl *placer) gapTotal() float64 {
@@ -650,18 +936,22 @@ func (pl *placer) box(p *Part) Rect {
 
 // partCost is the constraint cost of one part in its current pose,
 // excluding net length (overlap with others, zone, board, keepouts, height).
-func (pl *placer) partCost(p *Part) float64 {
+func (pl *placer) partCost(p *Part) float64 { return pl.partCostLim(p, math.Inf(1)) }
+
+// partCostLim is partCost, except that with hardOnly set it may stop
+// summing once the sum reaches lim and return that partial sum: every hard
+// term is ≥ 0, so a caller asking "cost < lim?" gets partCost's answer.
+// Below lim the sum is partCost's, term for term in the same order.
+func (pl *placer) partCostLim(p *Part, lim float64) float64 {
+	if !pl.hardOnly {
+		lim = math.Inf(1)
+	}
 	bx := pl.boxes[p]
-	cost := 0.0
 	// Overlap with neighbours (bucketed).
-	seen := map[*Part]bool{}
-	pl.forBuckets(bx, func(q *Part) {
-		if q == p || seen[q] || !collide(p, q) {
-			return
-		}
-		seen[q] = true
-		cost += 8 * pl.pairOverlap(p, q)
-	})
+	cost := pl.overlapCost(p, bx, nil, lim)
+	if cost >= lim {
+		return cost
+	}
 	// Board / zone containment of the body.
 	z := pl.zoneOf[p]
 	if !p.Fixed {
@@ -706,7 +996,13 @@ func (pl *placer) partCost(p *Part) float64 {
 			cost += 20 * bx.OverlapArea(hz.Rect)
 		}
 	}
+	if cost >= lim {
+		return cost
+	}
 	cost += pl.isoCost(p, bx)
+	if cost >= lim {
+		return cost
+	}
 	cost += pl.hvPadCost(p, bx)
 	if !pl.hardOnly {
 		cost += pl.tetherCost(p)
@@ -722,6 +1018,151 @@ func (pl *placer) partCost(p *Part) float64 {
 				cost += 3 * math.Max(0, keepApartMil-d)
 			}
 		}
+	}
+	return cost
+}
+
+// overlapCost is partCost's neighbour term for p with box bx and body
+// body (nil: p.Body(), read only when an intimate neighbour needs it): 8 ×
+// the courtyard overlap with every colliding part in the buckets, summed in
+// bucket order. It stops once the sum reaches lim.
+func (pl *placer) overlapCost(p *Part, bx Rect, body *Rect, lim float64) float64 {
+	return pl.overlapCostIn(p, bx, body, pl.intimateOf[p], lim)
+}
+
+// overlapCostIn is overlapCost with p's intimate partners given.
+func (pl *placer) overlapCostIn(p *Part, bx Rect, body *Rect, intimate map[*Part]bool, lim float64) float64 {
+	cost := 0.0
+	pl.forBucketsOnce(bx, func(q *Part) bool {
+		if q == p || !collide(p, q) {
+			return true
+		}
+		if intimate[q] {
+			pb := body
+			if pb == nil {
+				r := p.Body()
+				pb = &r
+			}
+			cost += 8 * pb.Expand(intimateGap/2).OverlapArea(q.Body().Expand(intimateGap/2))
+		} else {
+			cost += 8 * bx.OverlapArea(pl.boxes[q])
+		}
+		return cost < lim
+	})
+	return cost
+}
+
+// boundRejects reports whether a pose whose hard cost is at least lb can be
+// skipped by a search that accepts only cost < lim. hardBound sums a subset
+// of partCost's non-negative terms in partCost's order, and rounding to
+// nearest is monotone, so lb ≤ cost exactly; the margin (relative 1e-9,
+// absolute 1e-9 mil-cost) only prunes less, never more — a pose within it
+// of the limit goes to the full evaluation the search always did.
+func boundRejects(lb, lim float64) bool {
+	return lb >= lim+1e-9*math.Abs(lim)+1e-9
+}
+
+// spiralCtx is what hardBound needs of the part a spiral moves, read once
+// per spiral: nothing in it changes while the part searches (the other
+// parts, keep-outs and holes stay put).
+type spiralCtx struct {
+	p           *Part
+	z           Rect
+	zoneBody    bool   // the zone's body containment term applies
+	keepouts    []Rect // in Board.Keepouts order, the ones partCost counts for p
+	holes       []Rect // in Board.Holes order, other parts' holes with their keep
+	heightZones []Rect
+	intimate    map[*Part]bool
+}
+
+func (pl *placer) newSpiralCtx(p *Part) *spiralCtx {
+	sc := &spiralCtx{p: p, z: pl.zoneOf[p], intimate: pl.intimateOf[p]}
+	bridge := pl.c.IsBridge(p.Ref)
+	sc.zoneBody = !bridge && sc.z != pl.region
+	for _, k := range pl.b.Keepouts {
+		if (k.NoParts || k.NoCopper) && k.Owner != p.Ref {
+			kb := PolyBounds(k.Poly)
+			if bridge && !k.NoParts {
+				continue
+			}
+			sc.keepouts = append(sc.keepouts, kb)
+		}
+	}
+	for _, h := range pl.b.Holes {
+		if h.Owner != p.Ref {
+			sc.holes = append(sc.holes, h.Bounds().Expand(h.Keep))
+		}
+	}
+	for _, hz := range pl.m.HeightZones {
+		if p.Height > hz.MaxHeight {
+			sc.heightZones = append(sc.heightZones, hz.Rect)
+		}
+	}
+	return sc
+}
+
+// zoneTerms are partCost's board and zone containment terms of a box bx
+// (a movable part), summed in partCost's order without the pad band between
+// them. They feed hardBound only, whose callers compare: plain comparisons
+// stand in for math.Max (equal but for NaN and the sign of a zero).
+func (pl *placer) zoneTerms(sc *spiralCtx, bx Rect) (t1, t3, t4 float64) {
+	z := sc.z
+	t1 = 20 * fastOutside(bx, pl.region)
+	cx, cy := (bx.MinX+bx.MaxX)/2, (bx.MinY+bx.MaxY)/2
+	dx := fmax(0, fmax(z.MinX-cx, cx-z.MaxX))
+	dy := fmax(0, fmax(z.MinY-cy, cy-z.MaxY))
+	t3 = 30 * (dx + dy) * fmax(bx.MaxX-bx.MinX, bx.MaxY-bx.MinY)
+	if sc.zoneBody {
+		t4 = 20 * fastOutside(bx, z)
+	}
+	return
+}
+
+func fmax(a, b float64) float64 {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+// fastOutside is outside for hardBound (see zoneTerms).
+func fastOutside(bx, r Rect) float64 {
+	return fmax(0, bx.MaxX-bx.MinX)*fmax(0, bx.MaxY-bx.MinY) - bx.OverlapArea(r)
+}
+
+// hardBound is a lower bound of the hard cost (hardCost) of the spiral's
+// part were its box bx and its body body: the terms that need only the box,
+// summed in partCost's order. The omitted ones (pad edge bands, isolation
+// and HV pad gaps) are ≥ 0 and float addition of non-negative terms is
+// monotone, so the bound never exceeds partCost's sum. It returns as soon
+// as a partial sum (the containment terms alone first: no neighbour
+// search) reaches lim.
+func (pl *placer) hardBound(sc *spiralCtx, bx, body Rect, lim float64) float64 {
+	p := sc.p
+	var t1, t3, t4 float64
+	if !p.Fixed {
+		t1, t3, t4 = pl.zoneTerms(sc, bx)
+		if z := t1 + t3 + t4; z >= lim {
+			return z
+		}
+	}
+	cost := pl.overlapCostIn(p, bx, &body, sc.intimate, lim)
+	if cost >= lim {
+		return cost
+	}
+	if !p.Fixed {
+		cost += t1
+		cost += t3
+		cost += t4
+	}
+	for _, kb := range sc.keepouts {
+		cost += 20 * bx.OverlapArea(kb)
+	}
+	for _, hr := range sc.holes {
+		cost += 20 * bx.OverlapArea(hr)
+	}
+	for _, hz := range sc.heightZones {
+		cost += 20 * bx.OverlapArea(hz)
 	}
 	return cost
 }
@@ -762,34 +1203,119 @@ func outside(bx, r Rect) float64 {
 	return bx.Area() - bx.OverlapArea(r)
 }
 
+// bucketEntry is a part in a placement bucket, with the first bucket
+// (lowest x, then lowest y) of the range it was filed under.
+type bucketEntry struct {
+	p      *Part
+	x0, y0 int
+}
+
+// bucketGrid files parts by placeBucket cell: a dense array over the board
+// and a margin around it (parts off the board — a pile next to it — included),
+// a map for cells beyond. The legaliser queries it millions of times; a map
+// of every cell spent most of that time hashing.
+type bucketGrid struct {
+	x0, y0, nx, ny int
+	cells          [][]bucketEntry
+	far            map[[2]int]*[]bucketEntry
+}
+
+const bucketGridMargin = 20000.0 // mil around the board kept dense
+
+func newBucketGrid(bb Rect) *bucketGrid {
+	g := &bucketGrid{far: map[[2]int]*[]bucketEntry{}}
+	if bb.Empty() || bb.W() > 1e6 || bb.H() > 1e6 {
+		return g // no sane outline: every cell in the map
+	}
+	x0, y0, x1, y1 := bucketRange(bb.Expand(bucketGridMargin))
+	g.x0, g.y0, g.nx, g.ny = x0, y0, x1-x0+1, y1-y0+1
+	g.cells = make([][]bucketEntry, g.nx*g.ny)
+	return g
+}
+
+func (g *bucketGrid) index(x, y int) int {
+	if x < g.x0 || y < g.y0 || x >= g.x0+g.nx || y >= g.y0+g.ny {
+		return -1
+	}
+	return (x-g.x0)*g.ny + (y - g.y0)
+}
+
+// at is the cell's parts (read only).
+func (g *bucketGrid) at(x, y int) []bucketEntry {
+	if i := g.index(x, y); i >= 0 {
+		return g.cells[i]
+	}
+	if c := g.far[[2]int{x, y}]; c != nil {
+		return *c
+	}
+	return nil
+}
+
+// cell is the cell's slot, created when missing.
+func (g *bucketGrid) cell(x, y int) *[]bucketEntry {
+	if i := g.index(x, y); i >= 0 {
+		return &g.cells[i]
+	}
+	k := [2]int{x, y}
+	c := g.far[k]
+	if c == nil {
+		c = new([]bucketEntry)
+		g.far[k] = c
+	}
+	return c
+}
+
+func bucketRange(r Rect) (x0, y0, x1, y1 int) {
+	return int(math.Floor(r.MinX / placeBucket)), int(math.Floor(r.MinY / placeBucket)),
+		int(math.Floor(r.MaxX / placeBucket)), int(math.Floor(r.MaxY / placeBucket))
+}
+
 func (pl *placer) forBuckets(r Rect, fn func(*Part)) {
-	x0, y0 := int(math.Floor(r.MinX/placeBucket)), int(math.Floor(r.MinY/placeBucket))
-	x1, y1 := int(math.Floor(r.MaxX/placeBucket)), int(math.Floor(r.MaxY/placeBucket))
+	x0, y0, x1, y1 := bucketRange(r)
 	for x := x0; x <= x1; x++ {
 		for y := y0; y <= y1; y++ {
-			for _, q := range pl.bucket[[2]int{x, y}] {
-				fn(q)
+			for _, e := range pl.bucket.at(x, y) {
+				fn(e.p)
+			}
+		}
+	}
+}
+
+// forBucketsOnce calls fn once per part filed in r's buckets, at its first
+// bucket in forBuckets' order (x, then y) — the order a seen-set over
+// forBuckets visits them, without the set: a part filed under buckets
+// [ex0..]×[ey0..] is first met in r's range at (max(ex0, x0), max(ey0, y0)).
+// fn returns false to stop.
+func (pl *placer) forBucketsOnce(r Rect, fn func(*Part) bool) {
+	x0, y0, x1, y1 := bucketRange(r)
+	for x := x0; x <= x1; x++ {
+		for y := y0; y <= y1; y++ {
+			for _, e := range pl.bucket.at(x, y) {
+				if max(e.x0, x0) != x || max(e.y0, y0) != y {
+					continue
+				}
+				if !fn(e.p) {
+					return
+				}
 			}
 		}
 	}
 }
 
 func (pl *placer) bucketOp(p *Part, add bool) {
-	r := pl.boxes[p]
-	x0, y0 := int(math.Floor(r.MinX/placeBucket)), int(math.Floor(r.MinY/placeBucket))
-	x1, y1 := int(math.Floor(r.MaxX/placeBucket)), int(math.Floor(r.MaxY/placeBucket))
+	x0, y0, x1, y1 := bucketRange(pl.boxes[p])
 	for x := x0; x <= x1; x++ {
 		for y := y0; y <= y1; y++ {
-			k := [2]int{x, y}
+			c := pl.bucket.cell(x, y)
 			if add {
-				pl.bucket[k] = append(pl.bucket[k], p)
+				*c = append(*c, bucketEntry{p, x0, y0})
 				continue
 			}
-			l := pl.bucket[k]
-			for i, q := range l {
-				if q == p {
+			l := *c
+			for i, e := range l {
+				if e.p == p {
 					l[i] = l[len(l)-1]
-					pl.bucket[k] = l[:len(l)-1]
+					*c = l[:len(l)-1]
 					break
 				}
 			}
@@ -798,7 +1324,7 @@ func (pl *placer) bucketOp(p *Part, add bool) {
 }
 
 func (pl *placer) rebuildBuckets() {
-	pl.bucket = map[[2]int][]*Part{}
+	pl.bucket = newBucketGrid(pl.b.Bounds())
 	pl.boxes = map[*Part]Rect{}
 	for _, p := range pl.b.Parts {
 		pl.boxes[p] = pl.box(p)
@@ -1221,9 +1747,12 @@ func (pl *placer) legalise() {
 	// (a transformer straddling the isolation strip) costs 10–40 s; with its
 	// local cost unchanged the same search finds the same nothing.
 	stuck := map[*Part]float64{}
-	for pass := 0; pass < 3; pass++ {
+	for pass := 0; pass < 3 && !pl.overBudget(); pass++ {
 		moved := false
 		for _, p := range order {
+			if pl.overBudget() {
+				break
+			}
 			hc := pl.hardCost(p)
 			if hc <= 1e-6 {
 				continue
@@ -1245,11 +1774,65 @@ func (pl *placer) legalise() {
 }
 
 // hardCost counts only the constraint violations (not decap/length terms).
-func (pl *placer) hardCost(p *Part) float64 {
+func (pl *placer) hardCost(p *Part) float64 { return pl.hardCostLim(p, math.Inf(1)) }
+
+// hardCostLim is hardCost, or a partial sum ≥ lim once it reaches lim.
+func (pl *placer) hardCostLim(p *Part, lim float64) float64 {
 	pl.hardOnly = true
-	c := pl.partCost(p)
+	c := pl.partCostLim(p, lim)
 	pl.hardOnly = false
 	return c
+}
+
+// spiralRings[ring][k] is (cos a, sin a) of the spiral's k-th point on that
+// ring, a = 2πk/n with n = max(8·ring, 1) — the same math.Cos / math.Sin
+// values the spiral computed per point, once: a full spiral (400 rings,
+// four turns) asked for them 2.5 million times per part.
+var (
+	spiralRingsOnce sync.Once
+	spiralRings     [][]Point
+)
+
+const spiralMaxRing = 400
+
+func spiralRing(ring int) []Point {
+	spiralRingsOnce.Do(func() {
+		spiralRings = make([][]Point, spiralMaxRing+1)
+		for r := range spiralRings {
+			n := max(8*r, 1)
+			cs := make([]Point, n)
+			for k := range cs {
+				a := 2 * math.Pi * float64(k) / float64(n)
+				cs[k] = Point{math.Cos(a), math.Sin(a)}
+			}
+			spiralRings[r] = cs
+		}
+	})
+	if ring <= spiralMaxRing {
+		return spiralRings[ring]
+	}
+	n := 8 * ring
+	cs := make([]Point, n)
+	for k := range cs {
+		a := 2 * math.Pi * float64(k) / float64(n)
+		cs[k] = Point{math.Cos(a), math.Sin(a)}
+	}
+	return cs
+}
+
+// spiralCentre is where the spiral of a part centred at orig starts: orig,
+// unless its zone z lies beyond the spiral's reach (its last ring, radius
+// (spiralMaxRing-1)·step, a circle: the distance is Euclidean) — then the
+// zone's nearest point, since no ring around orig could enter the zone.
+func spiralCentre(orig Point, z Rect, step float64) Point {
+	if z.Empty() {
+		return orig
+	}
+	in := Point{clamp(orig.X, z.MinX, z.MaxX), clamp(orig.Y, z.MinY, z.MaxY)}
+	if in.Dist(orig) > float64(spiralMaxRing)*step {
+		return in
+	}
+	return orig
 }
 
 func (pl *placer) spiral(p *Part) bool {
@@ -1263,19 +1846,63 @@ func (pl *placer) spiral(p *Part) bool {
 	if !pl.opt.NoRotate {
 		rots = append(rots, normDeg(rot0+90), normDeg(rot0+180), normDeg(rot0+270))
 	}
+	halo := pl.spacing/2 + pl.opt.Halo[p.Ref]
+	sc := pl.newSpiralCtx(p)
+	// A part constructed far outside its zone (more than the spiral's reach:
+	// a 1500-part board's satellites of an off-board pile) can never get
+	// there from its own spot, and every ring is a full search for nothing.
+	// Spiral around the nearest point of the zone instead.
+	centre := orig
+	if z, ok := pl.zoneOf[p]; ok {
+		centre = spiralCentre(orig, z, step)
+	}
 	for _, rot := range rots {
+		if pl.overBudget() {
+			break
+		}
 		if bestCost <= 1e-6 {
 			break
 		}
-		for ring := 0; ring < 400 && bestCost > 1e-6; ring++ {
+		// The body at this rotation, once known (looked up again only until
+		// the first real move creates it).
+		nrot := normDeg(rot)
+		rel, relOK := p.relBody[nrot]
+		relOK = relOK && len(p.Pads) > 0
+		for ring := 0; ring < spiralMaxRing && bestCost > 1e-6; ring++ {
 			r := float64(ring) * step
 			n := max(8*ring, 1)
+			if ring&15 == 15 && pl.overBudget() {
+				break
+			}
+			cs := spiralRing(ring)
 			for k := 0; k < n; k++ {
-				a := 2 * math.Pi * float64(k) / float64(n)
-				c := orig.Add(Point{r * math.Cos(a), r * math.Sin(a)})
+				c := centre.Add(Point{r * cs[k].X, r * cs[k].Y})
+				lim := bestCost - 1e-6
+				// Most spots of a crowded board are rejected on their box alone
+				// (overlap, zone, board, keep-outs): judge those on the pose
+				// movePartCentre would compute, without re-posing every pad. A
+				// rigid part's body at rot is its cached relative body moved, so
+				// the pose and box are movePartCentre's to the bit, and the next
+				// real move starts from the same anchor as it always did.
+				if relOK {
+					off := rel.Translate(p.Pos).Center().Sub(p.Pos)
+					pos := c.Sub(off)
+					body := rel.Translate(pos)
+					if boundRejects(pl.hardBound(sc, body.Expand(halo), body, lim), lim) {
+						// The pads lag behind until the next real move, which
+						// re-poses them from this anchor (movePartCentre's
+						// first MoveTo); nothing reads them in between.
+						p.Pos, p.Rotation = pos, nrot
+						continue
+					}
+				}
 				movePartCentre(p, c, rot)
 				pl.boxes[p] = pl.box(p)
-				if cost := pl.hardCost(p); cost < bestCost-1e-6 {
+				if !relOK {
+					rel, relOK = p.relBody[nrot]
+					relOK = relOK && len(p.Pads) > 0
+				}
+				if cost := pl.hardCostLim(p, lim); cost < lim {
 					best, bestRot, bestCost = c, rot, cost
 					if cost <= 1e-6 {
 						break
@@ -1292,9 +1919,11 @@ func (pl *placer) spiral(p *Part) bool {
 
 // ---- annealing ----------------------------------------------------------------
 
-func (pl *placer) anneal(deadline time.Time) {
+// anneal reports whether it stopped on its deadline before every move was
+// tried.
+func (pl *placer) anneal(deadline time.Time) bool {
 	if len(pl.movable) == 0 {
-		return
+		return false
 	}
 	pl.rebuildBuckets()
 	if w := pl.opt.Congestion; w >= 0 {
@@ -1330,9 +1959,11 @@ func (pl *placer) anneal(deadline time.Time) {
 		if i&0xff == 0 {
 			if budget > 0 {
 				timeFrac = time.Since(start).Seconds() / budget
+			} else {
+				return true // no time left at all (PlaceOptions.Deadline passed)
 			}
 			if timeFrac >= 1 {
-				break
+				return true
 			}
 		}
 		// Cooling follows the move count, so a seed reproduces its layout
@@ -1356,6 +1987,7 @@ func (pl *placer) anneal(deadline time.Time) {
 			pl.rudy.done()
 		}
 	}
+	return false
 }
 
 type savedPose struct {
@@ -1510,12 +2142,13 @@ func (pl *placer) undo(p *Part) {
 func (pl *placer) localCost(p, q *Part) float64 {
 	// Sum in a fixed order: float addition is not associative, and map order
 	// would make accept/reject decisions (and so whole runs) irreproducible.
-	nets := append([]int(nil), pl.partNet[p]...)
+	nets := append(pl.netBuf[:0], pl.partNet[p]...)
 	cost := pl.partCost(p)
 	if q != nil {
 		nets = append(nets, pl.partNet[q]...)
 		cost += pl.partCost(q)
 	}
+	pl.netBuf = nets
 	sort.Ints(nets)
 	for k, i := range nets {
 		if k == 0 || i != nets[k-1] {
@@ -1537,7 +2170,8 @@ func (pl *placer) localCost(p, q *Part) float64 {
 // groupCost is a follower's share of a block move: its nets other than the
 // ones it shares with the core (those are already in localCost).
 func (pl *placer) groupCost(d *Part) float64 {
-	nets := append([]int(nil), pl.partNet[d]...)
+	nets := append(pl.netBuf[:0], pl.partNet[d]...)
+	pl.netBuf = nets
 	sort.Ints(nets)
 	cost := 0.0
 	for k, i := range nets {
@@ -2124,7 +2758,9 @@ func (pl *placer) polish() {
 		}
 		return items[i].p.Ref < items[j].p.Ref
 	})
-	const maxPolish = 400
+	// 400 parts, or half the movable ones on a board above 800: a
+	// 1443-part board has 600-odd decaps, filters and clock parts.
+	maxPolish := max(400, len(pl.movable)/2)
 	if len(items) > maxPolish {
 		items = items[:maxPolish]
 	}
@@ -2135,6 +2771,9 @@ func (pl *placer) polish() {
 		rots = nil
 	}
 	for _, it := range items {
+		if pl.overBudget() {
+			break
+		}
 		pl.polishPart(it.p, rots, step, radius)
 	}
 }
@@ -2178,6 +2817,264 @@ func (pl *placer) polishPart(p *Part, rots []float64, step, radius float64) {
 		pl.boxes[p] = pl.box(p)
 		pl.bucketOp(p, true)
 	}
+}
+
+// rescueFarMil is how far a decap may end from the pin it serves before
+// rescueDecaps looks for a legal spot near the pin: 0.4 in (10 mm), well
+// beyond any decap tether's slack. It was an inch; on the 1443-part board
+// the decaps the clock-cut anneal left between 0.4 and 1 in kept the mean
+// near 450 mil. rescueReachMil bounds the search around the pin.
+const (
+	rescueFarMil   = 400.0
+	rescueReachMil = 1000.0
+)
+
+// decapGap is d's distance from the pin it serves (its nearest pad on the
+// pin's net), +Inf when it serves none.
+func (pl *placer) decapGap(d *Part) float64 {
+	pin := pl.decap[d]
+	if pin == nil {
+		return math.Inf(1)
+	}
+	best := math.Inf(1)
+	for _, pd := range d.Pads {
+		if pd.Net == pin.Net {
+			best = math.Min(best, pd.Box.C.Dist(pin.Box.C))
+		}
+	}
+	return best
+}
+
+// rescueDecaps brings back decaps the anneal left more than rescueFarMil
+// from their pin. On a crowded board (1443 parts, anneal cut by the
+// clock) dozens ended 3–5 inches out: polish only searches 180 mil around
+// the pin, and the spots there were taken. Each far decap spirals out from
+// its pin to the nearest legal pose (fixed parts and every other part stay
+// where they are) and moves there only when that lowers its local cost.
+func (pl *placer) rescueDecaps() {
+	var far []*Part
+	for _, d := range pl.movable {
+		if g := pl.decapGap(d); !math.IsInf(g, 1) && g > rescueFarMil {
+			far = append(far, d)
+		}
+	}
+	if len(far) == 0 {
+		return
+	}
+	pl.rebuildBuckets()
+	rots := []float64{0, 90, 180, 270}
+	if pl.opt.NoRotate {
+		rots = nil
+	}
+	for _, d := range far {
+		if pl.rescueOver() {
+			return
+		}
+		pl.rescuePart(d, rots)
+	}
+}
+
+// netLens is the weighted length of each of p's nets (each once, in index
+// order).
+func (pl *placer) netLens(p *Part) []float64 {
+	nets := append([]int(nil), pl.partNet[p]...)
+	sort.Ints(nets)
+	var out []float64
+	for k, i := range nets {
+		if k == 0 || i != nets[k-1] {
+			out = append(out, pl.netCost(i))
+		}
+	}
+	return out
+}
+
+// netsNoLonger reports whether no net got longer (1e-6 slack): the nets
+// are compared one by one, so shortening one cannot pay for another.
+func netsNoLonger(before, after []float64) bool {
+	if len(before) != len(after) {
+		return false
+	}
+	for i := range after {
+		if after[i] > before[i]+1e-6 {
+			return false
+		}
+	}
+	return true
+}
+
+// labelGuard holds what a rescue of d must not worsen: the blocked labels
+// of d and of every part near d's old pose, measured there.
+type labelGuard struct {
+	pl      *placer
+	on      bool
+	reach   float64
+	old     map[*Part]bool // part near the old pose → its label blocked there
+	blocked int
+}
+
+// labelReach is how far (mil) from a body another part's label slots can
+// reach: the longest label plus its gap and clearance.
+func (pl *placer) labelReach() float64 {
+	ls := pl.opt.Labels
+	n := 0
+	for _, p := range pl.b.Parts {
+		n = max(n, len([]rune(p.Ref)))
+	}
+	return ls.CharW*float64(n) + ls.Height + ls.Gap + ls.Clear + 1
+}
+
+// labelGuard measures the labels around d at its current pose (d in its
+// buckets).
+func (pl *placer) labelGuard(d *Part) *labelGuard {
+	g := &labelGuard{pl: pl, on: pl.opt.Labels != nil, old: map[*Part]bool{}}
+	if !g.on {
+		return g
+	}
+	g.reach = pl.labelReach()
+	pl.forBucketsOnce(d.Body().Expand(g.reach), func(q *Part) bool {
+		if q.Ref != "" && pl.c.Kinds[q.Ref] != KindMechanical {
+			g.old[q] = !pl.labelFree(q)
+		}
+		return true
+	})
+	if d.Ref != "" {
+		g.old[d] = !pl.labelFree(d)
+	}
+	for _, b := range g.old {
+		if b {
+			g.blocked++
+		}
+	}
+	return g
+}
+
+// ok reports whether d at its current pose (out of its buckets) blocks no
+// more labels than at its old one: d's own and its old and new
+// neighbours'. A new neighbour's label was free of d before.
+func (g *labelGuard) ok(d *Part) bool {
+	if !g.on {
+		return true
+	}
+	pl := g.pl
+	before, set := g.blocked, map[*Part]bool{}
+	for q := range g.old {
+		set[q] = true
+	}
+	pl.forBucketsOnce(d.Body().Expand(g.reach), func(q *Part) bool {
+		if q.Ref != "" && pl.c.Kinds[q.Ref] != KindMechanical && !set[q] {
+			set[q] = true
+			if !pl.labelFree(q) { // d is out of the buckets: its status without d
+				before++
+			}
+		}
+		return true
+	})
+	pl.bucketOp(d, true)
+	after := 0
+	for q := range set {
+		if !pl.labelFree(q) {
+			after++
+			if after > before {
+				break
+			}
+		}
+	}
+	pl.bucketOp(d, false)
+	return after <= before
+}
+
+// rescueGrace is how long past PlaceOptions.Deadline the decap rescue may
+// still run: on a loaded machine the deadline fell during polish and no
+// far decap came back (a 1443-part seed ended with decaps a mean 1355 mil
+// out). The stop is absolute — Deadline + rescueGrace — so a phase that
+// overran before it does not buy the rescue more time.
+const rescueGrace = 15 * time.Second
+
+// rescueOver reports whether the rescue must stop: past Deadline +
+// rescueGrace (it records the phase cut then).
+func (pl *placer) rescueOver() bool {
+	dl := pl.opt.Deadline
+	now := time.Now
+	if pl.clock != nil {
+		now = pl.clock
+	}
+	if dl.IsZero() || now().Before(dl.Add(rescueGrace)) {
+		return false
+	}
+	pl.overBudget()
+	return true
+}
+
+func (pl *placer) rescuePart(d *Part, rots []float64) {
+	pin := pl.decap[d].Box.C
+	pos0, rot0 := d.Pos, d.Rotation
+	before := pl.localCost(d, nil)
+	// A rescue must not lengthen any net or block a label: the local cost
+	// alone traded both for the decap's tether (szpi: 3 more blocked
+	// designators, rk3568: +0.1 in). Nets are d's (all the move changes),
+	// each on its own; labels are d's and its neighbours' at either pose.
+	wire0 := pl.netLens(d)
+	g := pl.labelGuard(d)
+	pl.bucketOp(d, false)
+	sc := pl.newSpiralCtx(d)
+	halo := pl.spacing/2 + pl.opt.Halo[d.Ref]
+	step := math.Max(pl.spacing, 10)
+	rs := rots
+	if rs == nil {
+		rs = []float64{rot0}
+	}
+	found := false
+	var bestPos Point
+	var bestRot float64
+	// Ring by ring out to the distance the decap is at now: the first ring
+	// with a legal pose holds the nearest ones; the best of its poses wins.
+	maxRing := int(math.Min(rescueReachMil, pl.decapGap(d)) / step)
+	for ring := 0; ring <= maxRing && !found && !pl.rescueOver(); ring++ {
+		r := float64(ring) * step
+		n := max(8*ring, 1)
+		best := before
+		cs := spiralRing(ring)
+		for _, rot := range rs {
+			// Past the deadline: keep the best legal pose found (none: the
+			// decap goes back), buckets restored below either way.
+			if pl.rescueOver() {
+				break
+			}
+			for k := 0; k < n; k++ {
+				// An outer ring is thousands of poses: check the stop every
+				// 64, keeping the best legal pose found so far.
+				pl.rescueEvals++
+				if k&63 == 63 && pl.rescueOver() {
+					break
+				}
+				c := pin.Add(Point{r * cs[k].X, r * cs[k].Y})
+				if rel, ok := d.relBody[normDeg(rot)]; ok && len(d.Pads) > 0 {
+					off := rel.Translate(d.Pos).Center().Sub(d.Pos)
+					pos := c.Sub(off)
+					body := rel.Translate(pos)
+					if boundRejects(pl.hardBound(sc, body.Expand(halo), body, 1e-6), 1e-6) {
+						d.Pos, d.Rotation = pos, normDeg(rot)
+						continue
+					}
+				}
+				movePartCentre(d, c, rot)
+				pl.boxes[d] = pl.box(d)
+				if pl.hardCostLim(d, 1e-6) >= 1e-6 {
+					continue
+				}
+				if cost := pl.localCost(d, nil); cost < best-1e-6 && netsNoLonger(wire0, pl.netLens(d)) && g.ok(d) {
+					best, bestPos, bestRot, found = cost, d.Pos, d.Rotation, true
+				}
+			}
+		}
+	}
+	if found {
+		d.MoveTo(bestPos, bestRot)
+	} else {
+		d.MoveTo(pos0, rot0)
+	}
+	pl.boxes[d] = pl.box(d)
+	pl.bucketOp(d, true)
 }
 
 // portReserve is the strip along a connector's protected pins that belongs
@@ -2459,12 +3356,10 @@ func (pl *placer) isoCost(p *Part, bx Rect) float64 {
 	}
 	reach := iso.MaxClearanceMil()
 	cost := 0.0
-	seen := map[*Part]bool{}
-	pl.forBuckets(bx.Expand(reach), func(q *Part) {
-		if q == p || seen[q] {
-			return
+	pl.forBucketsOnce(bx.Expand(reach), func(q *Part) bool {
+		if q == p {
+			return true
 		}
-		seen[q] = true
 		for _, a := range p.Pads {
 			da := iso.NetDomain[a.Net]
 			if da == "" {
@@ -2485,6 +3380,7 @@ func (pl *placer) isoCost(p *Part, bx Rect) float64 {
 				}
 			}
 		}
+		return true
 	})
 	return cost
 }
@@ -2522,12 +3418,10 @@ func (pl *placer) hvPadCost(p *Part, bx Rect) float64 {
 	}
 	base := pl.b.Rules.Clearance
 	cost := 0.0
-	seen := map[*Part]bool{}
-	pl.forBuckets(bx.Expand(pl.hvReach), func(q *Part) {
-		if q == p || seen[q] {
-			return
+	pl.forBucketsOnce(bx.Expand(pl.hvReach), func(q *Part) bool {
+		if q == p {
+			return true
 		}
-		seen[q] = true
 		for _, a := range p.Pads {
 			if a.Net == "" {
 				continue
@@ -2545,6 +3439,7 @@ func (pl *placer) hvPadCost(p *Part, bx Rect) float64 {
 				}
 			}
 		}
+		return true
 	})
 	return cost
 }

@@ -85,6 +85,32 @@ func fakeRouterMain(router string, args []string) int {
 			case <-time.After(20 * time.Second):
 				return 9 // never asked to stop gracefully
 			}
+		case "checkpoint-hang": // writes a checkpoint session, never stops, never reports: killed
+			os.WriteFile(argAfter(args, "-do"), []byte(fakeSessionFor(args)), 0o644)
+			signal.Notify(make(chan os.Signal, 1), os.Interrupt)
+			fakeReady()
+			time.Sleep(60 * time.Second)
+			return 9
+		case "echo-pairs": // the session names every net of the pairs file
+			os.WriteFile(argAfter(args, "-do"), []byte(fakeSessionFor(args)), 0o644)
+			os.WriteFile(rep, []byte(report+"\n"), 0o644)
+			return 0
+		case "finished-hang": // fastroute 0.1.14 on a large board: logs its counts, "routing finished", saves the session, then neither exits nor reports until stopped
+			ses := argAfter(args, "-do")
+			sig := make(chan os.Signal, 1)
+			signal.Notify(sig, os.Interrupt)
+			fmt.Fprintf(os.Stderr, "  510.869 INFO  checkpoint: best board so far (7 unrouted, 3 violations) written to '%s'\n", ses)
+			fmt.Fprintf(os.Stderr, "  1665.799 INFO  checkpoint: best board so far (5 unrouted, 2 violations) written to '%s'\n", ses)
+			fmt.Fprintln(os.Stderr, "  1667.754 INFO  routing finished in 1640.48 s")
+			os.WriteFile(ses, []byte("(session x)\n"), 0o644)
+			fmt.Fprintf(os.Stderr, "  1667.847 INFO  saved '%s' (12 bytes)\n", strings.ReplaceAll(ses, "/", "\\"))
+			fakeReady()
+			select {
+			case <-sig:
+				return 0 // stops, still without a report
+			case <-time.After(60 * time.Second):
+				return 9
+			}
 		case "ignore-stop": // catches the stop request and keeps routing: must be killed
 			signal.Notify(make(chan os.Signal, 1), os.Interrupt)
 			fakeReady()
@@ -133,4 +159,24 @@ func fakeReady() {
 	if p := os.Getenv(envFakeFRReady); p != "" {
 		_ = os.WriteFile(p, []byte("ready\n"), 0o644)
 	}
+}
+
+// fakeSessionFor is a session naming each net token of --pairs as
+// fastroute writes it: (net TOKEN (wire ...)).
+func fakeSessionFor(args []string) string {
+	var b strings.Builder
+	b.WriteString("(session x (routes (network_out\n")
+	for _, a := range args {
+		if p, ok := strings.CutPrefix(a, "--pairs="); ok {
+			raw, _ := os.ReadFile(p)
+			for _, line := range strings.Split(string(raw), "\n") {
+				f := strings.Fields(line)
+				if len(f) >= 3 && f[0] == "pair" {
+					fmt.Fprintf(&b, "  (net %s (wire (path F.Cu 100 0 0 10 0)))\n  (net %s (wire (path F.Cu 100 0 5 10 5)))\n", f[1], f[2])
+				}
+			}
+		}
+	}
+	b.WriteString(")))\n")
+	return b.String()
 }

@@ -13,6 +13,7 @@ package app
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -49,8 +50,11 @@ type sbSpec struct {
 	UnusedPins string `json:"unusedPins,omitempty"`
 	// ZoneOrder: "flow" (default: connectors → regulators → controller →
 	// peripherals) or "spec" (the zones list order).
-	ZoneOrder string   `json:"zoneOrder,omitempty"`
-	LibDirs   []string `json:"libDirs,omitempty"`
+	ZoneOrder string `json:"zoneOrder,omitempty"`
+	// LibDirs: symbol / footprint library directories. A relative entry is
+	// relative to the spec file's directory (loadSbSpec makes it absolute),
+	// not to the working directory.
+	LibDirs []string `json:"libDirs,omitempty"`
 	// Intent is passed to `intent derive --spec` (standard, layers, rules …);
 	// rails/net voltage+current from this spec are merged into its rails.
 	Intent json.RawMessage `json:"intent,omitempty"`
@@ -159,6 +163,15 @@ func loadSbSpec(path string) (*sbSpec, error) {
 	}
 	if s.Schema != "" && s.Schema != sbSchema {
 		return nil, fmt.Errorf("%s: schema %q, want %q", path, s.Schema, sbSchema)
+	}
+	specDir, err := filepath.Abs(filepath.Dir(path))
+	if err != nil {
+		return nil, err
+	}
+	for i, d := range s.LibDirs {
+		if d != "" && !filepath.IsAbs(d) {
+			s.LibDirs[i] = filepath.Join(specDir, d)
+		}
 	}
 	return &s, nil
 }
@@ -544,6 +557,9 @@ type sbResolveOpts struct {
 	Offline   bool // never touch the network (cache / local symbols / generated only)
 	Jobs      int
 	PartsPath string
+	// NoFootprintCheck skips footprint file resolution and its diagnostics
+	// (sch-edit reading its stored base design; the rebuild checks).
+	NoFootprintCheck bool
 }
 
 type sbResolveStats struct {
@@ -826,7 +842,219 @@ func resolveSymbols(parts []*sbRPart, opts sbResolveOpts, libDirs []string) (st 
 			p.Footprint = kicad.LibSymbolProperty(text, "Footprint")
 		}
 	}
+	// Footprint problems fail the build like every other spec problem: the
+	// error is returned here explicitly (the deferred handler above only
+	// fills in an error when none is returned).
+	// "lcsc:FOO" on a part whose symbol is not from LCSC (stock, generated,
+	// local): the footprint an LCSC import of this build brought, if any;
+	// else the normal lookup below (libDirs, project dir) with its
+	// diagnostics — never skipped by nickname.
+	if opts.NoFootprintCheck {
+		if len(diags) > 0 {
+			return st, &sbDiagErr{diags}
+		}
+		return st, nil
+	}
+	for _, p := range parts {
+		if fl, ff, ok := strings.Cut(p.Footprint, ":"); ok && fl == "lcsc" && p.FPFile == "" {
+			p.FPFile = sbLCSCFootprintFile(ff, nil, cached, "")
+		}
+	}
+	diags = append(diags, sbResolveFootprintLibs(parts, dirs, &st)...)
+	if len(diags) > 0 {
+		return st, &sbDiagErr{diags}
+	}
 	return st, nil
+}
+
+// sbFPLibCheck answers whether a footprint "Lib:Name" is one KiCad finds
+// without the project, checked down to the footprint file. The user's
+// global fp-lib-table decides what a nickname is (path variables such as
+// ${KICAD10_FOOTPRINT_DIR} expanded): an enabled row is the library, a
+// nickname whose rows are all disabled is one KiCad cannot load. Only a
+// nickname with no global row falls back to the stock install. Stock and
+// global inspection are tracked apart: a library is reported missing only
+// when every source that could hold it was inspected; otherwise the build
+// notes it as unverified.
+type sbFPLibCheck struct {
+	once     bool
+	stock    string // stock footprint dir ("" = none found)
+	tables   *kicad.FPLibTables
+	globalOK bool // a global table was read completely (no unreadable nested table)
+}
+
+// sbStockFootprintDir / sbLoadFPLibTables are what the check reads; tests
+// replace them.
+var (
+	sbStockFootprintDir = kicad.StockFootprintDir
+	sbLoadFPLibTables   = kicad.LoadFPLibTables
+)
+
+type sbFPExt int
+
+const (
+	sbFPExtOK         sbFPExt = iota // found
+	sbFPExtNoFP                      // the library resolves, the footprint is not in it
+	sbFPExtNoLib                     // the library resolves nowhere
+	sbFPExtUnverified                // nothing could be inspected (no KiCad install, unreadable tables)
+)
+
+// external checks lib:name outside the project; where is the library
+// folder for sbFPExtNoFP.
+func (c *sbFPLibCheck) external(lib, name string) (res sbFPExt, where string) {
+	if !c.once {
+		c.once = true
+		c.stock = sbStockFootprintDir()
+		// The project directory given is a fresh temp one: only global rows
+		// count (an old <out>/fp-lib-table is rewritten by this build).
+		if tmp, err := os.MkdirTemp("", "pcbpilot-fplib-"); err == nil {
+			if t, err := sbLoadFPLibTables(tmp); err == nil {
+				c.tables = t
+				// An existing table, even an empty one, is an inspection;
+				// a nested table that could not be read leaves it partial.
+				c.globalOK = t.GlobalTable != ""
+				for _, l := range t.Libs {
+					if l.Scope == "global" && l.Blocked {
+						c.globalOK = false
+					}
+				}
+			}
+			os.RemoveAll(tmp)
+		}
+	}
+	if c.tables != nil {
+		hasRow := false
+		for _, l := range c.tables.Libs {
+			if l.Scope == "global" && l.Nickname == lib {
+				hasRow = true
+			}
+		}
+		if hasRow { // the table decides, the stock folder of the same name does not
+			ref, err := c.tables.Resolve(lib + ":" + name)
+			var fe *kicad.FPLibError
+			switch {
+			case err == nil && ref.Scope == "global":
+				return sbFPExtOK, ""
+			case errors.As(err, &fe) && fe.Code == kicad.ErrFPNotFound:
+				return sbFPExtNoFP, filepath.Dir(fe.Path)
+			case c.globalOK: // disabled everywhere, bad URI, missing folder
+				return sbFPExtNoLib, ""
+			default: // an unreadable nested table may define it
+				return sbFPExtUnverified, ""
+			}
+		}
+	}
+	if c.stock != "" {
+		if d := filepath.Join(c.stock, lib+".pretty"); sbIsDir(d) {
+			if fileExists(filepath.Join(d, name+".kicad_mod")) {
+				return sbFPExtOK, ""
+			}
+			return sbFPExtNoFP, d
+		}
+	}
+	// No global row and not in the stock install (or none found): missing
+	// only when the global table was inspected completely.
+	if c.globalOK {
+		return sbFPExtNoLib, ""
+	}
+	return sbFPExtUnverified, ""
+}
+
+func sbIsDir(p string) bool {
+	st, err := os.Stat(p)
+	return err == nil && st.IsDir()
+}
+
+// sbResolveFootprintLibs gives every part whose footprint names a library
+// found under the project dir or the spec's libDirs (<dir>/<lib>.pretty, or
+// a libDirs entry that is itself <lib>.pretty) the footprint file to copy
+// into the project — whatever its symbol came from (stock, LCSC, generated,
+// local). The build then ships <lib>.pretty and registers it in the
+// project fp-lib-table as ${KIPRJMOD}/<lib>.pretty, like the symbol libs.
+// A library found nowhere — not there, not KiCad's stock footprints, not
+// the user's global fp-lib-table — is a spec error (FOOTPRINT_LIB_NOT_FOUND):
+// before v0.12.1 such a footprint was left out silently and `kicad pcb-sync`
+// failed later with E_FP_LIB_UNRESOLVED.
+func sbResolveFootprintLibs(parts []*sbRPart, dirs []string, st *sbResolveStats) []sbDiag {
+	var diags []sbDiag
+	var ext sbFPLibCheck
+	libDir := map[string]string{} // nickname → <lib>.pretty found ("" = not under dirs)
+	findLib := func(lib string) string {
+		if d, ok := libDir[lib]; ok {
+			return d
+		}
+		d := ""
+		for _, dir := range dirs {
+			if dir == "" {
+				continue
+			}
+			if c := filepath.Join(dir, lib+".pretty"); sbIsDir(c) {
+				d = c
+				break
+			}
+			if filepath.Base(filepath.Clean(dir)) == lib+".pretty" && sbIsDir(dir) {
+				d = dir
+				break
+			}
+		}
+		libDir[lib] = d
+		return d
+	}
+	noted := map[string]bool{}
+	missing := map[string][]string{}
+	var order []string
+	for _, p := range parts {
+		lib, name, ok := strings.Cut(p.Footprint, ":")
+		if !ok || lib == "" || name == "" || p.FPFile != "" {
+			continue
+		}
+		if d := findLib(lib); d != "" {
+			f := filepath.Join(d, name+".kicad_mod")
+			if !fileExists(f) {
+				diags = append(diags, sbDiag{Code: "FOOTPRINT_NOT_FOUND", Message: fmt.Sprintf("%s: footprint %s: library %s has no %s.kicad_mod", p.Ref, p.Footprint, d, name),
+					Fix: "fix the footprint name, or add the .kicad_mod to the library"})
+				continue
+			}
+			p.FPFile = f
+			continue
+		}
+		res, where := ext.external(lib, name)
+		if res == sbFPExtOK {
+			continue
+		}
+		if res == sbFPExtNoFP {
+			diags = append(diags, sbDiag{Code: "FOOTPRINT_NOT_FOUND", Message: fmt.Sprintf("%s: footprint %s: library %s has no %s.kicad_mod", p.Ref, p.Footprint, where, name),
+				Fix: "fix the footprint name, or add the .kicad_mod to the library"})
+			continue
+		}
+		if res == sbFPExtUnverified {
+			if !noted[lib] {
+				noted[lib] = true
+				st.Notes = append(st.Notes, fmt.Sprintf("footprint library %q (%s …) is not under the project dir or libDirs, and no KiCad install / global fp-lib-table could be read to check it", lib, p.Ref))
+			}
+			continue
+		}
+		if missing[lib] == nil {
+			order = append(order, lib)
+		}
+		missing[lib] = append(missing[lib], p.Ref)
+	}
+	var where []string
+	for _, dir := range dirs {
+		if dir != "" {
+			where = append(where, dir)
+		}
+	}
+	for _, lib := range order {
+		refs := missing[lib]
+		if len(refs) > 8 {
+			refs = append(refs[:8:8], fmt.Sprintf("… %d more", len(missing[lib])-8))
+		}
+		diags = append(diags, sbDiag{Code: "FOOTPRINT_LIB_NOT_FOUND",
+			Message: fmt.Sprintf("%s: footprint library %q is in no libDirs entry (looked for %s.pretty in %s), not a KiCad stock library and not in the global fp-lib-table", strings.Join(refs, ", "), lib, lib, strings.Join(where, ", ")),
+			Fix:     fmt.Sprintf("add the directory holding %s.pretty to the spec's \"libDirs\" (the build copies it into the project and registers ${KIPRJMOD}/%s.pretty), or fix the footprint", lib, lib)})
+	}
+	return diags
 }
 
 // sbPassiveRefs are designator classes whose pins are electrically passive.
@@ -1211,7 +1439,7 @@ func sbFlags(c *cobra.Command, o *sbOptions) {
 	f.StringVar(&o.PartsPath, "parts", "", "standard-parts.json for blocks (default: the installed skill's)")
 	f.IntVar(&o.Jobs, "jobs", 8, "parallel LCSC imports / zone plans")
 	f.IntVar(&o.PlannerBudget, "planner-budget", 20000, "layout planner candidate budget per zone (bounds one planner run)")
-	f.DurationVar(&o.PlannerTimeout, "planner-timeout", 20*time.Second, "wall-time budget of the layout stage: zones not started by then use the grid")
+	f.DurationVar(&o.PlannerTimeout, "planner-timeout", 20*time.Second, "planner cutoff for the whole layout stage: no planner run starts after it (those zones use the grid); a run already started finishes, bounded by --planner-budget, so the stage can take longer (reported in warnings)")
 	f.StringArrayVar(&o.Requirements, "requirements", nil, "project requirement document(s): the schematic design review (review-panel, stage schematic) runs on them")
 	f.StringVar(&o.Reviewers, "review", "codex,kimi,claude", "design-review reviewer CLIs (all must pass); runs when --requirements is given")
 	f.BoolVar(&o.NoReview, "no-review", false, "skip the design review despite --requirements; needs a signed waiver {\"gate\":\"design-review\",\"match\":\"--no-review\"} in --waivers")

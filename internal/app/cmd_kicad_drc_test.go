@@ -94,8 +94,12 @@ func TestKicadRouteDRCConsumersMalformedReport(t *testing.T) {
 		if c.Quick || !strings.Contains(c.QuickNote, "DRC did not run") {
 			t.Errorf("%s (exit %s): quick check %v %q", tc.fixture, tc.code, c.Quick, c.QuickNote)
 		}
-		if _, err := r.starvedThermals(c.Board); err == nil {
-			t.Errorf("%s (exit %s): starved-thermal pass ran on an unreadable report", tc.fixture, tc.code)
+		// The starved-thermal repair is optional: an unreadable DRC never
+		// stops the route, the board is kept and a cannot-check gate says
+		// the check did not happen.
+		if b, err := r.starvedThermals(c.Board); err != nil || b != c.Board || len(r.stepGates) != 1 ||
+			r.stepGates[0].Gate != "starved-thermals" || r.stepGates[0].Pass || !strings.Contains(r.stepGates[0].Detail, "cannot check") {
+			t.Errorf("%s (exit %s): starved-thermal pass on an unreadable report: %v %v %+v", tc.fixture, tc.code, b, err, r.stepGates)
 		}
 		if _, err := r.kt.DRC(c.Board, filepath.Join(r.work, "input-drc.json")); err == nil {
 			t.Errorf("%s (exit %s): input DRC read", tc.fixture, tc.code)

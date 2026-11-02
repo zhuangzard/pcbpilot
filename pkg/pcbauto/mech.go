@@ -35,6 +35,11 @@ type MechSpec struct {
 		// Margin) instead of honouring width/height.
 		AutoSize bool    `json:"autoSize,omitempty"`
 		Margin   float64 `json:"margin,omitempty"`
+		// ReplaceOutline lets width/height or outline replace a board that
+		// already has an outline (placed at that outline's lower-left
+		// corner). Without it the existing outline stays and the spec's size
+		// must match it (0.1 mm), or the spec is refused.
+		ReplaceOutline bool `json:"replaceOutline,omitempty"`
 	} `json:"board"`
 	Holes       []MechHole `json:"holes,omitempty"`
 	CornerHoles *struct {
@@ -141,17 +146,7 @@ var screwHoles = map[string][2]float64{ // drill, keepout diameter (mm)
 // keepouts, fixed poses and edge connectors. It returns the constraint set
 // the placer must keep.
 func ApplyMech(b *Board, m *MechSpec) (*Mechanics, error) {
-	return applyMech(b, m, false, false)
-}
-
-// ApplyMechAnchored is ApplyMech for a board whose outline stays where it is
-// (kicad place keeps the KiCad Edge.Cuts): a spec outline (width/height or
-// polygon) is laid out from the existing outline's lower-left corner instead
-// of the model origin, so the model and the written board share one frame.
-// Without it a KiCad outline at y-down 0..120 mm (y-up −120..0) moved the
-// model board to 0..120 and every part was written 120 mm above the board.
-func ApplyMechAnchored(b *Board, m *MechSpec) (*Mechanics, error) {
-	return applyMech(b, m, false, true)
+	return applyMech(b, m, false)
 }
 
 // ApplyMechInPlace is ApplyMech for a route-only run: fixed and edge parts
@@ -160,10 +155,39 @@ func ApplyMechAnchored(b *Board, m *MechSpec) (*Mechanics, error) {
 // noted. Snapping U1 0.05 mil to the ESP32 top edge in the model hid a via
 // 5.96 mil from U1.36 on the real board (engine DRC saw 5.99).
 func ApplyMechInPlace(b *Board, m *MechSpec) (*Mechanics, error) {
-	return applyMech(b, m, true, false)
+	return applyMech(b, m, true)
 }
 
-func applyMech(b *Board, m *MechSpec, inPlace, anchored bool) (*Mechanics, error) {
+// mechOutline sets the spec's outline want (spec origin 0,0). A board
+// without one takes it as is. A board with one keeps it: the spec's
+// coordinates are from the board's lower-left corner, so replacing it by a
+// rectangle at 0,0 put every hole, fixed part and edge connector — and on
+// a KiCad board, whose outline rarely starts at 0,0, every placed part —
+// off the real board. A spec of the same size (0.1 mm) keeps the board's
+// outline; another size is refused unless replace, which moves the spec's
+// outline to the board's lower-left corner.
+func mechOutline(b *Board, want []Point, replace bool, k float64) error {
+	if len(b.Outline) < 3 {
+		b.Outline = want
+		return nil
+	}
+	old, nb := b.Bounds(), PolyBounds(want)
+	if !replace {
+		const tolMil = 0.1 / 0.0254 // 0.1 mm
+		if math.Abs(nb.W()-old.W()) > tolMil || math.Abs(nb.H()-old.H()) > tolMil {
+			return fmt.Errorf("mech board %.1f x %.1f differs from the board's outline %.1f x %.1f (spec units): drop the board section to keep the outline, or set board.replaceOutline to replace it", nb.W()/k, nb.H()/k, old.W()/k, old.H()/k)
+		}
+		return nil
+	}
+	d := Point{old.MinX - nb.MinX, old.MinY - nb.MinY}
+	b.Outline = make([]Point, len(want))
+	for i, p := range want {
+		b.Outline[i] = p.Add(d)
+	}
+	return nil
+}
+
+func applyMech(b *Board, m *MechSpec, inPlace bool) (*Mechanics, error) {
 	k := 1 / 0.0254 // mm → mil
 	if strings.EqualFold(m.Units, "mil") {
 		k = 1
@@ -176,21 +200,21 @@ func applyMech(b *Board, m *MechSpec, inPlace, anchored bool) (*Mechanics, error
 		}
 	}
 	// Outline.
-	var ox, oy float64 // spec origin in board coordinates
-	if anchored && len(b.Outline) >= 3 {
-		ob := b.Bounds()
-		ox, oy = ob.MinX, ob.MinY
-	}
+	var want []Point // the spec's outline, from its own origin
 	switch {
 	case len(m.Board.Outline) >= 3:
-		b.Outline = nil
 		for _, p := range m.Board.Outline {
-			b.Outline = append(b.Outline, Point{ox + p[0]*k, oy + p[1]*k})
+			want = append(want, Point{p[0] * k, p[1] * k})
 		}
 	case m.Board.Width > 0 && m.Board.Height > 0:
-		b.Outline = RoundedRect(Rect{ox, oy, ox + m.Board.Width*k, oy + m.Board.Height*k}, m.Board.CornerRadius*k)
+		want = RoundedRect(Rect{0, 0, m.Board.Width * k, m.Board.Height * k}, m.Board.CornerRadius*k)
 	case !m.Board.AutoSize && len(b.Outline) < 3:
 		return nil, fmt.Errorf("mech spec needs board.width/height, an outline, or autoSize")
+	}
+	if want != nil {
+		if err := mechOutline(b, want, m.Board.ReplaceOutline, k); err != nil {
+			return nil, err
+		}
 	}
 	if m.Board.Thickness > 0 {
 		b.Rules.BoardThickMil = m.Board.Thickness * k

@@ -4,7 +4,7 @@ description: "pcbpilot 仿真与设计文档专项：电源直流仿真（每网
 license: MIT
 metadata:
   author: "zhuangzard (pcbpilot); original easyeda-agent by zhoushoujianwork"
-  version: "0.12.1"
+  version: "0.12.3"
   homepage: "https://github.com/zhuangzard/pcbpilot"
 ---
 
@@ -68,7 +68,9 @@ metadata:
 2. **电源仿真**：`pcbpilot sim power --connectivity sch-P1.json --connectivity sch-P2.json --values list-P1.json
    --values list-P2.json --out sim.json --report sim.md --spice sim.cir --spice-check`。
    - 先看 `sim.md` 的 Warnings/Assumptions：所有轨 0 V 或 “no power model” = 输入源或稳压器没匹配上，结果作废，
-     写 `--models project-models.json`（`connector-source` / `ldo` / `buck` / `load`，字段见库文件 `_doc`）后重跑。
+     写 `--models project-models.json`（`connector-source` / `ldo` / `buck` / `load`；电源路径上的 MOSFET 用
+     `mosfet`（默认导通，`"on": false` 关断），同型号分别建模用 `"match":{"refs":["Q7"]}`；字段见库文件 `_doc`，
+     示例见 [power-sim.md](../pcbpilot/references/power-sim.md) §6）后重跑，不用代理件顶替 MOSFET。
    - `spiceCheck.pass` 只证明线性化网表与 ngspice 一致，不证明模型对。
 3. **设计意图**：`pcbpilot intent derive --connectivity … --values … --sim sim.json [--spec spec.json] --out intent.json
    --report intent.md --analog-out analog.json`。`--strict` 让 error 级 finding 非零退出；只有板子没有原理图时用
@@ -127,6 +129,7 @@ metadata:
 | 报告 §7 多项 N/A | 没给 `--drc` / `--check` / `--reload-board` / `--net-diff` | 补证据再出下一版；交付版必须齐 |
 | `signoff-review` 缺 review.json | 未跑设计评审 | `review-panel --stage design`（router 的评审流程），不伪造 |
 | `signoff-copper` intent-widths 失败 | 走线窄于 intent 线宽或 `widthMil.min` | 交还 router 加宽/并联铜；改完重 dump → post-layout → signoff |
+| `signoff-copper` cannot check: <net>: … no track, via or filled copper | 这些网络还没布线（自身 0 走线/弧/过孔/已灌铺铜；别的网有铜不算） | 先布线（`kicad route` / `pcb auto route`），再重 dump → post-layout → signoff |
 | `board-manual` 门禁失败 | notes 缺接口用途、逐脚说明、LED、电源输入，或 post.json 不是同一板 | 按 board-manual.md 补 `pcbpilot.manual-notes.json`；先跑同板 post-layout |
 
 实测样例与数字见 [references/verified-runs.md](references/verified-runs.md)。

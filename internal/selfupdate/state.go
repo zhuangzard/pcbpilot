@@ -253,6 +253,58 @@ func ReadUpdateState() UpdateState {
 	return s
 }
 
+// OneShotPhase: the outcome of an apply, announced once (done, rolled back,
+// failed); pending/deferred states are reported while they last.
+func OneShotPhase(phase string) bool {
+	return phase == PhaseDone || phase == PhaseRolledBack || phase == PhaseFailed
+}
+
+// OutcomeID names one apply outcome: health hands it out with the notice it
+// built from that outcome, and the CLI acknowledges exactly that one.
+type OutcomeID struct {
+	Phase string    `json:"phase"`
+	To    string    `json:"to,omitempty"`
+	At    time.Time `json:"at"`
+}
+
+// Outcome is the state's outcome identity (zero unless a one-shot phase).
+func (s UpdateState) Outcome() OutcomeID {
+	if !OneShotPhase(s.Phase) {
+		return OutcomeID{}
+	}
+	return OutcomeID{Phase: s.Phase, To: s.To, At: s.At}
+}
+
+// Zero reports an empty identity.
+func (o OutcomeID) Zero() bool { return o.Phase == "" }
+
+// Same compares two identities (time by instant, not representation).
+func (o OutcomeID) Same(p OutcomeID) bool {
+	return o.Phase == p.Phase && o.To == p.To && o.At.Equal(p.At)
+}
+
+// UpdateNoticedPath holds the outcome a CLI session last relayed. It is its
+// own file, written only with an identity health handed out, so an ack
+// never rewrites update-state.json (no read-modify-write against the
+// daemon) and can never cover an outcome nobody was shown: a newer outcome
+// has another identity and is announced.
+func UpdateNoticedPath() string { return statePath("update-noticed.json") }
+
+// ReadNoticedOutcome is the last acknowledged outcome (zero when none).
+func ReadNoticedOutcome() OutcomeID {
+	var o OutcomeID
+	_ = ReadJSON(UpdateNoticedPath(), &o)
+	return o
+}
+
+// AckUpdateOutcome records that the outcome id was shown (atomic write).
+func AckUpdateOutcome(id OutcomeID) error {
+	if id.Zero() {
+		return nil
+	}
+	return WriteJSON(UpdateNoticedPath(), id)
+}
+
 // ── session.json ──────────────────────────────────────────────────────────
 
 type Session struct {

@@ -88,7 +88,7 @@ func TestMergeSchematicWins(t *testing.T) {
 		{Ref: "U1", Value: "LDO", LCSC: "C6186", LCSCField: "LCSC"},
 		{Ref: "Q1", Value: "AO3400", LCSC: "C20917", LCSCField: "LCSC"},
 		{Ref: "D1", Value: "RED", DNP: true},
-		{Ref: "R2", Value: "0R"},
+		{Ref: "R2", Value: "0R", DNP: true}, // DNP on the board too (in sync)
 		// J1 absent → excluded, warned
 	}
 	parts, warns := MergeParts(loadFix(t), sch, true)
@@ -222,6 +222,31 @@ func TestParseSchBOM(t *testing.T) {
 	}
 	if len(got) != 3 || got[0].LCSC != "C25744" || got[0].LCSCField != "LCSC" || !got[2].DNP || got[2].Ref != "R3" {
 		t.Fatalf("%+v", got)
+	}
+}
+
+// kicad-cli writes a reference with a letter suffix as "J18A?" (KiCad reads
+// it as unannotated); the board footprint is "J18A", and MergeParts must
+// find it instead of warning that the board part is not in the BOM.
+func TestParseSchBOMLetterSuffix(t *testing.T) {
+	csv := `"Reference","Value","Footprint","DNP","EXCLUDE_FROM_BOM","LCSC"` + "\n" +
+		`"J9A?","CONN","C:C_1","","","C1"` + "\n" +
+		`"J9B?,R?","CONN","C:C_1","","","C1"` + "\n"
+	got, err := ParseSchBOM([]byte(csv))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var refs []string
+	for _, p := range got {
+		refs = append(refs, p.Ref)
+	}
+	if strings.Join(refs, " ") != "J9A J9B R?" {
+		t.Fatalf("refs %v", refs)
+	}
+	bd := &Board{Footprints: []Footprint{{Ref: "J9A", LibID: "C:C_1"}, {Ref: "J9B", LibID: "C:C_1"}}}
+	parts, warns := MergeParts(bd, got, true)
+	if len(warns) != 0 || len(parts) != 2 || parts[0].LCSC != "C1" || parts[1].LCSC != "C1" {
+		t.Fatalf("parts %+v warns %v", parts, warns)
 	}
 }
 
@@ -494,5 +519,28 @@ func TestLiveImportLCSC(t *testing.T) {
 	mods, _ := filepath.Glob(filepath.Join(dir, "lcsc.pretty", "*.kicad_mod"))
 	if len(mods) != 1 {
 		t.Fatalf("footprints %v", mods)
+	}
+}
+
+// A symbol field named "DNP" shadows KiCad's DNP flag in the BOM's ${DNP}
+// column. Its note is not the flag (pkg/population): without the netlist
+// only KiCad's own "DNP" rendering counts; the note's part stays fitted and
+// MergeParts warns about it.
+func TestMergePartsWarnsDNPField(t *testing.T) {
+	csv := `"Reference","Value","Footprint","DNP","EXCLUDE_FROM_BOM","LCSC"` + "\n" +
+		`"C9","1n","C:C_0603","backup footprint","",""` + "\n" +
+		`"R9","10k","R:R_0603","DNP","",""` + "\n" +
+		`"R10","10k","R:R_0603","","","C25744"` + "\n"
+	rows, err := ParseSchBOM([]byte(csv))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bd := &Board{Footprints: []Footprint{{Ref: "C9"}, {Ref: "R9", DNP: true}, {Ref: "R10"}}}
+	parts, warns := MergeParts(bd, rows, true)
+	if len(parts) != 3 || parts[0].DNP || !parts[1].DNP || parts[2].DNP {
+		t.Fatalf("parts %+v", parts)
+	}
+	if len(warns) != 1 || !strings.Contains(warns[0], `C9: symbol field "DNP" = "backup footprint" but KiCad's DNP flag is off`) {
+		t.Fatalf("warnings %v", warns)
 	}
 }

@@ -33,6 +33,11 @@ type Engine struct {
 	warnings    []string
 	assumptions []string
 	runs        map[string]*run
+	// floated are ground nets on the far side of a choke winding that joins
+	// two ground nets (a CMC's return line GND_J–GND): their own node, so the
+	// return current and the winding DCR are solved instead of vanishing
+	// into the one reference node.
+	floated map[string]bool
 }
 
 // NewEngine binds models for d.
@@ -42,6 +47,7 @@ func NewEngine(d *Design, libs Libraries, opt Options) *Engine {
 		e.warnf("no power-model library loaded — every IC uses the generic assumed load")
 	}
 	e.bindAll()
+	e.floatChokeGrounds()
 	return e
 }
 
@@ -123,7 +129,7 @@ func (r *run) assumef(format string, args ...any) {
 }
 
 func (e *Engine) node(c *Circuit, net string) int {
-	if e.isGround(net) {
+	if e.isGround(net) && !e.floated[net] {
 		return Ground
 	}
 	return c.Node(net)
@@ -148,7 +154,7 @@ func (e *Engine) term(c *Circuit, ref string, pins []Pin) (Terminal, bool) {
 		if p.Net == "" {
 			return Terminal{}, false
 		}
-		if p.Net != net && !(e.isGround(p.Net) && e.isGround(net)) {
+		if p.Net != net && !(e.isGround(p.Net) && e.isGround(net) && !e.floated[p.Net] && !e.floated[net]) {
 			return Terminal{}, false
 		}
 	}
@@ -185,6 +191,21 @@ func (e *Engine) switchClosed(b *binding, sc scenario) (bool, string) {
 		return true, "momentary switch pressed in " + sc.name
 	}
 	return false, "momentary switch released in " + sc.name
+}
+
+// mosfetOn is a mosfet model's state: --switch REF=closed|open, else the
+// model's "on" (default on: the model declares a conducting pass element).
+func (e *Engine) mosfetOn(b *binding) (bool, string) {
+	if v, ok := e.opt.Switches[b.part.Ref]; ok {
+		return v, "--switch override"
+	}
+	if b.model.On != nil && !*b.model.On {
+		return false, "model " + b.model.ID + " declares it off"
+	}
+	if b.model.On != nil {
+		return true, "model " + b.model.ID + " declares it on"
+	}
+	return true, "mosfet model " + b.model.ID + " is on by default (set \"on\": false or --switch " + b.part.Ref + "=open)"
 }
 
 func (e *Engine) loadKnee(net string) float64 {
@@ -234,7 +255,7 @@ func (e *Engine) build(sc scenario) *run {
 			if b.kind == KindInductor && len(p.Pins) == 4 {
 				// Common-mode choke: each winding is its own series DCR. Two-terminal
 				// handling left the part open, cutting the input of every board with
-				// a CMC (Board-C: 24 V inlet and both motor lines simulated at 0 V).
+				// a CMC (a field board: 24 V inlet and both motor lines simulated at 0 V).
 				e.stampWindings(c, r, b, add)
 				continue
 			}
@@ -295,6 +316,30 @@ func (e *Engine) build(sc scenario) *run {
 				ron = e.def.SwitchRonOhm
 			}
 			add(b, &resistor{t: [2]Terminal{t0, t1}, r: ron}, p.Ref+" closed")
+		case KindMOSFET:
+			on, why := e.mosfetOn(b)
+			if !on {
+				r.assumef("%s off: %s", p.Ref, why)
+				continue
+			}
+			d := p.pinsNamed(roleNames(m, "drain", defDrain...))
+			src := p.pinsNamed(roleNames(m, "source", defSource...))
+			td, okd := e.term(c, p.Ref, d)
+			ts, oks := e.term(c, p.Ref, src)
+			if !okd || !oks {
+				r.warnf("%s: mosfet model %s needs drain and source pins on one net each (pins.drain / pins.source) — treated as open", p.Ref, m.ID)
+				continue
+			}
+			if td.Node == ts.Node {
+				continue
+			}
+			ron := m.RonOhm
+			if ron == 0 {
+				ron = e.def.SwitchRonOhm
+				e.assumef("%s: MOSFET Rds(on) %.3g Ω assumed (no ronOhm in model %s)", p.Ref, ron, m.ID)
+			}
+			r.assumef("%s on: %s", p.Ref, why)
+			add(b, &resistor{t: [2]Terminal{td, ts}, r: ron}, p.Ref+" on")
 		case KindDiode, KindLED:
 			an := p.pinsNamed(roleNames(m, "anode", defAnode...))
 			ca := p.pinsNamed(roleNames(m, "cathode", defCathode...))
@@ -923,7 +968,7 @@ func (e *Engine) solve(sc scenario) *run {
 
 // voltage of a net in a run (0 for ground, ok=false when not in the circuit).
 func (r *run) voltage(net string, e *Engine) (float64, bool) {
-	if e.isGround(net) {
+	if e.isGround(net) && !e.floated[net] {
 		return 0, true
 	}
 	i, ok := r.c.index[net]
@@ -966,13 +1011,103 @@ func sortedKeys[M ~map[string]V, V any](m M) []string {
 	return out
 }
 
+// chokeWindings is the winding list of a 4-pin inductor binding (the
+// model's, else the usual CMC pinout 1–4 / 2–3) and whether it was assumed.
+func chokeWindings(b *binding) ([][2]string, bool) {
+	if len(b.model.Windings) > 0 {
+		return b.model.Windings, false
+	}
+	return [][2]string{{"1", "4"}, {"2", "3"}}, true
+}
+
+// floatChokeGrounds builds the graph of ground nets joined by windings of
+// 4-pin inductors (a CMC return line GND_J–GND, chained chokes A–B–C) and
+// keeps exactly one reference per connected group — the ground with the
+// most pins in the design (the board ground), ties by name — while every
+// other ground of the group is solved as its own node. Choosing a "far"
+// ground per winding instead floated the middle of a chain and left both
+// ends on the one reference, shorting the chain.
+func (e *Engine) floatChokeGrounds() {
+	pins := map[string]int{}
+	for _, p := range e.d.Parts {
+		for _, q := range p.Pins {
+			pins[q.Net]++
+		}
+	}
+	parent := map[string]string{}
+	var find func(string) string
+	find = func(n string) string {
+		if parent[n] == "" || parent[n] == n {
+			parent[n] = n
+			return n
+		}
+		parent[n] = find(parent[n])
+		return parent[n]
+	}
+	type joint struct{ label, net string }
+	var via []joint // the joining windings, for the assumption
+	for _, b := range e.binds {
+		if b.kind != KindInductor || len(b.part.Pins) != 4 {
+			continue
+		}
+		ws, _ := chokeWindings(b)
+		for _, w := range ws {
+			a, z := b.part.pinsNamed([]string{w[0]}), b.part.pinsNamed([]string{w[1]})
+			if len(a) == 0 || len(z) == 0 {
+				continue
+			}
+			na, nz := a[0].Net, z[0].Net
+			if na == nz || !e.isGround(na) || !e.isGround(nz) {
+				continue
+			}
+			parent[find(na)] = find(nz)
+			via = append(via, joint{fmt.Sprintf("%s %s–%s", b.part.Ref, w[0], w[1]), na})
+		}
+	}
+	groups := map[string][]string{}
+	for n := range parent {
+		groups[find(n)] = append(groups[find(n)], n)
+	}
+	roots := make([]string, 0, len(groups))
+	for r := range groups {
+		roots = append(roots, r)
+	}
+	sort.Strings(roots)
+	for _, r := range roots {
+		g := groups[r]
+		sort.Strings(g)
+		ref := g[0]
+		for _, n := range g[1:] {
+			if pins[n] > pins[ref] {
+				ref = n
+			}
+		}
+		var own, by []string
+		for _, j := range via {
+			if find(j.net) == r {
+				by = append(by, j.label)
+			}
+		}
+		for _, n := range g {
+			if n != ref {
+				if e.floated == nil {
+					e.floated = map[string]bool{}
+				}
+				e.floated[n] = true
+				own = append(own, n)
+			}
+		}
+		e.assumef("ground nets %s are joined by choke windings (%s): %s is the reference, %s solved as own node(s) (return currents flow through the windings)",
+			strings.Join(g, ", "), strings.Join(by, ", "), ref, strings.Join(own, ", "))
+	}
+}
+
 // stampWindings adds one series DCR per winding of a 4-pin inductor
 // (Model.Windings, default 1–4 / 2–3 — the usual CMC pinout).
 func (e *Engine) stampWindings(c *Circuit, r *run, b *binding, add func(*binding, element, string)) {
 	p, m := b.part, b.model
-	ws := m.Windings
-	if len(ws) == 0 {
-		ws = [][2]string{{"1", "4"}, {"2", "3"}}
+	ws, assumed := chokeWindings(b)
+	if assumed {
 		e.assumef("%s: 4-pin inductor taken as a common-mode choke, windings 1–4 and 2–3", p.Ref)
 	}
 	rr := m.DCROhm
@@ -995,12 +1130,6 @@ func (e *Engine) stampWindings(c *Circuit, r *run, b *binding, add func(*binding
 		t1, ok1 := e.term(c, p.Ref, z)
 		if !ok0 || !ok1 {
 			continue
-		}
-		if t0.Node == Ground && t1.Node == Ground && a[0].Net != z[0].Net {
-			// Every ground net is the reference node, so a winding between two
-			// ground nets (CMC return line GND_J–GND_SYS) carries no solved
-			// current: declare that net's current in the spec instead.
-			e.assumef("%s: winding %s–%s joins ground nets %s and %s — its return current is not solved (declare it)", p.Ref, w[0], w[1], a[0].Net, z[0].Net)
 		}
 		add(b, &resistor{t: [2]Terminal{t0, t1}, r: rr}, fmt.Sprintf("%s DCR %s–%s", p.Ref, w[0], w[1]))
 	}

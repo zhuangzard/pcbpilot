@@ -89,15 +89,53 @@ var kicadSiblings = []string{".kicad_pcb", ".kicad_pro", ".kicad_dru"}
 // copyKicadBoard copies src (+ its .kicad_pro / .kicad_dru when present)
 // to dst (a .kicad_pcb path) and reports whether a .kicad_pro came along.
 func copyKicadBoard(src, dst string) (hasPro bool, err error) {
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return false, fmt.Errorf("copy %s: %w", src, err)
+	}
+	if err := os.WriteFile(dst, data, 0o644); err != nil {
+		return false, err
+	}
+	return copySidecars(src, dst, true)
+}
+
+// copyKicadSidecars copies the files beside board src that its rules live
+// in — the .kicad_pro (net classes, board setup) and the .kicad_dru
+// (custom rules: intent clearances, creepage, track floors) — next to dst
+// under dst's base name, for a board pcbnew wrote elsewhere (kicad place
+// --out), so it keeps its rules. A stale .kicad_dru at dst goes when src
+// has none (its rules are not the board's); a .kicad_pro at dst stays (it
+// was kept before, and holds the destination project's own settings).
+// Reports whether dst has a .kicad_pro.
+func copyKicadSidecars(src, dst string) (hasPro bool, err error) {
+	return copySidecars(src, dst, false)
+}
+
+// copySidecars copies src's .kicad_pro / .kicad_dru to dst's base name. A
+// sidecar src lacks is removed at dst (the .kicad_pro only with
+// removePro); a removal that fails for any reason but absence is an error,
+// not a silent stale rules file.
+func copySidecars(src, dst string, removePro bool) (hasPro bool, err error) {
 	sb, db := strings.TrimSuffix(src, ".kicad_pcb"), strings.TrimSuffix(dst, ".kicad_pcb")
-	for _, ext := range kicadSiblings {
+	if sb == db {
+		_, err := os.Stat(sb + ".kicad_pro")
+		return err == nil, nil
+	}
+	for _, ext := range kicadSiblings[1:] {
 		data, err := os.ReadFile(sb + ext)
 		if err != nil {
-			if ext != ".kicad_pcb" && os.IsNotExist(err) {
-				_ = os.Remove(db + ext)
+			if !os.IsNotExist(err) {
+				return false, fmt.Errorf("copy %s: %w", sb+ext, err)
+			}
+			if ext == ".kicad_pro" && !removePro {
+				_, err := os.Stat(db + ext)
+				hasPro = hasPro || err == nil
 				continue
 			}
-			return false, fmt.Errorf("copy %s: %w", sb+ext, err)
+			if err := os.Remove(db + ext); err != nil && !os.IsNotExist(err) {
+				return false, fmt.Errorf("remove the stale %s: %w", db+ext, err)
+			}
+			continue
 		}
 		if err := os.WriteFile(db+ext, data, 0o644); err != nil {
 			return false, err
@@ -270,16 +308,14 @@ func checkRuleFloors(r kicad.Rules, f kicadRuleFloors) error {
 // kicadIsolation turns the intent's insulation pairs into the bridge's
 // domain classes and clearance / creepage rules.
 func kicadIsolation(in *designIntent) []map[string]any {
-	nets := map[string][]string{}
-	for _, d := range in.Domains {
-		nets[d.ID] = d.Nets
-	}
+	nets := in.domainNets()
 	var out []map[string]any
 	for _, p := range in.Pairs {
 		if p.ClearanceMm <= 0 && p.CreepageMm <= 0 {
 			continue
 		}
-		out = append(out, map[string]any{"a": p.A, "b": p.B, "aNets": nets[p.A], "bNets": nets[p.B],
+		// The pair ends are "domain:<id>": the nets are the domain's.
+		out = append(out, map[string]any{"a": p.A, "b": p.B, "aNets": nets[intentDomainID(p.A)], "bNets": nets[intentDomainID(p.B)],
 			"clearanceMm": p.ClearanceMm, "creepageMm": p.CreepageMm})
 	}
 	return out
@@ -303,10 +339,14 @@ func kicadRequirements(in *designIntent) map[string]kicad.NetRequirement {
 		reqs[net] = kicad.NetRequirement{OuterMil: r.OuterMil, InnerMil: r.InnerMil, MinMil: r.MinMil, ClearanceMil: r.ClearanceMil,
 			ViaDiaMil: viaDia[net], ViaDrillMil: viaDrill[net]}
 	}
-	nets := map[string][]string{}
-	for _, d := range in.Domains {
-		nets[d.ID] = d.Nets
-	}
+	// The per-net raise looks the pair ends up as written: a bare domain id
+	// (hand-written intents) raises every net of the pair; a pkg/intent
+	// pair end "domain:<id>" never did and still does not — on a real board
+	// one domain holds hundreds of nets, and their class clearance against
+	// every other net would be the pair distance. Those pairs are enforced
+	// by the pair rule alone (kicadIsolation: PPD_ domain classes + the
+	// .kicad_dru clearance / creepage rule, which KiCad's DRC checks).
+	nets := in.domainNets()
 	for _, p := range in.Pairs {
 		clr := p.ClearanceMm / 0.0254
 		if clr <= 0 {

@@ -29,7 +29,6 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/zhuangzard/pcbpilot/internal/kicad"
 	"github.com/zhuangzard/pcbpilot/internal/pcb/specctra"
-	"github.com/zhuangzard/pcbpilot/pkg/netname"
 	"github.com/zhuangzard/pcbpilot/pkg/pcbauto"
 )
 
@@ -41,6 +40,9 @@ type kicadRouteOpts struct {
 	ripUp       bool
 	fo          fastrouteOpts
 	minTraceSet bool
+	// maxTimeSet / routerTimeoutSet: the flags were given (else the
+	// defaults scale with the board: fastrouteAutoMaxTime).
+	maxTimeSet, routerTimeoutSet bool
 	// padNeckFloor (mil, 0 = off): see kicad.PadNeckFloorMil.
 	padNeckFloor float64
 	// rules: explicit flags (0 = not given); ruleFlags = any was given.
@@ -118,6 +120,10 @@ Exits non-zero when any gate fails; --waivers takes signed {gate,match,reason,by
 				return fmt.Errorf("--pcb and --intent are required: the intent is the pre-route gate for widths, clearances and neck-down")
 			}
 			o.minTraceSet = cmd.Flags().Changed("min-trace-um")
+			o.maxTimeSet, o.routerTimeoutSet = cmd.Flags().Changed("max-time"), cmd.Flags().Changed("router-timeout")
+			if o.maxTimeSet && o.fo.maxTime < 0 {
+				return fmt.Errorf("--max-time must be >= 0 (0 = no fastroute time limit)")
+			}
 			for _, n := range []string{"clearance-mil", "track-mil", "min-track-mil", "via-dia-mil", "via-drill-mil", "edge-mil"} {
 				o.ruleFlags = o.ruleFlags || cmd.Flags().Changed(n)
 			}
@@ -160,13 +166,13 @@ Exits non-zero when any gate fails; --waivers takes signed {gate,match,reason,by
 	f.StringVar(&o.tm.bin, "tracemaker-bin", "", "tracemaker executable (default: $TRACEMAKER_BIN, ~/.pcbpilot/tracemaker/current, PATH)")
 	f.DurationVar(&o.tm.timeout, "tracemaker-time", 300*time.Second, "tracemaker --time budget (it also sets the lattice pitch: ≥ 300 s gave 0.05 mm and a complete Board-A, 90–180 s gave 0.1 mm and 2 open connections)")
 	f.StringVar(&o.fastrouteBin, "fastroute-bin", "", "fastroute executable (default: $FASTROUTE_BIN, ~/.pcbpilot/fastroute/current, PATH)")
-	f.DurationVar(&o.fo.maxTime, "max-time", 0, "fastroute --max-time per run (0 = none)")
+	f.DurationVar(&o.fo.maxTime, "max-time", 0, "fastroute --max-time per run; default: scaled with the board (10 min + 0.3 s per connection, at most 40 min; summary.routerTime); 0 given explicitly = no limit. At the limit fastroute writes its best board; pcbpilot asks it to stop (Ctrl+Break / SIGINT) a grace later (max-time/10, 1–5 min), kills it 2 min after that and still imports its last checkpoint session — an incomplete result, never a pass")
 	f.IntVar(&o.fo.threads, "threads", 0, "fastroute autorouter/optimizer threads: 0 = min(cores-1, 8); 1 = single-threaded (reproducible across fastroute builds; a crashed multi-threaded run is retried single-threaded). Board-A: 3 runs with 8 threads gave byte-identical sessions")
 	f.IntVar(&o.fo.multiStart, "multi-start", 4, "fastroute --multi-start=N: N-1 differently seeded pass-1 orders rerun in parallel by fastroute when connections stay unrouted, best kept (1 = off)")
 	f.BoolVar(&o.optimizer, "optimizer", false, "run fastroute's optimizer (its budget equals the whole routing stage incl. multi-start, ≥ 60 s; Board-A --multi-start=4: 299 s with it, 134 s without, same 4 unrouted / 30 violations, 0.1 % shorter, 1 via fewer) — off by default")
 	f.Float64Var(&o.fo.optThreshold, "optimizer-threshold", 0, "fastroute --router.optimizer.optimization_improvement_threshold (percent per pass; 0 = fastroute's default)")
 	f.IntVar(&o.fo.rounds, "continue", 2, "fastroute continuation runs (--initial-session) while connections remain unrouted")
-	f.DurationVar(&o.fo.timeout, "router-timeout", 45*time.Minute, "hard limit per fastroute run")
+	f.DurationVar(&o.fo.timeout, "router-timeout", 45*time.Minute, "hard limit per fastroute run (raised to --max-time + the stop grace when that is later and the flag was not given)")
 	f.Float64Var(&o.fo.minTraceUm, "min-trace-um", 0, "fastroute --router.min_trace_width_um (default: max(board minimum track width, min(narrowest widthMil.min, narrowest class width)))")
 	f.Float64Var(&o.padNeckFloor, "pad-neck-floor-mil", 0, "let intent nets neck down at pads (off by default: every intent class is --no-neckdown-classes). Nets with widthMil.min <= max(this, narrowest min) leave that list and fastroute's neck floor becomes that value, so no neck goes below the net's own minimum; full width outside the pad zone is restored by widen-to-intent and enforced by the intent-widths gate (a failing run is not shipped). Also lets escape vias sit next to own-net SMD pads (fastroute allows it). Board-A: 10")
 	f.Float64Var(&o.rules.ClearanceMil, "clearance-mil", 0, "board minimum clearance + Default netclass clearance (default for a board without .kicad_pro: intent copper.clearanceMil)")
@@ -199,19 +205,22 @@ const noReviewMatch = "--no-review"
 
 // kicadRun is one kicad route execution.
 type kicadRun struct {
-	o       kicadRouteOpts
-	kt      *kicad.Tools
-	in      *designIntent
-	waivers []gateWaiver
-	summary map[string]any
-	gates   []gateResult
-	work    string
-	step    int
-	classes []kicad.NetClass
-	route   *routeResult
-	conn    string // schematic connectivity JSON (with --sch)
-	netlist *kicad.SchNetlist
-	stderr  io.Writer
+	// stepGates: cannot-check gates from post-route steps whose own check
+	// did not run (postRoute resets them, qualityGates reports them).
+	stepGates []gateResult
+	o         kicadRouteOpts
+	kt        *kicad.Tools
+	in        *designIntent
+	waivers   []gateWaiver
+	summary   map[string]any
+	gates     []gateResult
+	work      string
+	step      int
+	classes   []kicad.NetClass
+	route     *routeResult
+	conn      string // schematic connectivity JSON (with --sch)
+	netlist   *kicad.SchNetlist
+	stderr    io.Writer
 	// inputDRC: the input board's own DRC errors (rule|message), to mark
 	// what routing did not cause.
 	inputDRC map[string]bool
@@ -655,6 +664,7 @@ func (r *kicadRun) run() error {
 func (r *kicadRun) postRoute(board string, inSnap *boardSnapshot) (string, bool, error) {
 	o := r.o
 	var err error
+	r.stepGates = nil
 	// 4. Post-route copper: via arrays, widen to intent, pours, widen nets, silk.
 	if board, err = r.viaArrays(board); err != nil {
 		return board, false, err
@@ -674,16 +684,18 @@ func (r *kicadRun) postRoute(board string, inSnap *boardSnapshot) (string, bool,
 		if ps, err = r.clipPoursToIso(board, ps); err != nil {
 			return board, false, err
 		}
-		out := r.next("pours")
-		res, err := r.kt.Pours(board, ps, out)
-		r.summary["pours"] = map[string]any{"plan": ps, "result": res}
-		if err != nil {
-			return board, false, err
-		}
-		board = out
-		fmt.Fprintf(r.stderr, "pours: %d zone(s) added and filled\n", len(ps))
-		if board, err = r.starvedThermals(board); err != nil {
-			return board, false, err
+		if len(ps) > 0 { // none left: every pour clipped away, the pour-clip gate failed
+			out := r.next("pours")
+			res, err := r.kt.Pours(board, ps, out)
+			r.summary["pours"] = map[string]any{"plan": ps, "result": res}
+			if err != nil {
+				return board, false, err
+			}
+			board = out
+			fmt.Fprintf(r.stderr, "pours: %d zone(s) added and filled\n", len(ps))
+			if board, err = r.starvedThermals(board); err != nil {
+				return board, false, err
+			}
 		}
 	}
 	r.lap("pours + zone fill + thermals")
@@ -786,6 +798,16 @@ func (r *kicadRun) prepareRoute(classed string, reqs map[string]kicad.NetRequire
 	if prepared, err = r.planEscapes(inSnap, prepared); err != nil {
 		return "", 0, fmt.Errorf("pre-route gate: escapes: %w", err)
 	}
+	// fastroute takes the first via of the list for every net: largest
+	// first, shrunk to each net's class via after the import
+	// (kicad_route_vias.go).
+	var viaOrder []string
+	var routerVia *dsnVia
+	prepared, viaOrder, routerVia = dsnRouterVia(prepared)
+	r.summary["dsnViaOrder"] = viaOrder
+	if routerVia != nil {
+		r.summary["routerViaPadstack"] = map[string]any{"name": routerVia.name, "diameterUm": routerVia.dia, "drillUm": routerVia.drill}
+	}
 	dsnPath = filepath.Join(o.outDir, "route.dsn")
 	if err := os.WriteFile(dsnPath, []byte(prepared), 0o644); err != nil {
 		return "", 0, err
@@ -815,8 +837,31 @@ func (r *kicadRun) prepareRoute(classed string, reqs map[string]kicad.NetRequire
 			o.fo.minTraceUm = math.Ceil(floor*25.4*10) / 10
 		}
 	}
+	// fastroute's time budget: scaled with the board unless --max-time was
+	// given; the hard limit never cuts a run before its own stop.
+	conns := boardConnections(inSnap)
+	if !o.maxTimeSet {
+		o.fo.maxTime = fastrouteAutoMaxTime(conns)
+	}
+	if !o.routerTimeoutSet && o.fo.maxTime > 0 {
+		if need := o.fo.maxTime + fastrouteStopGrace(o.fo.maxTime) + fastrouteKillGrace; need > o.fo.timeout {
+			o.fo.timeout = need
+		}
+	}
+	r.summary["routerTime"] = map[string]any{"connections": conns, "maxTimeS": o.fo.maxTime.Seconds(), "maxTimeSource": map[bool]string{true: "--max-time", false: "auto (10 min + 0.3 s per connection, at most 40 min)"}[o.maxTimeSet],
+		"routerTimeoutS": o.fo.timeout.Seconds()}
+	fmt.Fprintf(r.stderr, "router time: %d connection(s), fastroute --max-time %s, hard limit %s\n", conns, o.fo.maxTime, o.fo.timeout)
 	base := strings.TrimSuffix(dsnPath, ".dsn")
-	pairs, tune := intentPairsAndTune(r.in)
+	// Nets fastroute's pairs / tune files cannot name (spaces in a
+	// hierarchical name): aliased in fastroute's copy of the DSN.
+	o.fo.aliases = newFastrouteNetAliases(intentRouterNets(r.in), prepared)
+	if !o.fo.aliases.empty() {
+		r.summary["fastrouteNetAliases"] = o.fo.aliases.toAlias
+	}
+	pairs, tune, groupIDs := intentPairsTuneGroups(r.in, o.fo.aliases)
+	if len(groupIDs) > 0 {
+		r.summary["intentTuneGroups"] = groupIDs // tune-file group id → intent length group
+	}
 	if pairs != "" {
 		o.fo.pairsFile = base + "-pairs.txt"
 		if err := os.WriteFile(o.fo.pairsFile, []byte(pairs), 0o644); err != nil {
@@ -956,7 +1001,12 @@ func (r *kicadRun) widen(board, what string, plan func([]specctra.Track, []widen
 	for round := 0; round < 2; round++ {
 		rep, err := r.kt.DRC(out, filepath.Join(r.work, fmt.Sprintf("%02d-widen-drc%d.json", r.step, round)))
 		if err != nil {
-			return ops, out, err
+			// The widened tracks were planned clear of their neighbours; the
+			// KiCad step-back check did not run: kept, and said so (the
+			// routed board's own DRC gate judges the copper).
+			fmt.Fprintf(r.stderr, "widen: cannot check the widened tracks with KiCad DRC (%v); kept as planned\n", err)
+			r.stepGates = append(r.stepGates, gateResult{Gate: "widen-drc", Detail: fmt.Sprintf("cannot check: the KiCad DRC step-back of %s did not run: %v", what, err)})
+			return ops, out, nil
 		}
 		bad := map[string]bool{}
 		for _, v := range rep.Violations {
@@ -1086,6 +1136,12 @@ func (r *kicadRun) qualityGates(board string) (bool, error) {
 		if g.Gate == "design-review" {
 			keep = append(keep, g)
 		}
+	}
+	// Post-route steps whose own check could not run (a DRC that timed out):
+	// cannot-check gates of this board.
+	keep = append(keep, r.stepGates...)
+	if r.route != nil {
+		keep = append(keep, r.route.Gates...)
 	}
 	r.gates = keep
 	routed := filepath.Join(o.outDir, "routed.kicad_pcb")
@@ -1294,7 +1350,7 @@ func designReviewGate(stage string, o reviewRunOpts, evidence []string, waivers 
 	if sha, err := reviewInputSHA(stage, o.requirements, evidence, reviewMaxBytes); err == nil {
 		var old reviewRecord
 		if b, err := os.ReadFile(filepath.Join(dir, "review.json")); err == nil && json.Unmarshal(b, &old) == nil &&
-			old.Stage == stage && old.InputSHA256 == sha && old.Gate.Pass {
+			old.Stage == stage && old.InputSHA256 == sha && old.Gate.Pass && reviewFilesChanged(&old, o.requirements, evidence) == "" {
 			g := old.Gate
 			g.Detail = "reused " + filepath.Join(dir, "review.json") + " (same inputs): " + g.Detail
 			summary["review-"+stage] = filepath.Join(dir, "review.json")
@@ -1391,7 +1447,14 @@ var reStarvedPad = regexp.MustCompile(`[Pp]ad (\S+) \[[^\]]*\] of (\S+)`)
 func (r *kicadRun) starvedThermals(board string) (string, error) {
 	rep, err := r.kt.DRC(board, filepath.Join(r.work, fmt.Sprintf("%02d-pours-drc.json", r.step)))
 	if err != nil {
-		return board, err
+		// An optional repair step: its DRC not running (a timeout on a
+		// large board) never stops the route — the pours stay, the gate
+		// says the check did not happen, the routed board and every other
+		// gate still come.
+		fmt.Fprintf(r.stderr, "thermals: cannot check starved thermals (%v); pours kept as filled\n", err)
+		r.summary["starvedThermals"] = map[string]any{"error": err.Error()}
+		r.stepGates = append(r.stepGates, gateResult{Gate: "starved-thermals", Detail: "cannot check: the DRC that finds starved thermal pads did not run: " + err.Error()})
+		return board, nil
 	}
 	seen := map[string]bool{}
 	var ops []map[string]any
@@ -1767,9 +1830,42 @@ func defaultRouteThreads(cpus int, both bool) int {
 	return min(max(cpus-1, 1), 8)
 }
 
+// boardConnections counts the connections routing has to make: per net,
+// its pads minus one.
+func boardConnections(s *boardSnapshot) int {
+	if s == nil {
+		return 0
+	}
+	pads := map[string]int{}
+	for _, c := range s.Components {
+		for _, p := range c.Pads {
+			if p.Net != "" {
+				pads[p.Net]++
+			}
+		}
+	}
+	n := 0
+	for _, k := range pads {
+		if k > 1 {
+			n += k - 1
+		}
+	}
+	return n
+}
+
+// fastrouteAutoMaxTime is kicad route's default fastroute --max-time:
+// 10 min + 0.3 s per connection, at most 40 min (a 3202-connection board
+// gets 26 min; fastroute committed 678 of them in 30 min).
+func fastrouteAutoMaxTime(conns int) time.Duration {
+	d := 10*time.Minute + time.Duration(conns)*300*time.Millisecond
+	return min(d, 40*time.Minute).Round(time.Second)
+}
+
 // clipPoursToIso trims the board-outline pours to their net's insulation
 // domain (pcbauto.ClipPoursToIso). Without it the patient GND / +3V3 pours of
-// Board-C covered the SELV strip: 1030 isolation errors on a 2 x MOPP board.
+// a field board covered the SELV strip: 1030 isolation errors on a 2 x MOPP
+// board. A planned pour clipped to nothing is never dropped silently: the
+// pour-clip gate fails and names it (the plane it stood for is missing).
 func (r *kicadRun) clipPoursToIso(board string, ps []kicad.Pour) ([]kicad.Pour, error) {
 	if r.o.intent == "" {
 		return ps, nil
@@ -1779,21 +1875,21 @@ func (r *kicadRun) clipPoursToIso(board string, ps []kicad.Pour) ([]kicad.Pour, 
 		return ps, err
 	}
 	in, err := pcbauto.ParseIntent(iraw)
-	if err != nil || len(in.Pairs) == 0 {
+	if err != nil {
+		return ps, fmt.Errorf("pours: --intent %s: %w", r.o.intent, err)
+	}
+	if len(in.Pairs) == 0 {
 		return ps, nil
 	}
-	snap, raw, err := r.snapshot(board)
+	_, raw, err := r.snapshot(board)
 	if err != nil {
 		return ps, err
 	}
-	// the same board net identities as r.in (onBoard): an intent domain
-	// naming "VCC_PIC" must clip the pour of "/pic_sockets/VCC_PIC"
-	in = pcbautoIntentOnBoard(in, boardNetIDs(snap))
 	planes := make([]pcbauto.PlaneRegion, len(ps))
 	for i, p := range ps {
 		planes[i] = pcbauto.PlaneRegion{Net: p.Net, Layer: p.Layer}
 	}
-	clipped, notes, err := pcbauto.ClipPoursToIso(raw, in, planes)
+	clipped, lost, notes, err := pcbauto.ClipPoursToIso(raw, in, planes)
 	if err != nil {
 		return ps, err
 	}
@@ -1818,59 +1914,23 @@ func (r *kicadRun) clipPoursToIso(board string, ps []kicad.Pour) ([]kicad.Pour, 
 		fmt.Fprintln(r.stderr, "pours: "+n)
 	}
 	r.summary["pourClip"] = notes
+	r.add(pourClipGate(len(ps), lost, notes))
 	return out, nil
 }
 
-// pcbautoIntentOnBoard is in with every domain (nets, reference ground),
-// net, diff-pair, floats-on and net-class net name resolved to the board's net identity
-// (pkg/netname), as designIntent.onBoard does for r.in (which has already
-// refused ambiguous or merging names). Unknown names stay; in is not
-// changed.
-func pcbautoIntentOnBoard(in *pcbauto.Intent, boardNets []string) *pcbauto.Intent {
-	if in == nil {
-		return in
+// pourClipGate: every planned pour keeps some area in its insulation
+// domain. A pour clipped to nothing fails the gate with its net and layer
+// (the plane it stood for — a return path, a shield — is missing; fix the
+// domain territory or the pour plan), it is never silently omitted.
+func pourClipGate(planned int, lost []pcbauto.PlaneRegion, notes []string) gateResult {
+	g := gateResult{Gate: "pour-clip", Pass: len(lost) == 0}
+	for _, p := range lost {
+		g.Items = append(g.Items, fmt.Sprintf("%s on layer %d: clipped to nothing in its insulation domain — no pour written", p.Net, p.Layer))
 	}
-	res := netname.NewResolver(boardNets)
-	conv := func(n string) string {
-		if id, m := res.Resolve(n); m == netname.Found {
-			return id
-		}
-		return n
+	if g.Pass {
+		g.Detail = fmt.Sprintf("%d planned pour(s) kept in their insulation domain (%d clipped)", planned, len(notes))
+	} else {
+		g.Detail = fmt.Sprintf("%d of %d planned pour(s) clipped to nothing in their insulation domain", len(lost), planned)
 	}
-	list := func(ns []string) []string {
-		out := make([]string, len(ns))
-		for i, n := range ns {
-			out[i] = conv(n)
-		}
-		return out
-	}
-	cp := *in
-	cp.Domains = append([]pcbauto.IntentDomain(nil), in.Domains...)
-	for i := range cp.Domains {
-		cp.Domains[i].Nets = list(cp.Domains[i].Nets)
-		if cp.Domains[i].Reference != "" {
-			cp.Domains[i].Reference = conv(cp.Domains[i].Reference)
-		}
-	}
-	cp.NetClasses = append([]pcbauto.IntentNetClass(nil), in.NetClasses...)
-	for i := range cp.NetClasses {
-		cp.NetClasses[i].Nets = list(cp.NetClasses[i].Nets)
-	}
-	if in.Nets != nil {
-		cp.Nets = make(map[string]*pcbauto.IntentNet, len(in.Nets))
-		for name, n := range in.Nets {
-			if n != nil {
-				x := *n
-				if x.DiffPair != "" {
-					x.DiffPair = conv(x.DiffPair)
-				}
-				if x.FloatsOn != "" {
-					x.FloatsOn = conv(x.FloatsOn)
-				}
-				n = &x
-			}
-			cp.Nets[conv(name)] = n
-		}
-	}
-	return &cp
+	return g
 }

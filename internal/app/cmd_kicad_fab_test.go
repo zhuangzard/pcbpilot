@@ -26,7 +26,7 @@ func TestKiCadLcscCheckListsMissing(t *testing.T) {
 	if !errors.Is(err, errActionFailed) {
 		t.Fatalf("want non-zero (errActionFailed), got %v", err)
 	}
-	for _, s := range []string{"8 footprints, 6 assembled, 1 missing LCSC, 1 invalid", "U1", "Q1", `"AO3400A"`} {
+	for _, s := range []string{"8 footprints, 6 assembled (2 not assembled: 1 DNP, 1 excluded from BOM, 0 excluded from the position file), 1 missing LCSC, 1 invalid", "U1", "Q1", `"AO3400A"`} {
 		if !strings.Contains(out, s) {
 			t.Errorf("output lacks %q:\n%s", s, out)
 		}

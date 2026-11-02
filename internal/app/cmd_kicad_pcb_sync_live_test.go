@@ -1045,3 +1045,130 @@ pcbnew.SaveBoard(sys.argv[1], b)
 		t.Fatalf("the copper shape stayed on the old net: %v", got)
 	}
 }
+
+// TestPcbSyncLiveSlashSheetName: a sheet whose name holds '/' (sch-build's
+// own page split titles "… (1/2)", or a page titled "I/O"). kicad-cli's XML
+// netlist writes its path unescaped; v0.12.0 put that on the pads while
+// KiCad's parity check wants "/I{slash}O (1{slash}2)/…", so every local
+// net of the sheet was a net_conflict and nothing was written. Built from
+// a synthetic spec with sch-build, then a --create sync: every gate passes
+// and the pads carry KiCad's escaped name.
+func TestPcbSyncLiveSlashSheetName(t *testing.T) {
+	kt := pcbSyncLive(t)
+	sbNeedKicad(t)
+	out := filepath.Join(t.TempDir(), "sl")
+	spec := &sbSpec{Name: "sl", Pages: []sbPage{{ID: "pa", Title: "Power"}, {ID: "pb", Title: "I/O conn (1/2)"}},
+		Zones: []sbZone{{ID: "za", Page: "pa"}, {ID: "zb", Page: "pb"}},
+		Parts: []sbPart{
+			{Ref: "R1", Value: "10k", Symbol: "Device:R", Footprint: "Resistor_SMD:R_0603_1608Metric", Zone: "za"},
+			{Ref: "R2", Value: "10k", Symbol: "Device:R", Footprint: "Resistor_SMD:R_0603_1608Metric", Zone: "zb"},
+			{Ref: "R3", Value: "1k", Symbol: "Device:R", Footprint: "Resistor_SMD:R_0603_1608Metric", Zone: "zb"},
+		},
+		Nets: []sbNet{
+			{Name: "+3V3", Pins: []string{"R1:1", "R2:1"}},
+			{Name: "GND", Pins: []string{"R1:2", "R3:2"}},
+			{Name: "MID", Pins: []string{"R2:2", "R3:1"}},
+		}}
+	if res, err := runSchBuild(spec, sbOptions{OutDir: out, NoIntent: true, Jobs: 2, PlannerBudget: 20000}, nil); err != nil || !res.OK {
+		t.Fatalf("build: %v %+v", err, res)
+	}
+	o := syncOpts(filepath.Join(out, "sl.kicad_sch"), filepath.Join(out, "sl.kicad_pcb"))
+	o.create = true // a new board: --create alone writes it (no --in-place)
+	rep, code := runSync(t, o)
+	if code != 0 || !rep.Committed {
+		t.Fatalf("exit %d gates %+v errors %+v", code, rep.Gates, rep.Errors)
+	}
+	wantGates(t, rep, map[string]gate.Status{"pad-net": gate.Pass, "schematic-parity": gate.Pass, "idempotent": gate.Pass})
+	fps, _ := footprintsByRef(t, kt, o.pcb)
+	const want = "/I{slash}O conn (1{slash}2)/MID"
+	for _, ref := range []string{"R2", "R3"} {
+		hit := false
+		for _, p := range fps[ref].Pads {
+			hit = hit || p.Net == want
+		}
+		if !hit {
+			t.Errorf("%s pads %+v: none on %q", ref, fps[ref].Pads, want)
+		}
+	}
+	// The new board's footprints are staged left of the origin, so an
+	// outline drawn from 0,0 afterwards is accepted (its DRC gate sees no
+	// new copper-to-edge violation; v0.12.1 staged them from 0,0).
+	for _, st := range rep.Staged {
+		if st.X > -10 {
+			t.Errorf("staged %s at x = %.2f: not left of the origin", st.Ref, st.X)
+		}
+	}
+	boardLiveOp(t, kt, "outline", o.pcb, &kicad.OutlineSpec{
+		Outer: kicad.BoardShape{Rect: &kicad.BoardRect{X: 0, Y: 0, Width: 60, Height: 40, CornerRadius: 1}}})
+}
+
+// TestKicadDRCLiveForeignSchematic: a board written outside its project
+// directory (kicad place --out …) still gets schematic parity: kicad drc
+// --sch names the root, and fab --preflight honours its --sch (v0.12.1:
+// both cannot-check, "root schematic missing"). A sub-sheet without its own
+// project cannot stand in for the root.
+func TestKicadDRCLiveForeignSchematic(t *testing.T) {
+	pcbSyncLive(t)
+	sbNeedKicad(t)
+	cli, err := kicad.ResolveFabCLI()
+	if err != nil {
+		t.Skip(err)
+	}
+	out := filepath.Join(t.TempDir(), "fs")
+	spec := &sbSpec{Name: "fs", Pages: []sbPage{{ID: "pa", Title: "A"}, {ID: "pb", Title: "B"}},
+		Zones: []sbZone{{ID: "za", Page: "pa"}, {ID: "zb", Page: "pb"}},
+		Parts: []sbPart{
+			{Ref: "R1", Value: "10k", Symbol: "Device:R", Footprint: "Resistor_SMD:R_0603_1608Metric", Zone: "za"},
+			{Ref: "R2", Value: "1k", Symbol: "Device:R", Footprint: "Resistor_SMD:R_0603_1608Metric", Zone: "zb"},
+		},
+		Nets: []sbNet{{Name: "+3V3", Pins: []string{"R1:1", "R2:1"}}, {Name: "GND", Pins: []string{"R1:2", "R2:2"}}}}
+	if res, err := runSchBuild(spec, sbOptions{OutDir: out, NoIntent: true, Jobs: 2, PlannerBudget: 20000}, nil); err != nil || !res.OK {
+		t.Fatalf("build: %v %+v", err, res)
+	}
+	o := syncOpts(filepath.Join(out, "fs.kicad_sch"), filepath.Join(out, "fs.kicad_pcb"))
+	o.create = true
+	if rep, code := runSync(t, o); code != 0 {
+		t.Fatalf("sync: exit %d %+v %+v", code, rep.Gates, rep.Errors)
+	}
+	moved := filepath.Join(t.TempDir(), "placed")
+	if err := os.MkdirAll(moved, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{"fs.kicad_pcb", "fs.kicad_pro"} {
+		b, err := os.ReadFile(filepath.Join(out, f))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(moved, f), b, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	board := filepath.Join(moved, "fs.kicad_pcb")
+	status := func(cs []drcCheck, name string) (gate.Status, string) {
+		for _, c := range cs {
+			if c.Name == name {
+				return c.Status, c.Detail
+			}
+		}
+		return "missing", ""
+	}
+	// kicad drc: without --sch the parity run cannot stage; with it, it runs
+	rep := runKicadDRC(kicadDRCOptions{pcb: board, cli: cli, parity: true, tolMm: 0.5})
+	if st, d := status(rep.Checks, "kicad-drc"); st != gate.CannotCheck {
+		t.Errorf("no root beside the board, no --sch: kicad-drc %s (%s), want cannot-check", st, d)
+	}
+	rep = runKicadDRC(kicadDRCOptions{pcb: board, cli: cli, parity: true, sch: o.sch, tolMm: 0.5})
+	if st, d := status(rep.Checks, "schematic-parity"); st != gate.Pass {
+		t.Errorf("kicad drc --sch: schematic-parity %s (%s), want pass", st, d)
+	}
+	// fab --preflight honours --sch
+	pf := runFabPreflight(fabPreflightOptions{pcb: board, sch: o.sch, cli: cli, noAssembly: true})
+	if st, d := status(pf.Checks, "schematic-parity"); st != gate.Pass {
+		t.Errorf("fab --preflight --sch: schematic-parity %s (%s), want pass", st, d)
+	}
+	// a sub-sheet (no project of its own) is not the root
+	pf = runFabPreflight(fabPreflightOptions{pcb: board, sch: filepath.Join(out, "pb.kicad_sch"), cli: cli, noAssembly: true})
+	if st, d := status(pf.Checks, "schematic-parity"); st != gate.CannotCheck || !strings.Contains(d, "root sheet") {
+		t.Errorf("fab --preflight --sch <sub-sheet>: schematic-parity %s (%s), want cannot-check", st, d)
+	}
+}

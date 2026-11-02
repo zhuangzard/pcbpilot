@@ -235,8 +235,10 @@ pcbpilot kicad pcb-sync ... --in-place --apply-plan plan.json --revision <rev>
   `--out` 只要暂存板能读回就保留输出。`--in-place` 不改 `.kicad_pro`（缺失时才写）；`--out` 发布的 `.kicad_pro` 是源工程的原字节（不是
   SaveBoard 重写的，非默认设置都保留；parity 也用它）；源没有 `.kicad_pro` 时目标已有的那份保持不动，只有目标也没有才写
   SaveBoard 生成的默认工程。`.kicad_dru` 同理：源有就发布源的（覆盖目标已有的，基哈希校验），源没有就保留目标的。改名检查、parity
-  与提交都用**实际发布**的这份工程和规则，保留的目标文件提交前也再核对（被改 → 退出 4）。`--create`：`--pcb` 不存在时从空板起（全部新件暂存在
-  原点起的行里）；没有源板可查版本，就核对 bridge 应用时的 pcbnew 版本，不是 10.x → cannot-check 退出 5。
+  与提交都用**实际发布**的这份工程和规则，保留的目标文件提交前也再核对（被改 → 退出 4）。`--create`：`--pcb` 不存在时从空板起，并直接写到 `--pcb`（等同 `--in-place`，报告 `warnings`
+  写明；给 `--out` 则写到那里；`--pcb` 已存在时仍须 `--in-place` / `--out`）。新板（没有板框也没有封装）的暂存件排在原点左侧、
+  止于 x = −10 mm（v0.12.2；之后 `kicad board outline --origin 0,0` 不会压到它们），行宽至少为这批件面积的平方根
+  （大批量是紧凑方块，不是 100 mm 宽的长条）；没有源板可查版本，就核对 bridge 应用时的 pcbnew 版本，不是 10.x → cannot-check 退出 5。
 - **门禁**（`internal/gate`，没验证就不是 pass）：`pad-net`（暂存板上与符号挂钩的封装焊盘网 vs 网表引脚网，
   `ComparePinNets` / `padNetDiffGate`；NPTH 与无编号焊盘不算；同编号的焊盘必须同网，没有网的也算）、`schematic-parity`（暂存板 + 工程 + 全部 `.kicad_sch`
   复制到临时目录、板改名为根图名，`kicad-cli pcb drc --schematic-parity --severity-all`；任一 parity 项失败，只有被 flag 的
@@ -307,8 +309,25 @@ pcbpilot kicad rules … --check [--stage placed|routed] [--report r.json]  # �
   fail，两层都不抬高，不静默取大。
 - **下限**：与 v0.10.2 route 相同——线宽、间距、过孔不低于板自身最小值（最小线宽、最小间距、最小孔、最小过孔直径、
   孔 + 2×最小环宽），也不低于网原有网络类（用户类更宽时保留，`warnings` 列出 “width kept at …”）。
-- **绝缘对**：`PPD_<域>` 类 + `.kicad_dru` 的 clearance / creepage 规则；与 route 一样把对的电气间隙写到两侧每个网的
-  类间距上（**已知过约束**：这些网对对外的所有网也用了这个间距，保留只为与 route 一致）。
+- **绝缘对**：`PPD_<域>` 类 + `.kicad_dru` 的 clearance / creepage 规则。`intent derive` 写的对端是 `domain:<id>`，按域 id
+  解析出该域的网，再逐网解析成板上的（层次）网名（`/页/网`）——v0.12.0 曾按原文 `domain:<id>` 去找域，域类一个网都没有，
+  探针报 “nothing to probe”、`isolation-placement` 报 0 对通过，是**空过**。现在每个对在 `isolation[]` 里记
+  `boardNetsA/B`；任一侧在板上 0 个网 → `isolation-coverage` **cannot-check**（`--apply` 拒绝、`isolation-placement`
+  也 cannot-check），绝不当 pass。间隙/爬电取意图里的值 = max(标准推导, spec 声明)，来源记在
+  `isolation[].clearanceSource / creepageSource`（`derived` / `declared`，见 design-intent.md 的 `spec.isolation`）。
+  只有**手写的裸域 id** 对端才像 route 那样把对的电气间隙写到两侧每个网的类间距上（**已知过约束**，保留只为与 route 一致）；
+  `domain:<id>` 对端不抬（实板一个域就有几百个网，抬了等于全板 6 mm 间距），只靠 `.kicad_dru` 对规则，由 KiCad DRC 判。
+- **封装焊盘间隙**（`footprint-pad-clearance`，advisory）：同一封装里不同网的两个焊盘，KiCad 要求的间距 = 两焊盘各自间距的
+  较大者（焊盘局部覆盖 → 封装局部覆盖 → 网的有效类间距），与封装焊盘边到边间隙比；不够的按封装列出（最小间隙、所在焊盘、
+  类、位号）。0.5 mm 间距的 VSSOP/TSSOP 焊盘间隙 0.15 mm，0.2 mm 的类间距在每个实例上都是 DRC clearance 错误，布局改不掉。
+  修法：给这些封装设局部间距覆盖（≤ 间隙），或降低该类间距 / 写针对该封装的 `.kicad_dru` 规则——**pcbpilot 不会静默降低**。
+  自定义 `.kicad_dru` 间距规则这里不解析，最终以 DRC 为准。
+- **工艺契约**（`--contract order-contract.json`，与 `kicad fab --preflight --contract` 同一文件、同一校验）：板的最小线宽、
+  最小间距、最小通孔、最小过孔环宽低于契约 `limits` 的，在暂存副本的 `.kicad_pro` 里**抬到**契约值（只抬不降；有孔径和环宽时
+  最小过孔直径 ≥ 孔 + 2×环宽；允许微孔时微孔孔径同样），再做推导——所以过孔也按契约环宽取下限，`--apply` 一起写进
+  `.kicad_pro`。`fab-contract` 检查列出抬了什么，以及仍低于契约的来源（用户 `.kicad_dru` 规则、用户网络类：pcbpilot 不改，
+  advisory warn，preflight 会判 fail，要自己改，绝不降契约）。`--check --contract` 按板现状判，低于契约 = fail。
+  契约文件进 `inputs`（role `contract`），变了 revision 就变。
 - **最小线宽是 DRC 规则**：网络类线宽只是布线默认值，不是下限。`.kicad_dru` 里加 `# pcbpilot-rules:begin … end`
   块，放在**最后**（用户规则 → route 块 `# pcbpilot:begin` → 本块）：KiCad 取最后匹配的规则，route 块的 inner 规则在
   意图没写 `min` 时只带板最小线宽，排在后面会把下限削弱到板最小值；route 重跑把自己的块追加到末尾后，`kicad route`
@@ -353,6 +372,8 @@ clearance 会替换类间距，也会被对规则替换）；有绝缘对时 cre
 
 **验证**（R1：各自三态、分开报告；pass 只证明这些检查，不等于可投板）：
 - `plan-coverage`：每网线宽依据是否完整（上面的 pass / cannot-check / fail）。
+- `isolation-coverage`：每个绝缘对两侧在板上都有网（否则 cannot-check，`--apply` 拒绝）。
+- `footprint-pad-clearance`（advisory）、`fab-contract`（有 `--contract` 时）：见上。
 - `staged-readback`：在暂存副本上 bridge `rules-read`（pcbnew 自己算出的**有效**网络类与 nm 尺寸）逐网等于计划，绝缘域网
   解析到 `PPD_<域>`，预设尺寸都在，每类外/内层解析出的最小线宽不低于下限；再用 **kicad-cli DRC 探针**：每类在外层（及内层）
   放一根比下限窄 2 µm 的探针线、每个绝缘对放两根间距比对间隙小 5 µm 的线（都在板外）。KiCad 读不懂 `.kicad_dru` 时
@@ -371,14 +392,18 @@ clearance 会替换类间距，也会被对规则替换）；有绝缘对时 cre
   clearance / creepage；每个计划网的**普通间距**按 KiCad 语义解析（自定义规则替换类间距）：任何可能管到它的规则（两物体
   判定）把间距压到计划以下即失败，值无法比较即 cannot-check；每个域边距规则 `pcbpilot edge PPD_<域>` 必须在、条件正确、
   `edge_clearance` 不低于计划，其后可能重叠的规则压低或无法比较同样失败 / cannot-check；再跑探针）、
-  `copper-widths`（每段直线与圆弧、按层、容差 0.04 mil，对照要求线宽 `requiredWidthMil`（不低于板最小线宽）：低于计划下限失败；介于下限与线宽之间只有意图 `neckdown`
+  `copper-widths`（每段直线与圆弧、按层、容差 0.04 mil，对照要求线宽 `requiredWidthMil`（不低于板最小线宽）：低于计划下限失败；介于下限与线宽之间的段，属于 `kicad route` 自己的**焊盘逃逸**（与 route 的 intent-widths 门禁同一条规则 `padEscape`：整段在本网焊盘真实铜皮的逃逸距离内、且一端贴着焊盘——route 预布的 escape 短线和焊盘处颈缩）记为 info，其余只有意图 `neckdown`
   `{refs, maxLengthMil, minWidthMil}` 覆盖的段可以；在本网铺铜内的细段 = cannot-check（铺铜颈缩由 post-layout sim 判）；
   没有走线、只有铺铜的网（含铺铜孤岛）= `zone-only`（cannot-check：铺铜宽度与是否连上焊盘这里不判）；≥2 焊盘却无铜的网 =
   `not-routed`（cannot-check，绝不当通过））、`via-size`（每个过孔不小于计划过孔）、`via-current`
   （route 的过孔电流门禁，但喂给它的是本次推导解析出的每网电流——sim 最坏值、声明的峰值 / RMS 比意图大时用大的，
   焊盘电流按比例放大——和计划所用的温升，不是意图文件里的原值）、`isolation-placement`（**advisory**：同面封装 courtyard 边到边距离 < 对的电气间隙
   → warn；跨两域且未在意图 `pairs[].bridges` 声明的器件 → warn。这是**布局代理检查，不是铜间距**，铜由带绝缘规则的
-  DRC 判）。`--stage placed`：未布线阶段不做铜检查（标 not applicable）。
+  DRC 判；对的某侧在板上没有网 → 该检查 cannot-check、不再 advisory）。`--stage placed`：未布线阶段不做铜检查（标 not applicable）。
+
+**探针板只留规则**（v0.12.1）：bridge `rules-probe` 在加探针前删掉封装、走线、过孔与铜皮（规则区域、板框保留；探针网靠探针线
+本身留在板上），三次 DRC 都跑在这块小板上。只读探针自己的违规，结果与整板相同；1443 件的板上每次 DRC 从约 150 s 降到秒级。
+stderr 末行 `kicad rules: timing: …` 给出每类 KiCad 调用的次数与耗时。
 
 **所有权按位置**：`.kicad_dru` 按块标记切成有序片段分别解析，规则属于哪个块只看它在哪个片段里；块外的规则即使与
 自有规则同名也是用户的（用了 pcbpilot 名字 → `dru-name` 冲突，拒绝）。**输入只读一次**：requirements、意图、sim、
@@ -446,7 +471,10 @@ pcbpilot kicad route --pcb board-b-v5a.kicad_pcb --intent intent.json --sim sim.
      有 `widthMil.min` 的类再加全层 `track_width (min …)`。规则写在 `# pcbpilot:begin … # pcbpilot:end` 块里。
      KiCad 10 的 DRC **不**按网络类线宽报错，线宽只能靠这些规则 + `intent-widths` 门禁。
    - **安全（ISO / 医疗）**：意图的绝缘对（`pairs` + `domains`）→ 每个域一个 `PPD_<域>` 网络类，`.kicad_dru` 写
-     `(constraint clearance (min …))` 与 `(constraint creepage (min …))`（KiCad 10 支持 creepage，已实测会报 creepage 违规）；
+     `(constraint clearance (min …))` 与 `(constraint creepage (min …))`（KiCad 10 支持 creepage，已实测会报 creepage 违规）。
+     creepage **不大于** clearance 时不写 creepage 约束：沿表面的路径不会短于同两块铜之间的直线，clearance 已经蕴含它
+     （实测 1443 件板：85 条 creepage 违规每一条都同时报为同一对的 clearance 违规）；而 KiCad 的 creepage 检查占了大板 DRC
+     的大部分时间（同一块摆好的板 1227 s → 312 s，除那 85 条 creepage 外结果逐条相同）。creepage 大于 clearance 的对照写不误；
      绝缘对两侧每个网的 DSN 间距抬到该对的电气间隙（fastroute 每类只有一个间距）。危险域的板边距离
      （`EdgeFromIntent.ByDomain`）写成 `(constraint edge_clearance (min …))`。
    - DSN：原生 `ExportSpecctraDSN`（um），再：复合类名的逗号改 `+`（`--no-neckdown-classes` 用逗号分隔）、加内层 layer_rule、
@@ -465,7 +493,27 @@ pcbpilot kicad route --pcb board-b-v5a.kicad_pcb --intent intent.json --sim sim.
    （`no_neckdown`），显式差分对带间距/偏斜。`both`：两个后端同时跑，**先「完整 + 无新增 DRC 错误」的胜出并取消另一个**，胜出者仍要过
    本次运行的全部门禁；任一门禁失败就换下一个（被取消的会重跑），全都不过则按最少未布通/新增 DRC 的那个报告失败。
    `summary.routerCandidates` 记录每个后端的未布通数、用时、快检结果、是否过全量门禁。任何门禁、签核都不因后端而减少。
-3. **fastroute**：一条 `runFastroute`（续跑、崩溃单线程重试）。`--multi-start`（默认 4）是 pcbpilot 设置：fastroute 自己
+3. **过孔尺寸**：fastroute（0.1.14）不会让每个过孔都用类的 `use_via`：fanout 等路径从 DSN structure `(via …)` 列表里取过孔（实板 262 个
+   过孔全是 Default 的 0.6 mm，类要求 0.6096 / 0.7 mm，`kicad rules --check` 的 via-size 判失败）。所以列表里只放**逐项取最大**的
+   一个过孔（自动布线仍按各类 `use_via`，已实测）：所有类过孔里最大的直径**和**最大的孔径（类 0.8/0.2 与 0.7/0.4 → 0.8/0.4；没有这样的类就按 KiCad 的命名
+   `Via[…]_<径>:<孔>_um` 加一个 padstack，SES 导入时 KiCad 从名字读孔径——实测导入为 0.8/0.4），作为列表里唯一的过孔（`summary.routerViaPadstack`、
+   `dsnViaOrder`）。导入后每个布线器过孔**缩**到它所在网的有效类过孔（KiCad 回读；bridge edit `setVia`，`summary.routerVias`）：
+   两个尺寸都只缩不放，fastroute 按大过孔留的间距都还在，每个类过孔（含它自己的环宽）都缩得到。缩不到类过孔的（某一维比类小）
+   判 `router-vias` 失败，网没有有效类过孔的判 cannot-check——都不会悄悄跳过。
+   **DRC 时限**：kicad-cli DRC 的时限按板文件大小放大（15 min + 每 MB 2 min，最多 2 h；`PCBPILOT_KICAD_DRC_TIMEOUT` 覆盖），
+   超时报 `kicad-cli pcb drc on <板> timed out after <时限>`。铺铜后的 starved-thermal 修复、widen 的 DRC 回退是可选步骤：
+   它们的 DRC 没跑成（超时）时记一个 cannot-check 门禁（`starved-thermals` / `widen-drc`），照样写 routed 板、跑其余门禁，
+   不再中止整个 route。
+3b. **fastroute 时限与部分结果**：`--max-time` 不给时按板子算（10 min + 每条连接 0.3 s，最多 40 min，写进
+   `summary.routerTime`）；显式 `--max-time 0` 才是不限时。到点 fastroute 自己写最好结果；再过一个宽限（max-time/10，
+   1–5 min）pcbpilot 发 Ctrl+Break（Unix 为 SIGINT），2 min 后仍不退出就杀掉；`--router-timeout` 没给时自动抬到
+   max-time + 两个宽限。被杀、没写报告但有 checkpoint `.ses` 的一轮记为 `partial`：照样导入这块部分布线的板，
+   `route-complete` 按板上铜的连通性数未布通，且**一定 fail**（不是 pass），其余门禁照常跑。fastroute 打印 “routing finished” 并 `saved` 了最终 `.ses` 却不退出、不写报告时（0.1.14 大板实测），pcbpilot 30 s 后就发停止（不等到点），把这份 ses 记为 `partial` + `finalSession: true`，未布通/违规数取 fastroute 日志里最后一行 “best board so far” 的数（`countsFrom: "log"`）。
+   **网名**：fastroute 的 `--pairs` / `--tune` 文件按空白切分、不认引号（0.1.14 实测 `"A B"`、`'A B'`、`A\ B` 都会拆开），
+   tune 里 `*` 是通配。层次网名带空格（页标题、自动分页的 " (1/2)"）、引号、`=`、`#`、`*` 的差分对 / 长度组网，
+   只在 fastroute 读的那份 DSN（`route.fastroute.dsn`）里改名为 `pcbpilot_net_N`，pairs / tune 写别名，fastroute 写回的
+   session 里凡是网标识位置（`(net …)` 之后、`(class 名 网 网 …)` 里）、整个 token 等于别名的（带不带引号都算），换回 DSN 里该网**原样的 token**（KiCad 把名字里的 `"` 写成两个单引号、反斜杠不转义，导入时再还原）后存成 `.names.ses` 再导入；只按整 token 替换，`pcbpilot_net_1_x` 这类真网名不受影响，别名也不会与 DSN 里任何 token 重名；报告里的未布通网名也换回真名。KiCad 板、`route.dsn` 和 TraceMaker（JSON 约束）不受影响。
+   一条 `runFastroute`（续跑、崩溃单线程重试）。`--multi-start`（默认 4）是 pcbpilot 设置：fastroute 自己
    并行重跑 N−1 个不同种子的第 1 轮网序、按（未布通、冲突、−分数）取最好，pcbpilot 不再叠第二层并行。同一 DSN + 同一参数
    结果逐字节相同（Board-A：3 次 `--multi-start=1`、2 次 `--multi-start=4` 的 SES 完全一致）。优化器默认关（`--optimizer`
    打开，`--optimizer-threshold`）：它的预算等于整个布线阶段（含 multi-start，至少 60 s）——Board-A `--multi-start=4`
@@ -514,6 +562,7 @@ pcbpilot kicad route --pcb board-b-v5a.kicad_pcb --intent intent.json --sim sim.
 
 ```bash
 pcbpilot kicad drc --pcb board.kicad_pcb [--schematic-parity] [--out drc/]
+pcbpilot kicad drc --pcb place/board.kicad_pcb --sch sch/board.kicad_sch       # 板不在工程目录：指定根原理图
 pcbpilot kicad drc --pcb board.kicad_pcb --baseline-pcb ../revA/board.kicad_pcb     # 只报新增
 pcbpilot kicad drc --pcb board.kicad_pcb --baseline drc/drc-report.json --waivers w.json
 ```
@@ -522,6 +571,9 @@ pcbpilot kicad drc --pcb board.kicad_pcb --baseline drc/drc-report.json --waiver
   用 pcbpilot 的隔离 KiCad 配置（空的全局库表，kicadenv.go）运行 `kicad-cli pcb drc --format json --severity-all`；工程自己的
   `fp-lib-table` / `sym-lib-table` 随副本带上，`${KIPRJMOD}` 指回原目录，所以工程库照常解析，只在全局库里的封装出 `lib_footprint_*`
   环境类警告。工程目录不新增 `.kicad_prl`、锁文件或任何改动（演示板副本前后哈希一致）。子图在工程目录外 → cannot-check。
+- **`--sch ROOT.kicad_sch`**（v0.12.2，隐含 `--schematic-parity`）：板写到了别的目录（`kicad place --out place/…`）时，
+  把该根原理图及其层次复制到副本里板的旁边（根图改名为 `<板>.kicad_sch`），parity 照常比对；不给时只认板旁边的同名根图，
+  没有就是 cannot-check。
 - **归属**：每个违例按条目 uuid 在 `.kicad_pcb` S 表达式里找到所属顶层对象（焊盘、丝印、courtyard 都归它的封装；线/弧/过孔/铺铜带网名），
   给出 `owner.class`：`environment`（库表类规则）> `schematic-parity` > `board-outline`（涉及 Edge.Cuts）> `routing`（涉及线、过孔、铺铜）>
   `footprint`（只涉及一个封装自己的对象）> `placement`（两个以上封装）> `graphic` > `unresolved`；位置另给 KiCad 坐标 `xMm/yMm`（mm，y 向下）。
@@ -563,7 +615,7 @@ pcbpilot signoff --run-dir route/ --intent intent.json --sim sim.json --connecti
 | `signoff-review` | 设计阶段 Codex + Kimi + Claude 评审通过（review.json，stage=design） |
 | `signoff-parts` | 每个 BOM 器件都有合法 LCSC C 号（原理图 supplierId / `--values` / 板上 LCSC 字段；安装孔、Mark、测试点、Logo 跳过） |
 | `signoff-safety` | 绝缘对电气间隙 / 爬电（开槽计入）+ 铜到板边（pkg/safety：IEC 60664-1、62368-1、60601-1 MOOP/MOPP、61010-1） |
-| `signoff-copper` | 按每段仿真电流的线宽、不低于 `widthMil.min`（禁止颈缩处）、过孔组载流 |
+| `signoff-copper` | 按每段仿真电流的线宽、不低于 `widthMil.min`（禁止颈缩处）、过孔组载流；逐网判：有两个以上物理焊盘的网络（同一器件的多个电源/地脚也算；同一封装内同号焊盘视为内部相连、算一个）若自身没有走线/弧/过孔/已灌铺铜（未布线），列出这些网络并判 cannot check、失败——别的网有铺铜或零星走线不算数 |
 | `signoff-ir` | 设计后仿真结论 pass/warn（IR 压降、开路、过孔电流、温升） |
 | `signoff-continuity` | 原理图 pin→net 划分 == 板上焊盘网络（`ComparePinNets`） |
 | `signoff-trace` | 每条意图规则可追溯到原理图网络、器件和板上焊盘；表格写在 `signoff.md` |

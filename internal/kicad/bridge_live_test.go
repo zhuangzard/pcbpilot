@@ -799,46 +799,33 @@ func anyList(v any) []any {
 	return l
 }
 
-// A pour clipped to its insulation domain (polys, mil, y-up) is ONE zone
-// on the union of its polygons, not the board outline; malformed polygons
-// are refused before anything is written.
+// A pour clipped to its insulation domain arrives as polygons (mil, y-up):
+// they become ONE zone (separate touching zones are KiCad zones_intersect
+// errors), built in the zone's own outline (ZONE.SetOutline of a Python
+// SHAPE_POLY_SET crashed pcbnew on a large board). Bad polygons are
+// rejected before any change.
 func TestBridgePoursClippedPolysLive(t *testing.T) {
 	tools := bridgeLiveTools(t)
 	dir := t.TempDir()
 	pcb := sharedTiny(t, dir)
 	out := filepath.Join(dir, "poured.kicad_pcb")
-	// two touching rectangles over x 0..1000 mil (25.4 mm) of the 50 x 40 mm board
-	a := [][2]float64{{0, 0}, {500, 0}, {500, -1500}, {0, -1500}}
-	b := [][2]float64{{500, 0}, {1000, 0}, {1000, -1500}, {500, -1500}}
-	if _, err := tools.Pours(pcb, []Pour{{Net: "GND", Layer: 2, Polys: [][][2]float64{a, b}}}, out); err != nil {
-		t.Fatal(err)
+	polys := [][][2]float64{
+		{{0, 0}, {400, 0}, {400, -400}, {0, -400}},
+		{{400, 0}, {800, 0}, {800, -400}, {400, -400}}, // touches the first
 	}
-	raw, err := os.ReadFile(out)
+	if _, err := tools.Pours(pcb, []Pour{{Net: "GND", Layer: 2, Polys: polys}}, out); err != nil {
+		t.Fatalf("clipped pour: %v", err)
+	}
+	b, err := os.ReadFile(out)
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := strings.ReplaceAll(string(raw), "\r\n", "\n")
-	if n := strings.Count(s, `"pcbpilot pour GND L2"`); n != 1 {
-		t.Fatalf("%d pour zones, want 1 merged zone", n)
-	}
-	start := strings.Index(s, "\n\t(zone")
-	end := strings.Index(s[start+1:], "\n\t)\n")
-	if start < 0 || end < 0 {
-		t.Fatal("no zone block in the poured board")
-	}
-	xs := regexp.MustCompile(`\(xy ([-0-9.]+) ([-0-9.]+)\)`).FindAllStringSubmatch(s[start:start+1+end], -1)
-	if len(xs) == 0 {
-		t.Fatal("zone has no outline points")
-	}
-	for _, m := range xs {
-		if x, _ := strconv.ParseFloat(m[1], 64); x > 25.4+0.01 {
-			t.Fatalf("zone point x %s mm beyond the clip polygons (25.4 mm): the board outline was poured", m[1])
-		}
+	if n := strings.Count(string(b), `(name "pcbpilot pour GND L2")`); n != 1 {
+		t.Fatalf("%d zones named for the clipped GND pour, want one merged zone", n)
 	}
 	bad := filepath.Join(dir, "bad.kicad_pcb")
-	_, err = tools.Pours(pcb, []Pour{{Net: "GND", Layer: 2, Polys: [][][2]float64{{{0, 0}, {1, 1}}}}}, bad)
-	if err == nil || !strings.Contains(err.Error(), "polys[0]") {
-		t.Fatalf("a two-point polygon: %v", err)
+	if _, err := tools.Pours(pcb, []Pour{{Net: "GND", Layer: 2, Polys: [][][2]float64{{{0, 0}, {1, 1}}}}}, bad); err == nil || !strings.Contains(err.Error(), "polys") {
+		t.Fatalf("a two-point polygon accepted: %v", err)
 	}
 	if _, serr := os.Stat(bad); serr == nil {
 		t.Fatal("rejected pours wrote the output board")

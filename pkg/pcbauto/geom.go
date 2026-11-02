@@ -72,9 +72,28 @@ func (r Rect) Overlaps(o Rect) bool {
 
 // OverlapArea is the intersection area (0 when disjoint).
 func (r Rect) OverlapArea(o Rect) float64 {
-	w := math.Min(r.MaxX, o.MaxX) - math.Max(r.MinX, o.MinX)
-	h := math.Min(r.MaxY, o.MaxY) - math.Max(r.MinY, o.MinY)
-	if w <= 0 || h <= 0 {
+	// Plain comparisons, not math.Min/Max (the legaliser's hottest call):
+	// they differ only for NaN and the sign of a zero, and a zero extent
+	// returns 0 either way.
+	maxX, minX, maxY, minY := r.MaxX, r.MinX, r.MaxY, r.MinY
+	if o.MaxX < maxX {
+		maxX = o.MaxX
+	}
+	if o.MinX > minX {
+		minX = o.MinX
+	}
+	w := maxX - minX
+	if !(w > 0) {
+		return 0
+	}
+	if o.MaxY < maxY {
+		maxY = o.MaxY
+	}
+	if o.MinY > minY {
+		minY = o.MinY
+	}
+	h := maxY - minY
+	if !(h > 0) {
 		return 0
 	}
 	return w * h

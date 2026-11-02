@@ -497,3 +497,33 @@ b0.Add(fp)
 	// Cutouts inside the footprint's outline are still fine.
 	boardLiveOp(t, tools, "outline", pcb, &kicad.OutlineSpec{Cutouts: []kicad.BoardShape{{Circle: &kicad.BoardCircle{X: 10, Y: 10, Diameter: 3}}}})
 }
+
+// TestKicadBoardLiveStackupNoOutline changes the stackup of a board that has
+// no outline yet: its invalid_outline names the board, whose uuid is new on
+// every load, and must not count as a new DRC error; kicad-cli's null size
+// is no stats failure.
+func TestKicadBoardLiveStackupNoOutline(t *testing.T) {
+	tools := boardLiveTools(t)
+	pcb := filepath.Join(t.TempDir(), "bare.kicad_pcb")
+	boardLiveOp(t, tools, "new", pcb, &kicad.NewBoardSpec{Layers: 2})
+	boardLiveOp(t, tools, "stackup", pcb, &kicad.StackupSpec{Layers: 6, Thickness: 1.6, Finish: "ENIG"})
+}
+
+// TestKicadBoardLiveReplaceArcOutline replaces a rounded outline (arcs) with
+// another: the removed Edge.Cuts items must not corrupt pcbnew's reload of
+// the result (10.0.6 returned a bare SwigPyObject once their Python proxies
+// were collected).
+func TestKicadBoardLiveReplaceArcOutline(t *testing.T) {
+	tools := boardLiveTools(t)
+	pcb := filepath.Join(t.TempDir(), "arc.kicad_pcb")
+	boardLiveOp(t, tools, "new", pcb, &kicad.NewBoardSpec{Layers: 2})
+	boardLiveOp(t, tools, "outline", pcb, &kicad.OutlineSpec{Outer: kicad.BoardShape{Rect: &kicad.BoardRect{X: 0, Y: 0, Width: 50, Height: 40, CornerRadius: 3}}})
+	boardLiveOp(t, tools, "outline", pcb, &kicad.OutlineSpec{Replace: true, Outer: kicad.BoardShape{Rect: &kicad.BoardRect{X: 10, Y: 0, Width: 80, Height: 60}}})
+	st, err := tools.Stats(pcb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !st.HasOutline || math.Abs(st.Width-80) > 0.01 || math.Abs(st.Height-60) > 0.01 {
+		t.Errorf("replaced outline: %+v", st)
+	}
+}

@@ -155,3 +155,41 @@ func TestReviewerInvocationIsConfinedToPrivateDir(t *testing.T) {
 		}
 	}
 }
+
+// An input that changes while the reviewers run — here past the prompt's
+// --max-bytes cut, so the prompt is the same — is not recorded as
+// reviewed: the run fails and review.json is not written.
+func TestRunReviewPanelInputChangedDuringReview(t *testing.T) {
+	dir := t.TempDir()
+	req := filepath.Join(dir, "REQ.md")
+	ev := filepath.Join(dir, "intent.json")
+	head := "| R-01 | fuse |\n" + strings.Repeat("filler\n", 300)
+	_ = os.WriteFile(req, []byte(head+"| R-09 | 1 kg |\n"), 0o644)
+	_ = os.WriteFile(ev, []byte("intent-evidence"), 0o644)
+	old := reviewerRunners
+	defer func() { reviewerRunners = old }()
+	reviewerRunners = map[string]reviewerRun{
+		"a": func(ctx context.Context, p string) (string, error) {
+			// the tail changes while this reviewer works
+			_ = os.WriteFile(req, []byte(head+"| R-09 | 9 kg |\n"), 0o644)
+			return `{"verdict":"pass","requirements":[{"id":"R-01","status":"met","evidence":"F1"}],"blocking":[],"advisory":[]}`, nil
+		},
+	}
+	out := filepath.Join(dir, "out")
+	_, err := runReviewPanel("design", []string{req}, []string{ev}, []string{"a"}, out, time.Minute, 500, nil, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "changed during the review") || !strings.Contains(err.Error(), "REQ.md differs") {
+		t.Fatalf("want a refusal naming REQ.md, got %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(out, "review.json")); !os.IsNotExist(err) {
+		t.Fatalf("review.json written for changed inputs: %v", err)
+	}
+	// Unchanged inputs: recorded, with the hashes of the bytes reviewed.
+	_ = os.WriteFile(req, []byte(head+"| R-09 | 1 kg |\n"), 0o644)
+	reviewerRunners = map[string]reviewerRun{"a": func(ctx context.Context, p string) (string, error) {
+		return `{"verdict":"pass","requirements":[{"id":"R-01","status":"met","evidence":"F1"}],"blocking":[],"advisory":[]}`, nil
+	}}
+	rec, err := runReviewPanel("design", []string{req}, []string{ev}, []string{"a"}, out, time.Minute, 500, nil, io.Discard)
+	if err != nil || len(rec.FilesSHA256) != 2 {
+		t.Fatalf("%v %+v", err, rec)
+	}
+}

@@ -729,6 +729,13 @@ func tailGates(snap *boardSnapshot, boardPath, postOut string, o qualityGateOpts
 	switch {
 	case o.routeGate != nil:
 		g = *o.routeGate
+	case o.routeChecked && o.route != nil && o.route.Partial:
+		// The router stopped at its time limit without a report: the board
+		// itself says what is unrouted; never a pass.
+		g = boardRouteCompleteGate(boardPath)
+		g.Pass = false
+		g.Detail = fmt.Sprintf("%s stopped at its time limit (partial: its last checkpoint session was imported): %s", o.route.Router, g.Detail)
+		g.Items = append([]string{"routing is incomplete: the router was stopped at --max-time / --router-timeout before it finished (raise --max-time, or route in parts)"}, g.Items...)
 	case o.routeChecked:
 		g = routeCompleteGate(o.route)
 	default:

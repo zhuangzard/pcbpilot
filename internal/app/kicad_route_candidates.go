@@ -44,6 +44,8 @@ func quickCheck(res *routeResult, newDRC int) (bool, string) {
 	switch {
 	case res == nil:
 		return false, "no result"
+	case res.Partial:
+		return false, "the router stopped at its time limit: a partial (checkpoint) result"
 	case res.UnroutedCount > 0:
 		return false, fmt.Sprintf("%d connection(s) unrouted", res.UnroutedCount)
 	case res.Fixable > 0:
@@ -144,10 +146,19 @@ func bestFailedCandidate(cs []*routeCandidate) *routeCandidate {
 		if !c.Tried || c.Res == nil || c.Board == "" {
 			continue
 		}
-		if best == nil || c.Res.UnroutedCount < best.Res.UnroutedCount ||
-			(c.Res.UnroutedCount == best.Res.UnroutedCount && c.NewDRC < best.NewDRC) {
+		if best == nil || unroutedRank(c.Res) < unroutedRank(best.Res) ||
+			(unroutedRank(c.Res) == unroutedRank(best.Res) && c.NewDRC < best.NewDRC) {
 			best = c
 		}
 	}
 	return best
+}
+
+// unroutedRank orders results by unrouted connections; a partial result
+// (count unknown) ranks after every counted one.
+func unroutedRank(r *routeResult) int {
+	if r.Partial || r.UnroutedCount < 0 {
+		return int(^uint(0) >> 1)
+	}
+	return r.UnroutedCount
 }

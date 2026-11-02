@@ -65,6 +65,7 @@ type kicadRulesOpts struct {
 	revision, report   string
 	replace            []string
 	stage              string
+	contract           string       // order contract (kicad fab --preflight --contract)
 	env                *kfile.Env   // tests: lock identity
 	backend            rulesBackend // tests: replaces KiCad
 	beforeCommit       func()       // tests: runs after the plan, before the commit
@@ -103,15 +104,28 @@ kicad route uses for its pre-route gate:
     width above an impedance-controlled or paired net's width fails
     (incompatible requirements).
   - insulation pairs → domain classes PPD_<domain> with clearance + creepage
-    rules; the pair clearance is also put on every net of the pair (route's
-    behaviour, an over-constraint kept for compatibility);
+    rules. Pair ends are "domain:<id>" (intent derive) and resolve to the
+    domain's nets, each by the board's (hierarchical) net name. A pair whose
+    domain has no net on the board is cannot-check (isolation-coverage;
+    --apply refuses) — never a pass. The clearance / creepage is the
+    intent's: max(derived from the standard, declared in the intent spec,
+    spec.isolation[] / spec.domains[].clearanceMm, creepageMm), the source in
+    isolation[].clearanceSource. A pair written with bare domain ids also
+    puts the pair clearance on every net of the pair (route's behaviour, an
+    over-constraint kept for compatibility);
   - nothing goes below the board's own minimums (track, clearance, via, hole,
     annular ring), the floors kicad route applies;
   - a .kicad_dru block "pcbpilot-rules" makes the floor a DRC minimum on every
     layer (a netclass width is only a routing default): the intent minimum
     (neck-down limit) when the net has one, else the full width;
   - KiCad's pre-defined track widths and via sizes get the classes' sizes (a
-    GUI convenience, never counted as a rule).
+    GUI convenience, never counted as a rule);
+  - --contract FILE (the order contract kicad fab --preflight reads): the
+    board's minimum track, clearance, through hole, via annular ring and
+    via diameter are raised to its limits (never lowered) before the
+    derivation, so vias are floored at the contract annular ring too;
+    fab-contract lists what still allows less (a user rule or class).
+    --check judges the board's own rules against it (fail when below).
 
 Everything is computed on a stage copy, read back with pcbnew (effective class
 and sizes per net) and proven with kicad-cli DRC on probe tracks just below
@@ -128,7 +142,12 @@ Modes (exactly one):
                          publish a reviewed plan only if the files still give R
   --check                read-only gate on an existing (routed) board
 
-Checks (each tri-state, reported separately): plan-coverage, staged-readback /
+Checks (each tri-state, reported separately): plan-coverage, isolation-coverage,
+footprint-pad-clearance (advisory: pads of one footprint closer than the
+clearance KiCad will require between them — e.g. a 0.5 mm pitch part's
+0.15 mm gaps under a 0.2 mm class — listed per footprint with the fix: a
+footprint-local clearance override or a lower class clearance; never lowered
+silently), fab-contract (with --contract), staged-readback /
 readback (apply) or effective-rules (check), and in --check copper-widths,
 via-size, via-current (route's gate) and the advisory placement proxy
 (isolation-placement: courtyard edge-to-edge of same-side footprints of two
@@ -167,6 +186,7 @@ JSON report on stdout (and --report FILE.json); diagnostics on stderr.`,
 	f.StringVar(&o.report, "report", "", "also write the JSON report to this .json")
 	f.StringArrayVar(&o.replace, "replace", nil, "a conflicting user netclass or .kicad_dru rule pcbpilot may replace, by name (repeatable)")
 	f.StringVar(&o.stage, "stage", "routed", "--check: routed (copper checked) | placed (copper checks not applicable)")
+	f.StringVar(&o.contract, "contract", "", "order contract JSON (the one kicad fab --preflight --contract reads): raise the board's minimum track / clearance / drill / annular ring / via to its limits and check them")
 	return c
 }
 
@@ -218,14 +238,23 @@ type rulesNetPlan struct {
 }
 
 type rulesIsoPlan struct {
-	A           string   `json:"a"`
-	B           string   `json:"b"`
-	ClassA      string   `json:"classA"`
-	ClassB      string   `json:"classB"`
-	ClearanceMm float64  `json:"clearanceMm"`
-	CreepageMm  float64  `json:"creepageMm,omitempty"`
-	Bridges     []string `json:"bridges,omitempty"`
-	Note        string   `json:"note"`
+	A           string  `json:"a"`
+	B           string  `json:"b"`
+	ClassA      string  `json:"classA"`
+	ClassB      string  `json:"classB"`
+	ClearanceMm float64 `json:"clearanceMm"`
+	CreepageMm  float64 `json:"creepageMm,omitempty"`
+	// ClearanceSource / CreepageSource: "derived" (the standard, pkg/intent
+	// SafetyDistances) or "declared" (the intent spec's required distance,
+	// when it is larger); empty for an intent without declarations.
+	ClearanceSource string `json:"clearanceSource,omitempty"`
+	CreepageSource  string `json:"creepageSource,omitempty"`
+	// BoardNetsA / BoardNetsB: the domain nets on the board (the domain
+	// class members). A side with none: the pair is cannot-check.
+	BoardNetsA int      `json:"boardNetsA"`
+	BoardNetsB int      `json:"boardNetsB"`
+	Bridges    []string `json:"bridges,omitempty"`
+	Note       string   `json:"note"`
 }
 
 type rulesConflict struct {
@@ -334,6 +363,12 @@ type rulesRun struct {
 	// take a path).
 	intentCopy string
 	probeRuns  int
+	// contract: the parsed --contract; contractRaised: the board minimums
+	// raised to it on the stage; stInOrig: the board's own rules (--check).
+	contract       *kicad.FabContract
+	contractRaised []contractRaise
+	contractNote   []string
+	stInOrig       string
 }
 
 func runKicadRules(o kicadRulesOpts, stdout, stderr io.Writer) error {
@@ -470,8 +505,13 @@ func (r *rulesRun) run(planSnap kfile.Snapshot) int {
 		if err != nil {
 			return r.fail(errRulesTool, "", err.Error(), "install KiCad 10 or set "+kicad.EnvApp+" / "+kicad.EnvPython+" / "+kicad.EnvCLI, 1)
 		}
-		r.t = kt
+		// DRC only ever runs on probe boards (no footprints): without
+		// the global library tables (kicadProbeTools).
+		r.t = kicadProbeTools{kt}
 	}
+	tb := newTimedRulesBackend(r.t)
+	r.t = tb
+	defer tb.print(r.stderr)
 	if v, err := r.t.Version(); err == nil {
 		rep.KiCadVersion = v
 	}
@@ -504,6 +544,8 @@ func (r *rulesRun) run(planSnap kfile.Snapshot) int {
 	r.writeStamp()
 	// Staged verification: pcbnew readback + DRC probes on the staged result.
 	r.verifyStaged()
+	r.contractCheck()
+	r.padClearance()
 
 	switch {
 	case o.plan:
@@ -566,7 +608,7 @@ func (r *rulesRun) readInputs() int {
 	for _, in := range []struct {
 		role, path string
 		req        bool
-	}{{"pcb", o.pcb, true}, {"project", r.pro, false}, {"rules", r.dru, false}, {"intent", o.intent, true}, {"sim", o.sim, true}} {
+	}{{"pcb", o.pcb, true}, {"project", r.pro, false}, {"rules", r.dru, false}, {"intent", o.intent, true}, {"sim", o.sim, true}, {"contract", o.contract, true}} {
 		if c := add(in.role, in.path, in.req); c != 0 {
 			return c
 		}
@@ -655,6 +697,11 @@ func (r *rulesRun) derive() int {
 				return r.fileErr(err)
 			}
 		}
+	}
+	// --contract: the board minimums raised to the order contract on the
+	// stage, before anything reads the stage.
+	if code := r.applyContract(); code != 0 {
+		return code
 	}
 	if r.snapRaw, err = r.t.Snapshot(r.stIn); err != nil {
 		return r.fail(errRulesTool, o.pcb, "board snapshot: "+err.Error(), "", 1)
@@ -837,11 +884,11 @@ func (r *rulesRun) refuseIncomplete() int {
 		return r.fail(errRulesConflict, r.o.pcb, strings.Join(unresolved, "; "),
 			"keep the user rule (change the intent instead), or let pcbpilot replace it with --replace <name>", 6)
 	}
-	for _, name := range []string{"plan-coverage", "staged-readback"} {
+	for _, name := range []string{"plan-coverage", "isolation-coverage", "staged-readback"} {
 		switch st := r.rep.checkStatus(name); st {
 		case gate.Pass:
 		case gate.Fail:
-			return r.fail(map[string]string{"plan-coverage": errRulesIncomplete, "staged-readback": errRulesVerify}[name], r.o.pcb,
+			return r.fail(map[string]string{"plan-coverage": errRulesIncomplete, "isolation-coverage": errRulesIncomplete, "staged-readback": errRulesVerify}[name], r.o.pcb,
 				name+" failed: nothing written (see checks)", "fix the cause named in the check and run again", 6)
 		default:
 			return r.fail(errRulesIncomplete, r.o.pcb, fmt.Sprintf("%s is %s: the plan is incomplete, nothing written", name, st),
@@ -959,7 +1006,7 @@ func rulesOutputAlias(o kicadRulesOpts) string {
 	for _, ext := range []string{".kicad_pcb", ".kicad_pro", ".kicad_dru", ".kicad_prl"} {
 		in = append(in, named{"board " + ext, boardSibling(o.pcb, ext)}, named{"KiCad lock", kfile.LockPath(boardSibling(o.pcb, ext))})
 	}
-	for _, f := range []named{{"--intent", o.intent}, {"--sim", o.sim}, {"--apply-plan", o.applyPlan}} {
+	for _, f := range []named{{"--intent", o.intent}, {"--sim", o.sim}, {"--apply-plan", o.applyPlan}, {"--contract", o.contract}} {
 		if f.path != "" {
 			in = append(in, f)
 		}

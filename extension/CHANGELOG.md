@@ -1,5 +1,123 @@
 # Changelog
 
+## [0.12.3] — 2026-10-30
+
+**CLI, daemon, Skills and MCP move to 0.12.3. The connector runtime is UNCHANGED (only its version number moves); import the
+0.12.3 `pcbpilot-connector.eext` so the versions match — the daemon pauses design actions until they do.**
+
+Summary: routing and sign-off on large boards. On the 1443-part test board, `kicad route` in 0.12.2 aborted on a DRC timeout and
+wrote no board; in 0.12.3 it writes the routed board and runs all 16 mandatory gates, and DRC of the routed board takes about 3
+minutes instead of not finishing. Pours are clipped to their insulation domain. Reviewed by Codex and Kimi K3.1 Pro round after
+round until no blocker remained.
+
+**Routing and DRC**
+- A DRC that hits its limit is reported as a timeout naming the check, the board and the limit. The limit scales with the board
+  file (15 min + 2 min per MB, at most 2 h; `PCBPILOT_KICAD_DRC_TIMEOUT` overrides it).
+- Optional DRC-backed route steps (starved-thermal repair, widen step-back) record a cannot-check gate instead of aborting; the
+  routed board is still written and every other gate runs.
+- `kicad rules` writes an insulation pair's creepage constraint only when it is larger than the pair's clearance (the clearance
+  rule already implies an equal or smaller creepage). This removes KiCad's slow creepage check where it adds nothing. Boards that
+  carry a 0.12.2 rules block need `kicad rules --apply` again to benefit.
+- Vias: route offers fastroute one via as large as every class via in both diameter and drill and, after import, shrinks each
+  router via to its own net class's via. A new `router-vias` gate fails or is cannot-check when a via cannot be sized, including
+  when the board snapshot cannot be read. Known limit: on some boards fastroute 0.1.14 still places its own smaller via; the gate
+  then fails instead of passing undersized vias (follow-up in the next release).
+- `kicad rules` copper-widths accepts the pad escapes route plans.
+- Pours are clipped to their insulation domain and kept as one zone each; a planned pour clipped to nothing fails the new
+  `pour-clip` gate. On the test board pour-to-foreign-domain isolation errors went from 1005 to 2.
+- A fastroute run that saved its final session but does not exit is stopped after 30 s and imported as a partial result with the
+  counts from its log.
+
+**Placement**
+- `kicad place --halo-mil` / `--halo-ic-mil` reserve routing room around parts.
+- Decaps more than 0.4 inch from their pin are moved closer when that lowers their cost without lengthening any of their nets or
+  blocking more labels; the rescue stops at the budget deadline plus 15 s.
+
+**Population (DNP)**
+- KiCad's own DNP flag decides everywhere: netlist, `sim power`, `kicad lcsc` and `kicad fab` (read from the schematic when it is
+  available, including symbols excluded from the BOM). A symbol field named "DNP", a values-file `dnp`, or a board flag that
+  disagrees is reported with the same warning in every tool instead of silently changing the result.
+- `kicad lcsc --check` prints an assembly breakdown (footprints, assembled, DNP, excluded).
+
+**Simulation and intent**
+- `sim power` models common-mode chokes (one resistance per winding) and pass elements with control pins; ground nets joined by
+  choke windings keep one reference per group, so return currents and winding drops are solved.
+- Grounds are merged into one isolation domain through a choke only when its windings are declared (`windings` in the intent
+  spec); otherwise they stay separate with a warning naming the declaration to add.
+- A poured ground or a branched rail keeps the floor minimum width.
+
+**Other**
+- `kicad sch-check --engineer-grade --spec` runs the sch-build engineer-grade gate on any project (sheets outside the root's folder
+  are refused).
+- `review-panel --reapply-waivers` recomputes a review's gate from its stored verdicts; reviews record hashes of their complete
+  input files, taken from the bytes the reviewers saw, and refuse inputs that changed.
+- An update notice relayed from an older daemon is shown once.
+
+## [0.12.2] — 2026-10-29
+
+**CLI, daemon, Skills and MCP move to 0.12.2. The connector runtime is UNCHANGED (only its version number moves); import the
+0.12.2 `pcbpilot-connector.eext` so the versions match — the daemon pauses design actions until they do.**
+
+Summary: fixes from a full-cycle run on a real 1443-part, 6-layer board. In 0.12.0, `kicad place` did not finish after 93 minutes;
+in 0.12.2 it places that board with every constraint in about 9 minutes and no illegal placement. Isolation checks that passed
+without testing anything now resolve their nets or say they cannot check. Every change was reviewed by Codex and Kimi K3.1 Pro
+round after round until no blocker remained.
+
+**Placement (`kicad place`)**
+- Large boards finish: legalisation rejects hopeless poses cheaply, the anneal keeps a real deadline, and hot paths no longer
+  allocate. On the small fixture boards placements are byte-identical to 0.12.1.
+- `--time-budget` (default 8m) bounds the whole search and returns the best result so far, flagged in the report
+  (`budgetHit`, and per seed `metrics.timeBudgetHit` naming the phase that was cut). Progress goes to stderr every phase
+  and every 30 s.
+- Domain zones are sized by everything they must hold (movable parts, fixed parts, bridges, keepouts and holes), never wider
+  than the board. A per-zone room report (`zoneFill`) names zones that are over-full or tight.
+- A strict last pass removes remaining overlaps without leaving the part's zone and without making any containment, keepout or
+  per-pad isolation term worse; a decap more than 1 inch from its pin is moved closer when that lowers its cost.
+- The report has a `verdict`; a best seed with any illegal placement (overlap, outside board or zone, in a keepout) fails with
+  exit 6 and names the parts.
+- `--out` copies the project's `.kicad_pro` and `.kicad_dru` next to every written board, so design rules are not lost.
+- A mech spec `board` section no longer replaces an existing outline with one at 0,0: the same size keeps the outline and
+  counts coordinates from its lower-left corner; a different size is refused (change the outline with `kicad board outline`
+  first).
+
+**Design rules and isolation (`kicad rules`, `intent`)**
+- Isolation pairs written as `domain:<id>` resolve to board nets. A pair side with no board nets is cannot-check and
+  `--apply` refuses; before, such pairs passed with nothing checked.
+- The intent spec can declare isolation distances per domain pair (`isolation[]`) or per domain; each pair takes the larger of
+  derived and declared values, records the source, and warns about declarations that match nothing.
+- New advisory `footprint-pad-clearance`: pads of different nets in one footprint closer than their required clearance, using
+  real rotated pad shapes; touching pads count as a short unless the footprint declares a net tie.
+- `--contract` reads the fab contract and raises (never lowers) minimum track, clearance, hole, annular ring and via sizes.
+- Much faster: probe boards are stripped and checked with empty library tables (plan 644 s → 37 s, apply 633 s → 91 s on the
+  test board).
+
+**Routing and DRC**
+- `kicad route` with fastroute: differential-pair and length-group net names that fastroute's pairs/tune files cannot hold
+  (spaces, quotes, `=`, `#`, `*`, `?`, backslash) work; fastroute gets aliases and the results are mapped back. A
+  default router time limit applies (10 min + 0.3 s per connection, at most 40 min); at the limit fastroute is asked to stop,
+  then killed, and its checkpoint is imported as a partial result that never passes `route-complete`.
+- Board DRC (`kicad drc`, `fab --preflight`, route gates) uses a private KiCad configuration with only the libraries the board
+  references, so library checks match the user's own setup (0.12.0's empty table reported every stock footprint).
+- `kicad drc --sch` adds schematic parity for a board outside its project folder; `fab --preflight --sch` honours it.
+- `kicad board` compares DRC before and after with all track errors reported, so unchanged boards no longer show new errors;
+  an outline-less board no longer fails, and `outline --replace` no longer crashes.
+
+**Schematic and sync**
+- `kicad sch-build` ships every footprint library the spec references from `libDirs` (relative entries resolve against the
+  spec's folder) and fails with `FOOTPRINT_LIB_NOT_FOUND` / `FOOTPRINT_NOT_FOUND`, checking stock and global libraries down to
+  the footprint file.
+- Sheet names containing `/` are escaped as KiCad does, so `pcb-sync` parity no longer fails on them.
+- `pcb-sync --create` alone writes a new board; new footprints are staged compactly to the left of the origin.
+- The schematic planner's time budget covers the whole layout stage and an overrun is reported honestly.
+
+**Simulation, sign-off, ordering**
+- `sim power`: a `mosfet` model kind (switch with `ronOhm`, `--switch REF=open|closed`) and models matched by designator
+  (`match.refs`); `--spice-check` treats high-impedance nodes as warnings.
+- `sim post-layout` compares KiCad values numerically with case-sensitive prefixes (1M ≠ 1m), MPNs for EasyEDA.
+- `signoff-copper` cannot pass when a net with two or more pads has no copper.
+- `kicad lcsc --check` matches letter-suffix designators such as J18A.
+- An update outcome is announced once.
+
 ## [0.12.1] — 2026-10-28
 
 **CLI, daemon, Skills and MCP move to 0.12.1. The connector runtime is UNCHANGED (only its version number moves); import the

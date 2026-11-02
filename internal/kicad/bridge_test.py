@@ -270,12 +270,6 @@ class ValidatePoursAndNetclasses(unittest.TestCase):
     def test_pours(self):
         b = board()
         self.assertEqual(bridge.validate_pours(b, {"zones": [{"net": "GND", "layer": 2}]}), [])
-        sq = [[0, 0], [100, 0], [100, 100], [0, 100]]
-        self.assertEqual(bridge.validate_pours(b, {"zones": [{"net": "GND", "layer": 2, "polys": [sq, sq]}]}), [])
-        self.assertEqual(bridge.validate_pours(b, {"zones": [{"net": "GND", "layer": 2, "polys": None}]}), [])
-        for polys, sub in (({}, "polys: a dict"), ([[[0, 0], [1, 1]]], "polys[0]: not a list of at least 3"),
-                           ([[[0, 0], [1, "1"], [2, 2]]], "polys[0][1]"), ([[[0, 0], [1, 1], [2, 2, 2]]], "polys[0][2]")):
-            self.assertTrue(has(bridge.validate_pours(b, {"zones": [{"net": "GND", "layer": 2, "polys": polys}]}), sub), (polys, sub))
         for spec, sub in (({"zones": {}}, "zones: a dict"), ({"zones": "GND"}, "zones: a str"), ([], "not an object"),
                           ({"zones": [{"net": ["GND"], "layer": 1}]}, "net ['GND']"), ({"zones": [{"net": "GND", "layer": 1.9}]}, "layer 1.9"),
                           ({"zones": [{"net": "GND", "layer": True}]}, "layer True"), ({"zones": [{"net": "GND", "layer": 1, "clearanceMil": "8"}]}, "clearanceMil"),

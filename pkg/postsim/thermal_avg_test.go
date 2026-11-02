@@ -190,3 +190,116 @@ func TestSimBoardValueChangeWarns(t *testing.T) {
 		t.Fatalf("no sim-board-bom warning: %+v", r.Findings)
 	}
 }
+
+// What the cross-check compares follows the dump's origin, never whether a
+// value field happens to be present: a KiCad snapshot (old ones carry only
+// device = the value) is compared on the sim's schematic Value, an EasyEDA
+// dump (device = the manufacturer id) on the sim MPN even when it also
+// carries a value.
+func TestSimBoardComparesLikeWithLike(t *testing.T) {
+	var base powersim.Output
+	if err := json.Unmarshal(simFrom(t, "../../internal/app/testdata/esp32-v05"), &base); err != nil {
+		t.Fatal(err)
+	}
+	rawBoard, err := os.ReadFile("testdata/esp32mini/board.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	type variant struct {
+		name  string
+		board func(m map[string]any, ref string) // edit one component
+		root  map[string]any                     // top-level fields
+		sim   func(p *powersim.PartResult, ref string)
+		// change is the R7 edit that must warn; "" = nothing to compare.
+		change func(p *powersim.PartResult)
+		want   string
+	}
+	vals := func(ref string) string { return "VAL-" + ref }
+	variants := []variant{
+		{name: "kicad", root: map[string]any{"source": "kicad"},
+			board:  func(m map[string]any, ref string) { m["device"], m["value"] = vals(ref), vals(ref) },
+			sim:    func(p *powersim.PartResult, ref string) { p.Value = vals(ref) },
+			change: func(p *powersim.PartResult) { p.Value = "330" }, want: "R7: sim 330, board VAL-R7"},
+		// Case folding suits MPNs, not values: 1m (milliohm) is not 1M.
+		{name: "kicad-value-case", root: map[string]any{"source": "kicad"},
+			board: func(m map[string]any, ref string) {
+				v := vals(ref)
+				if ref == "R7" {
+					v = "1M"
+				}
+				m["device"], m["value"] = v, v
+			},
+			sim: func(p *powersim.PartResult, ref string) {
+				p.Value = vals(ref)
+				if ref == "R7" {
+					p.Value = "1000k" // the same megohm, written differently
+				}
+			},
+			change: func(p *powersim.PartResult) { p.Value = "1m" }, want: "R7: sim 1m, board 1M"},
+		{name: "kicad-old-snapshot", root: map[string]any{"source": "kicad"},
+			board:  func(m map[string]any, ref string) { m["device"] = vals(ref) }, // no "value" field
+			sim:    func(p *powersim.PartResult, ref string) { p.Value = vals(ref) },
+			change: func(p *powersim.PartResult) { p.Value = "330" }, want: "R7: sim 330, board VAL-R7"},
+		{name: "kicad-old-sim", root: map[string]any{"source": "kicad"},
+			board: func(m map[string]any, ref string) { m["device"], m["value"] = vals(ref), vals(ref) },
+			sim:   func(p *powersim.PartResult, ref string) { p.Value = "" }}, // sim.json without values
+		{name: "easyeda-with-value", root: map[string]any{},
+			board:  func(m map[string]any, ref string) { m["value"] = vals(ref) }, // device stays the MPN
+			sim:    func(p *powersim.PartResult, ref string) { p.Value = "something-else" },
+			change: func(p *powersim.PartResult) { p.MPN = "0402WGF3300TCE" }, want: "R7: sim 0402WGF3300TCE"},
+	}
+	for _, v := range variants {
+		t.Run(v.name, func(t *testing.T) {
+			var board map[string]any
+			if err := json.Unmarshal(rawBoard, &board); err != nil {
+				t.Fatal(err)
+			}
+			for k, x := range v.root {
+				board[k] = x
+			}
+			for _, c := range board["components"].([]any) {
+				m := c.(map[string]any)
+				ref, _ := m["designator"].(string)
+				v.board(m, ref)
+			}
+			var sim powersim.Output
+			blob, _ := json.Marshal(base)
+			_ = json.Unmarshal(blob, &sim)
+			for i := range sim.Results {
+				for ref, p := range sim.Results[i].Parts {
+					v.sim(p, ref)
+				}
+			}
+			run := func() []Finding {
+				t.Helper()
+				b, _ := json.Marshal(board)
+				s, _ := json.Marshal(sim)
+				r, err := Run(b, s, DefaultOptions())
+				if err != nil {
+					t.Fatal(err)
+				}
+				return r.Findings
+			}
+			for _, f := range run() {
+				if f.Kind == "sim-board-bom" || f.Kind == "sim-board-mismatch" && strings.Contains(f.Message, ": sim ") {
+					t.Fatalf("false part mismatch: %s", f.Message)
+				}
+			}
+			if v.change == nil {
+				return
+			}
+			for i := range sim.Results {
+				if p := sim.Results[i].Parts["R7"]; p != nil {
+					v.change(p)
+				}
+			}
+			warn := false
+			for _, f := range run() {
+				warn = warn || f.Kind == "sim-board-bom" && strings.Contains(f.Message, v.want)
+			}
+			if !warn {
+				t.Fatalf("no sim-board-bom warning %q", v.want)
+			}
+		})
+	}
+}

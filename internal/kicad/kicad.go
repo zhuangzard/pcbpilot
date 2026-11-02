@@ -350,13 +350,39 @@ func (t *Tools) DRC(pcb, out string) (*DRCReport, error) { return t.DRCSeverity(
 
 // DRCSeverity is DRC with a kicad-cli severity: error | warning | all.
 func (t *Tools) DRCSeverity(pcb, out, severity string) (*DRCReport, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), BridgeTimeout)
+	return t.DRCEnv(pcb, out, severity, nil)
+}
+
+// DRCNoLibraries is DRC (errors) with the isolated KiCad configuration
+// (isolatedConfigDir: EMPTY global fp-lib-table and sym-lib-table in every
+// settings version directory, so KiCad never seeds the stock tables). Only
+// for boards without footprints (kicad rules' probe boards): loading the
+// stock library table costs ~100 s per kicad-cli run and a board without
+// footprints never reads it.
+func (t *Tools) DRCNoLibraries(pcb, out string) (*DRCReport, error) {
+	cfg := isolatedConfigDir()
+	if cfg == "" {
+		return nil, fmt.Errorf("%w: cannot prepare the isolated KiCad configuration under %s", ErrDRCReport, CacheRoot())
+	}
+	return t.DRCEnv(pcb, out, "error", []string{"KICAD_CONFIG_HOME=" + cfg})
+}
+
+// DRCEnv is DRCSeverity with extra environment variables for kicad-cli.
+func (t *Tools) DRCEnv(pcb, out, severity string, env []string) (*DRCReport, error) {
+	limit := DRCTimeoutFor(pcb, BridgeTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), limit)
 	defer cancel()
 	// A report left by an earlier run must never be read as this run's.
 	if err := os.Remove(out); err != nil && !os.IsNotExist(err) {
 		return nil, fmt.Errorf("%w: cannot remove the previous report: %v", ErrDRCReport, err)
 	}
 	cmd := exec.CommandContext(ctx, t.CLI, "pcb", "drc", "--format", "json", "--severity-"+severity, "-o", out, pcb)
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	} else if b, err := os.ReadFile(pcb); err == nil {
+		// The board's own footprint libraries only (boardenv.go).
+		cmd.Env = BoardCLIEnv(b)
+	}
 	var buf bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &buf, &buf
 	err := cmd.Run()
@@ -364,10 +390,13 @@ func (t *Tools) DRCSeverity(pcb, out, severity string) (*DRCReport, error) {
 	// Without --exit-code-violations a non-zero exit is kicad-cli failing
 	// (board load, crash, timeout), so whatever it left in out is not a result.
 	if err != nil || rerr != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return nil, drcTimeoutError(pcb, limit)
+		}
 		if err == nil {
 			err = rerr
 		}
-		return nil, fmt.Errorf("%w: kicad-cli pcb drc: %v: %s", ErrDRCReport, err, strings.TrimSpace(buf.String()))
+		return nil, fmt.Errorf("%w: kicad-cli pcb drc on %s: %v: %s", ErrDRCReport, pcb, err, strings.TrimSpace(buf.String()))
 	}
 	rep, err := ParseDRC(data)
 	if err != nil {

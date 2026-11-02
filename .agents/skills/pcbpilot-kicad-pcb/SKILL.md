@@ -4,7 +4,7 @@ description: "用 pcbpilot 离线完成 KiCad 板子的板级设置、布局、�
 license: MIT
 metadata:
   author: "zhuangzard (pcbpilot); original easyeda-agent by zhoushoujianwork"
-  version: "0.12.1"
+  version: "0.12.3"
   homepage: "https://github.com/zhuangzard/pcbpilot"
 ---
 
@@ -65,15 +65,21 @@ post-layout 仿真 → 签核 → 保存（复制回工程）。板框、层叠�
    ```
    先看计划：每网 `basis`（电流 × IPC 还是意图下限）、`floors`（被板最小值/原有类抬高）、`conflicts`（用户类/规则冲突，
    只按名 `--replace <名>` 放行，Agent 不替用户决定）。`plan-coverage` 为 cannot-check（缺 sim/声明电流）时 `--apply` 拒绝，
-   补证据再来；`staged-readback` / `readback` 是 KiCad 自己回读 + DRC 探针，失败即回滚。细则见
+   补证据再来；`isolation-coverage` 为 cannot-check（某绝缘域在板上一个网都没有）同样拒绝——修意图的网名，不要绕过；
+   `footprint-pad-clearance` warn = 某封装焊盘间隙小于类间距（DRC 必报、布局改不掉），把列出的封装/类告诉用户，按用户决定
+   设封装局部间距或降类间距，Agent 不替用户降；要下单时加 `--contract fab/order-contract.json`（与 `kicad fab --preflight`
+   同一契约）把板最小值（含最小环宽）抬到契约，`fab-contract` 列出仍低于契约的用户规则。
+   `staged-readback` / `readback` 是 KiCad 自己回读 + DRC 探针，失败即回滚。细则见
    [kicad.md 设计规则一节](../pcbpilot/references/kicad.md#设计规则kicad-rules意图--仿真--kicad-规则可验证)。
 3. **布局**（可选；已有满意布局就跳过）：
    ```bash
    pcbpilot kicad place --pcb board.kicad_pcb --out work/place/board.kicad_pcb \
-       --intent work/intent.json [--mech mech.json] [--groups groups.json] [--place-seeds 6] [--candidates 3]
+       --intent work/intent.json [--mech mech.json] [--groups groups.json] [--place-seeds 6] [--candidates 3] [--time-budget 8m]
    ```
    输出最佳种子 + `board.seed-N.kicad_pcb` 备选 + `board.report.json`；**输出板的走线/过孔被清除、铺铜未灌**，后面必须
-   重新布线。`mech.json` 的写法见 [mech-spec.md](../pcbpilot/references/recipes/mech-spec.md)。
+   重新布线。`--time-budget` 到点交出当前最优并在报告标 `budgetHit`（进度在 stderr）。最优种子有非法摆放则退出码 6、`verdict: fail`：看报告 `illegal` 与 `zoneFill`（域装不下就扩域/移件），不要直接布线。`mech.json` 的写法见 [mech-spec.md](../pcbpilot/references/recipes/mech-spec.md)。
+   密板布不通时加布线余量：`--halo-mil N`（每个可动件每边多留 N mil）、`--halo-ic-mil N`（6 脚以上的件改用 N mil，给扇出过孔环留地方）；
+   默认 0，布局只按线长打包。
 3a. **规则复查**：`pcbpilot kicad rules … --check --stage placed`：`effective-rules` 必须 pass；`isolation-placement` 是
    advisory 的布局代理（courtyard 边到边 < 绝缘间隙、未声明的跨域器件），不是铜间距，按提示回到布局。
 4. **布线 + 门禁**（一条命令）：
@@ -130,6 +136,9 @@ post-layout 仿真 → 签核 → 保存（复制回工程）。板框、层叠�
   `netclasses.kept`）、意图生成的 `PP<n>_W<线宽>`、绝缘域 `PPD_<域>`（`.kicad_dru` 写 clearance + creepage）。快照的
   `netClassOf` 是布线后每个网的有效类，`intent-rules` 门禁核对它。
 - **铺铜** `--pours auto|on|off`：`auto` 只给**没有任何铺铜区**的板加 GND/电源铺铜；已有铺铜区的板只重灌、不新建。
+  有绝缘对（intent `pairs`）时，整板铺铜先按网所在绝缘域裁剪（域边界后退半个对间要求：外层爬电、内层电气间隙），
+  每个铺铜仍是一个合并后的区（不再整板铺到异域焊盘下；没有绝缘对的网不变，报告 `pourClip` 写明）。
+  某个计划中的铺铜在自己的域里裁没了 → `pour-clip` 门禁失败并点名网/层（不会悄悄少一块地平面）。
   地/电源层用 `--gnd-net`、`--gnd-layers`、`--power-net`、`--power-layer` 改；层叠用 `kicad board stackup` 先定好。
 - **设计评审**：`--requirements` 必需；评审不通过就停止，不布线。`--no-review` / `--no-manual` 需要用户签名的 waiver。
 

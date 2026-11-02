@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/zhuangzard/pcbpilot/pkg/population"
 )
 
 // Pin is one component pin and the net it lands on ("" = unconnected).
@@ -42,7 +44,10 @@ type PartValues struct {
 	LCSC         string `json:"lcsc,omitempty"`
 	Manufacturer string `json:"manufacturer,omitempty"`
 	Description  string `json:"description,omitempty"`
-	DNP          bool   `json:"dnp,omitempty"` // not fitted: left out of the simulation
+	// DNP from a values file is not the population rule (pkg/population):
+	// the schematic's DNP flag (connectivity IR "dnp") decides; a values
+	// "dnp" on a part whose flag is off is ignored with a warning.
+	DNP bool `json:"dnp,omitempty"`
 }
 
 // ConnDoc is the subset of the 1.4 connectivity IR the simulator reads.
@@ -54,7 +59,9 @@ type ConnDoc struct {
 		Ref    string `json:"ref"`
 		PageID string `json:"pageId"`
 		DNP    bool   `json:"dnp"`
-		Device struct {
+		// DNPField: a "DNP" symbol field set while the flag is off.
+		DNPField string `json:"dnpField"`
+		Device   struct {
 			Name       string `json:"name"`
 			SupplierID string `json:"supplierId"`
 		} `json:"device"`
@@ -269,11 +276,17 @@ func BuildDesign(pages []*ConnDoc, values map[string]PartValues) (*Design, []str
 				ref = c.ID
 			}
 			// A not-fitted part carries no current: simulating it fitted made
-			// Board-C's R105 (0R, DNP) ground the 50 MHz oscillator enable and a
+			// a field board's R105 (0R, DNP) ground the 50 MHz oscillator enable and a
 			// reviewer flagged the FPGA clock as disabled.
-			if c.DNP || values[ref].DNP {
+			if c.DNP {
 				dnp[ref] = true
 				continue
+			}
+			if w := population.ValuesConflict(ref, values[ref].DNP, c.DNP); w != "" {
+				warnings = append(warnings, w)
+			}
+			if w := population.Conflict(ref, c.DNPField, false); w != "" {
+				warnings = append(warnings, w)
 			}
 			p := byRef[ref]
 			if p == nil {

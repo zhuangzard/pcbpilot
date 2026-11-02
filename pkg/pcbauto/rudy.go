@@ -40,6 +40,28 @@ type rudy struct {
 	mparts  []*Part
 	stamp   []int
 	epoch   int
+	cells   []int // commit's touched cells (reused: the anneal commits millions of moves)
+	// netStamp[i] == netEpoch: net i is already in mnets (begin's seen set,
+	// without a map per move).
+	netStamp []int
+	netEpoch int
+}
+
+// padCentres fills dst (reusing its storage) with p's pad centres.
+func padCentres(dst []Point, p *Part) []Point {
+	dst = dst[:0]
+	for _, pd := range p.Pads {
+		dst = append(dst, pd.Box.C)
+	}
+	return dst
+}
+
+// pinSets resizes sets to n entries, keeping each entry's storage.
+func pinSets(sets [][]Point, n int) [][]Point {
+	for len(sets) < n {
+		sets = append(sets, nil)
+	}
+	return sets[:n]
 }
 
 // newRudy builds the demand grid for the current placement.
@@ -162,11 +184,14 @@ func (r *rudy) begin(parts []*Part) {
 	r.pending = true
 	r.mparts = append(r.mparts[:0], parts...)
 	r.mnets = r.mnets[:0]
-	seen := map[int]bool{}
+	if len(r.netStamp) < len(r.nets) {
+		r.netStamp = make([]int, len(r.nets))
+	}
+	r.netEpoch++
 	for _, p := range parts {
 		for _, i := range r.partNets[p] {
-			if !seen[i] {
-				seen[i] = true
+			if r.netStamp[i] != r.netEpoch {
+				r.netStamp[i] = r.netEpoch
 				r.mnets = append(r.mnets, i)
 			}
 		}
@@ -175,13 +200,9 @@ func (r *rudy) begin(parts []*Part) {
 	for _, i := range r.mnets {
 		r.oldBox = append(r.oldBox, r.box[i])
 	}
-	r.oldPins = r.oldPins[:0]
-	for _, p := range parts {
-		var ps []Point
-		for _, pd := range p.Pads {
-			ps = append(ps, pd.Box.C)
-		}
-		r.oldPins = append(r.oldPins, ps)
+	r.oldPins = pinSets(r.oldPins, len(parts))
+	for k, p := range parts {
+		r.oldPins[k] = padCentres(r.oldPins[k], p)
 	}
 }
 
@@ -195,17 +216,13 @@ func (r *rudy) commit() float64 {
 	for _, i := range r.mnets {
 		r.newBox = append(r.newBox, r.netBox(i))
 	}
-	r.newPins = r.newPins[:0]
-	for _, p := range r.mparts {
-		var ps []Point
-		for _, pd := range p.Pads {
-			ps = append(ps, pd.Box.C)
-		}
-		r.newPins = append(r.newPins, ps)
+	r.newPins = pinSets(r.newPins, len(r.mparts))
+	for k, p := range r.mparts {
+		r.newPins[k] = padCentres(r.newPins[k], p)
 	}
 	// Touched cells.
 	r.epoch++
-	var cells []int
+	cells := r.cells[:0]
 	mark := func(bb Rect) {
 		if bb.Empty() {
 			return
@@ -227,11 +244,14 @@ func (r *rudy) commit() float64 {
 		mark(r.oldBox[k])
 		mark(r.newBox[k])
 	}
-	for _, ps := range append(append([][]Point(nil), r.oldPins...), r.newPins...) {
-		for _, p := range ps {
-			mark(Rect{p.X, p.Y, p.X, p.Y})
+	for _, sets := range [2][][]Point{r.oldPins, r.newPins} {
+		for _, ps := range sets {
+			for _, p := range ps {
+				mark(Rect{p.X, p.Y, p.X, p.Y})
+			}
 		}
 	}
+	r.cells = cells
 	before := 0.0
 	for _, k := range cells {
 		before += r.cellCost(k)

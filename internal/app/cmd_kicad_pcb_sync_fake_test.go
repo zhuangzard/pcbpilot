@@ -363,6 +363,27 @@ func TestPcbSyncCreateNeedsKiCad10(t *testing.T) {
 	}
 }
 
+// TestPcbSyncCreateImpliesWrite: --create on a board that does not exist
+// writes that new board without --in-place (v0.12.0: exit 2 asking for
+// --in-place / --out); the report says so. --create on a board that exists
+// still needs --in-place or --out, with a message naming the board.
+func TestPcbSyncCreateImpliesWrite(t *testing.T) {
+	dir, o, _ := fakeProject(t, fakeNetlist())
+	o.pcb, o.create = filepath.Join(dir, "fresh.kicad_pcb"), true
+	rep, code, stderr := runSyncCode(t, o)
+	// (the fake bridge's new board fails a gate: what counts here is that
+	// the run is an in-place apply, not a usage error; the live
+	// TestPcbSyncLiveSlashSheetName commits a bare --create)
+	if code == 2 || !rep.InPlace || rep.Mode != "apply" || !strings.Contains(strings.Join(rep.Warnings, " "), "--create") {
+		t.Fatalf("bare --create: exit %d inPlace %v mode %q warnings %v stderr %s", code, rep.InPlace, rep.Mode, rep.Warnings, stderr)
+	}
+	_, o2, _ := fakeProject(t, fakeNetlist())
+	o2.create = true
+	if _, code, stderr := runSyncCode(t, o2); code != 2 || !strings.Contains(stderr, "already exists") {
+		t.Fatalf("--create on an existing board: exit %d %s", code, stderr)
+	}
+}
+
 // TestPcbSyncReportHonoursLocks: read-only runs write no report unless
 // --report names one (so --check works while KiCad has the project open);
 // an explicit report is written with the KiCad lock check, and one that

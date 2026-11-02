@@ -7,9 +7,9 @@ import (
 
 // kicad place keeps the KiCad outline: a board drawn at y-down 0..120 mm is
 // y-up −120..0 in the snapshot, and the mech frame must start at its
-// lower-left corner (Board-C, 2026-10-14: every part was written 120 mm above
+// lower-left corner (a field board, 2026-10-14: every part was written 120 mm above
 // the board because the model outline moved to the origin).
-func TestApplyMechAnchoredKeepsOutlineFrame(t *testing.T) {
+func TestApplyMechKeepsOutlineFrame(t *testing.T) {
 	spec, err := ParseMech([]byte(`{"units":"mm","board":{"width":76.2,"height":50.8},
 		"zones":[{"domain":"A","rect":[0,0,10,50.8]}],
 		"edge":[{"ref":"J1","edge":"left","at":25}]}`))
@@ -32,7 +32,7 @@ func TestApplyMechAnchoredKeepsOutlineFrame(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := b.Bounds()
-	mc, err := ApplyMechAnchored(b, spec)
+	mc, err := ApplyMech(b, spec)
 	if err != nil {
 		t.Fatal(err)
 	}
