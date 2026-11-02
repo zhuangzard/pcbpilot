@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/zhuangzard/pcbpilot/internal/kicad"
+	"github.com/zhuangzard/pcbpilot/internal/pcb/specctra"
 )
 
 const testViaDSN = `(pcb x (structure (layer F.Cu) (via "Via[0-5]_800:200_um" "Via[0-5]_700:400_um" "Via[0-5]_600:300_um")
@@ -495,11 +497,138 @@ func TestMatchInputViasRouterReplacement(t *testing.T) {
 		{"smaller", matchVia("b", "A", 1, 1, 1, 2, 900, 500), matchVia("n", "A", 1, 1, 1, 2, 600, 300), false, false},
 		{"larger", matchVia("b", "A", 1, 1, 1, 2, 600, 300), matchVia("n", "A", 1, 1, 1, 2, 800, 400), false, false},
 		{"over a whole um", matchVia("b", "A", 1, 1, 1, 2, 609.6, 304.8), matchVia("n", "A", 1, 1, 1, 2, 611, 305), false, false},
+		{"between original and ceiling, diameter", matchVia("b", "A", 1, 1, 1, 2, 609.6, 304.8), matchVia("n", "A", 1, 1, 1, 2, 609.8, 304.8), false, false},
+		{"between original and ceiling, drill", matchVia("b", "A", 1, 1, 1, 2, 609.6, 304.4), matchVia("n", "A", 1, 1, 1, 2, 609.6, 304.7), false, false},
+		{"diameter rounded, drill kept", matchVia("b", "A", 1, 1, 1, 2, 609.6, 304.8), matchVia("n", "A", 1, 1, 1, 2, 610, 304.8), true, true},
+		{"drill rounded, diameter kept", matchVia("b", "A", 1, 1, 1, 2, 609.6, 304.8), matchVia("n", "A", 1, 1, 1, 2, 609.6, 305), true, true},
+		{"just above a whole um rounds up", matchVia("b", "A", 1, 1, 1, 2, 600.05, 300.05), matchVia("n", "A", 1, 1, 1, 2, 601, 301), true, true},
+		{"just above, own size", matchVia("b", "A", 1, 1, 1, 2, 600.05, 300.05), matchVia("n", "A", 1, 1, 1, 2, 600.05, 300.05), true, false},
+		{"100 nm above rounds up", matchVia("b", "A", 1, 1, 1, 2, 600.1, 300), matchVia("n", "A", 1, 1, 1, 2, 601, 300), true, true},
+		{"just above is not one further up", matchVia("b", "A", 1, 1, 1, 2, 600.05, 300), matchVia("n", "A", 1, 1, 1, 2, 602, 300), false, false},
+		{"a whole um stays", matchVia("b", "A", 1, 1, 1, 2, 600, 300), matchVia("n", "A", 1, 1, 1, 2, 601, 300), false, false},
 	} {
 		m := matchInputVias([]routeVia{c.b}, []routeVia{c.a}, class)
 		if m.input["n"] != c.input || m.ambiguous["n"] == c.input || (len(m.restore) > 0) != c.restor || len(m.gone) != 0 || (len(m.unchecked) > 0) == c.input {
 			t.Errorf("%s: %+v", c.name, m)
 		}
+	}
+}
+
+// The ceiling is the one the DSN gets, and the snapshot's rounding of a whole um
+// (305000 nm reads as 12.0079 mil, 305001 nm) does not push it one further.
+func TestViaSizeFromImportCeilingMatchesDSN(t *testing.T) {
+	for _, um := range []string{"600.05", "600.1", "609.6", "700.024", "400.05"} {
+		name := `"Via[0-1]_` + um + `:` + um + `_um"`
+		out := dsnWholeUmVias(`(pcb (library (padstack ` + name + ` (shape (circle F.Cu ` + um + `)))))`)
+		m := reDSNViaPadstack.FindStringSubmatch(out)
+		if m == nil {
+			t.Fatalf("%s: %s", um, out)
+		}
+		was, _ := strconv.ParseFloat(um, 64)
+		got, _ := strconv.ParseFloat(m[2], 64)
+		b, a := matchVia("b", "A", 0, 0, 1, 2, was, was), matchVia("n", "A", 0, 0, 1, 2, got, got)
+		if !viaSizeFromImport(b, a, noClassDrill) {
+			t.Errorf("%s -> %s not accepted", um, m[2])
+		}
+	}
+	snap := func(nm float64) float64 { return math.Round(nm/nmPerMil*1e4) / 1e4 }
+	b := routeVia{Net: "A", Dia: snap(610000), Drill: snap(305000)}
+	if int64(math.Round(b.Drill*nmPerMil)) <= 305000 {
+		t.Fatalf("the test needs a reading above the whole um: %v", b.Drill*nmPerMil)
+	}
+	if !viaSizeFromImport(b, routeVia{Net: "A", Dia: snap(610000), Drill: snap(305000)}, noClassDrill) {
+		t.Fatal("own size")
+	}
+	a := matchVia("n", "A", 0, 0, 1, 2, 610, 305.5)
+	if viaSizeFromImport(b, a, noClassDrill) {
+		t.Fatal("between a reading and its ceiling")
+	}
+}
+
+// The pre-write check looks only at copper on layers the via spans; DRC still
+// has the last word.
+func TestViaGrowConflictLayers(t *testing.T) {
+	rb := &kicad.RulesReadback{Nets: map[string]kicad.EffectiveNM{
+		"A": {ViaDiameter: 700000, ViaDrill: 400000, Clearance: 200000},
+		"B": {ViaDiameter: 700000, ViaDrill: 400000, Clearance: 200000},
+	}}
+	const f, b, in1, in2, in3 = 1, 2, 15, 16, 17
+	grow := func(from, to int) viaGrow {
+		return viaGrow{v: routeVia{ID: "v", Net: "A", X: 100, Y: 100, From: from, To: to}, classDia: 700000, drill: 400000}
+	}
+	track := func(layer int) []specctra.Track {
+		return []specctra.Track{{Net: "B", Layer: layer, X1: 100, Y1: 110, X2: 300, Y2: 110, Width: 8}}
+	}
+	for _, c := range []struct {
+		name  string
+		g     viaGrow
+		layer int
+		want  bool
+	}{
+		{"blind F-In1, track on F", grow(f, in1), f, true},
+		{"blind F-In1, track on In1", grow(f, in1), in1, true},
+		{"blind F-In1, track on In2", grow(f, in1), in2, false},
+		{"blind F-In1, track on B", grow(f, in1), b, false},
+		{"reversed ids", grow(in1, f), b, false},
+		{"buried In1-In2, track on F", grow(in1, in2), f, false},
+		{"buried In1-In2, track on B", grow(in1, in2), b, false},
+		{"buried In1-In3, track on In2", grow(in1, in3), in2, true},
+		{"blind In2-B, track on In1", grow(in2, b), in1, false},
+		{"blind In2-B, track on In3", grow(in2, b), in3, true},
+		{"through, track on an inner layer", grow(f, b), in2, true},
+		{"span unknown counts as all", grow(0, 0), b, true},
+		{"track layer unknown counts", grow(f, in1), 0, true},
+	} {
+		why, _ := viaGrowConflict(c.g, track(c.layer), nil, nil, rb, nil)
+		if (why != "") != c.want {
+			t.Errorf("%s: %q", c.name, why)
+		}
+	}
+	for _, c := range []struct {
+		name     string
+		g        viaGrow
+		from, to int
+		want     bool
+	}{
+		{"same span", grow(f, in1), f, in1, true},
+		{"share a layer", grow(f, in2), in1, in3, true},
+		{"stacked, no shared layer", grow(f, in1), in2, b, false},
+		{"other via through", grow(f, in1), f, b, true},
+		{"other via's span unknown", grow(f, in1), 0, 0, true},
+	} {
+		v := []widenVia{{Net: "B", X: 100, Y: 120, Diameter: 24, From: c.from, To: c.to}}
+		why, _ := viaGrowConflict(c.g, nil, v, nil, rb, nil)
+		if (why != "") != c.want {
+			t.Errorf("%s: %q", c.name, why)
+		}
+	}
+	for _, c := range []struct {
+		name  string
+		g     viaGrow
+		layer int
+		want  bool
+	}{
+		{"top pad, blind from the top", grow(f, in1), pcbSideTop, true},
+		{"bottom pad, blind from the top", grow(f, in1), pcbSideBottom, false},
+		{"top pad, buried", grow(in1, in2), pcbSideTop, false},
+		{"through-hole pad, buried", grow(in1, in2), pcbLayerMulti, true},
+	} {
+		p := []boardPad{{Net: "B", Number: "1", Layer: c.layer, X: 100, Y: 125, W: 30, H: 30}}
+		why, _ := viaGrowConflict(c.g, nil, nil, p, rb, nil)
+		if (why != "") != c.want {
+			t.Errorf("%s: %q", c.name, why)
+		}
+	}
+	// Through the repair: a track on another layer at the same XY is not in the
+	// way, and the snapshot's via layers reach the check. DRC still runs.
+	f2 := fakeRepairTools(`{"primitiveId":"t","net":"B","layer":2,"startX":100,"startY":110,"endX":300,"endY":110,"lineWidth":8}`, &kicad.DRCReport{}, nil)
+	f2.after = `{"copper":{"lines":[{"primitiveId":"t","net":"B","layer":2,"startX":100,"startY":110,"endX":300,"endY":110,"lineWidth":8}],
+		"vias":[{"primitiveId":"v1","net":"A","x":100,"y":100,"fromLayer":1,"toLayer":15,"diameter":23.622,"holeDiameter":15.748},
+		{"primitiveId":"o","net":"B","x":100,"y":120,"fromLayer":16,"toLayer":2,"diameter":24,"holeDiameter":12}]}}`
+	f2.before = `{"copper":{"vias":[{"primitiveId":"o","net":"B","x":100,"y":120,"fromLayer":16,"toLayer":2,"diameter":24,"holeDiameter":12}]}}`
+	board, gates := sizeRouterVias(f2, "classed", "imported", func(s string) string { return s + ".kicad_pcb" }, map[string]any{}, io.Discard)
+	if board != "vias-repair.kicad_pcb" || len(gates) != 1 || !gates[0].Pass {
+		t.Fatalf("%s %+v", board, gates)
 	}
 }
 

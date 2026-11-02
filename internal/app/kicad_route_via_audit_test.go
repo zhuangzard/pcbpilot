@@ -555,6 +555,57 @@ func TestRouterViasPartialWaiver(t *testing.T) {
 	}
 }
 
+// The detail counts vias: one via with two broken minimums is one via.
+func TestViaAuditDetailCountsVias(t *testing.T) {
+	prov := func(routeVia) string { return viaFromRouter }
+	spanless := auditVia("span", "SIG", 600, 300)
+	spanless.From, spanless.To = 0, 0
+	lim := viaLimits{drill: 500000, annular: 500000, diameter: 900000}
+	a := auditVias([]routeVia{auditVia("bad", "GND", 600, 400), auditVia("ok", "GND", 700, 400), spanless, spanless}, auditRB(), lim, prov, viaPolicy{})
+	if len(a.Illegal) < 3 {
+		t.Fatalf("the test needs several items on one via: %v", a.Illegal)
+	}
+	g := gateResult{Gate: "via-audit"}
+	viaAuditVerdict(&g, a)
+	if !strings.Contains(g.Detail, "of 4 via(s) break") || !strings.HasPrefix(g.Detail, "2 of 4") {
+		t.Fatalf("%s", g.Detail)
+	}
+	// Cannot-check only: vias apart from the custom rule that has none.
+	var lim2 viaLimits
+	v := int64(1)
+	b := auditVias([]routeVia{spanless, auditVia("ok", "SIG", 600, 300)}, auditRB(), lim2, prov, viaPolicy{})
+	b.CannotCheck = append(b.CannotCheck, viaLimitsFromDRU([]kicad.DRURule{{Name: "x", Condition: "y", Constraints: []kicad.DRUConstraint{{Type: "hole_size", Min: &v}}}}, &lim2)...)
+	g = gateResult{Gate: "via-audit"}
+	viaAuditVerdict(&g, b)
+	if g.Detail != "cannot check: 1 of 2 via(s), 1 custom rule(s) cannot be resolved" {
+		t.Fatalf("%s", g.Detail)
+	}
+}
+
+// A via-audit.json that could not be written is cannot-check evidence, in the
+// detail too; it does not hide a failure or pass a clean audit.
+func TestViaAuditWriteFailureInDetail(t *testing.T) {
+	prov := func(routeVia) string { return viaFromRouter }
+	werr := errors.New("disk full")
+	clean := auditVias([]routeVia{auditVia("ok", "SIG", 600, 300)}, auditRB(), viaLimits{}, prov, viaPolicy{})
+	g := gateResult{Gate: "via-audit"}
+	viaAuditVerdict(&g, clean)
+	viaAuditWriteFailed(&g, clean, werr)
+	var stderr bytes.Buffer
+	r := &kicadRun{stderr: &stderr, summary: map[string]any{}, reg: newGateRegistry(&stderr, nil)}
+	r.add(g)
+	if g.Pass || !g.CannotCheck || !strings.Contains(g.Detail, "cannot check: via-audit.json could not be written: disk full") || r.reg.ExitCode() != 5 || !strings.Contains(stderr.String(), "disk full") {
+		t.Fatalf("%+v exit %d %s", g, r.reg.ExitCode(), stderr.String())
+	}
+	bad := auditVias([]routeVia{auditVia("ring", "GND", 600, 400)}, auditRB(), viaLimits{annular: 130000}, prov, viaPolicy{})
+	g = gateResult{Gate: "via-audit"}
+	viaAuditVerdict(&g, bad)
+	viaAuditWriteFailed(&g, bad, werr)
+	if g.CannotCheck || len(g.Unchecked) != 1 || !strings.Contains(g.Detail, "disk full") {
+		t.Fatalf("%+v", g)
+	}
+}
+
 func TestViaLimitsFromDRU(t *testing.T) {
 	v := int64(150000)
 	lim := viaLimits{annular: 100000}

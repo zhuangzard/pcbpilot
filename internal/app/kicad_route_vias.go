@@ -137,13 +137,16 @@ var (
 	reDSNCircle      = regexp.MustCompile(`(\(circle\s+(\S+)\s+)([0-9.]+)`)
 )
 
+// wholeUm is the whole-µm size a padstack of v µm is rounded up to.
+func wholeUm(v float64) float64 { return math.Ceil(v - 1e-6) }
+
 // dsnCeilUm is s (µm) rounded up to a whole µm; ok = false for no positive number.
 func dsnCeilUm(s string) (string, bool) {
 	v, err := strconv.ParseFloat(s, 64)
 	if err != nil || v <= 0 {
 		return s, false
 	}
-	return strconv.FormatFloat(math.Ceil(v-1e-6), 'f', -1, 64), true
+	return strconv.FormatFloat(wholeUm(v), 'f', -1, 64), true
 }
 
 // dsnCeilCircles rounds each circle of a padstack up on its own, so a
@@ -478,15 +481,22 @@ const viaExactMatchMil = 0.01 // the DSN's coordinate rounding
 
 func viaSpanKey(v routeVia) [2]int { return [2]int{min(v.From, v.To), max(v.From, v.To)} }
 
+// viaSnapshotQuantNM bounds the snapshot's mil rounding (4 decimals, ±1.3 nm):
+// the size a snapshot reports may be just past the whole µm the board has.
+const viaSnapshotQuantNM = 2
+
 // viaSizeFromImport: can the import have made a via of size a out of input via
-// b? It rounds a size up to whole um, and may take the net's class drill. Any
-// other size was not b: a router via at the same place. One of the same size
-// cannot be told from b, and changes nothing if it is taken for b.
+// b? Each dimension is either b's own or the whole µm dsnWholeUmVias rounds it
+// up to, and the drill may be the net's class drill. Any other size was not b: a
+// router via at the same place. One of the same size cannot be told from b, and
+// changes nothing if it is taken for b.
 func viaSizeFromImport(b, a routeVia, classDrill func(string) (int64, bool)) bool {
 	nm := func(mil float64) int64 { return int64(math.Round(mil * nmPerMil)) }
 	fits := func(was, now int64) bool {
-		up := (was + 999 - viaExactTolNM) / 1000 * 1000 // the snapshot's rounding is no fraction
-		return now+viaExactTolNM >= was && now <= max(was, up)+viaExactTolNM
+		if absNM(now-was) <= viaExactTolNM {
+			return true
+		}
+		return absNM(now-int64(wholeUm(float64(was-viaSnapshotQuantNM)/1000)*1000)) <= viaExactTolNM
 	}
 	if !fits(nm(b.Dia), nm(a.Dia)) {
 		return false

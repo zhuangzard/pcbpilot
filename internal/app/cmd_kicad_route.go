@@ -65,6 +65,7 @@ type kicadRouteOpts struct {
 	pourCredit            bool
 	noManual              bool
 	viaPolicy             string
+	testRunBody           func(*kicadRun) error // replaces the run in tests of the command around it
 	projectConfig         string
 	requirements          []string
 	reviewers             string
@@ -342,7 +343,11 @@ func runKicadRoute(o kicadRouteOpts, stdout, stderr io.Writer) error {
 	r.reg = newGateRegistry(stderr, waivers)
 	start := time.Now()
 	r.last = start
-	err = r.run()
+	if o.testRunBody != nil {
+		err = o.testRunBody(r)
+	} else {
+		err = r.run()
+	}
 	// D3: the registry is the single source of truth for gate status.
 	// Legacy r.gates is still populated for backward compat with callers
 	// that read it (qualityGates, postRoute, etc.), but summary.json

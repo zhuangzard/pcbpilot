@@ -3,11 +3,13 @@ package app
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/zhuangzard/pcbpilot/internal/gate"
 	"github.com/zhuangzard/pcbpilot/internal/kicad"
 	"github.com/zhuangzard/pcbpilot/pkg/pcbauto"
 )
@@ -68,11 +70,36 @@ func TestKicadLive(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	err = runKicadRoute(o, &stdout, &stderr)
 	t.Log(stderr.String())
-	// No --sim: post-layout-sim fails by design, so the run fails; the
+	// No --sim: post-layout-sim fails by design, so the run fails with exit 6; the
 	// routing gates must pass.
+	var ec exitCodeError
+	if !errors.As(err, &ec) || ec.code != 6 {
+		t.Errorf("run: %v, want exit 6", err)
+	}
 	data, rerr := os.ReadFile(filepath.Join(out, "summary.json"))
 	if rerr != nil {
 		t.Fatalf("no summary (%v): %v", err, rerr)
+	}
+	var statuses struct {
+		Pass  *bool        `json:"pass"`
+		Gates []GateRecord `json:"gates"`
+	}
+	if err := json.Unmarshal(data, &statuses); err != nil {
+		t.Fatal(err)
+	}
+	if statuses.Pass == nil || *statuses.Pass {
+		t.Errorf("summary.pass: %s", data)
+	}
+	for _, g := range statuses.Gates {
+		if want := map[bool]gate.Status{true: gate.Pass, false: gate.Fail}[g.Pass]; g.Status != want && g.Status != gate.CannotCheck {
+			t.Errorf("gate %s: status %s pass %v", g.ID, g.Status, g.Pass)
+		}
+		if g.ID == "post-layout-sim" && g.Status != gate.Fail {
+			t.Errorf("post-layout-sim: %s", g.Status)
+		}
+		if g.ID == "via-audit" && g.Status != gate.Pass {
+			t.Errorf("via-audit: %+v", g)
+		}
 	}
 	var sum struct {
 		Gates []gateResult `json:"gates"`

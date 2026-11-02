@@ -59,9 +59,32 @@ func (g viaGrow) describe() string {
 	return fmt.Sprintf("%s via %s: router via %.2f/%.2f mil cannot be shrunk to the class via %.2f/%.2f mil", g.v.Net, short12(g.v.ID), g.v.Dia, g.v.Drill, float64(g.classDia)/nmPerMil, float64(g.drill)/nmPerMil)
 }
 
+// viaLayerOrder is a copper layer's place in the stack: the bridge's ids are F.Cu
+// 1, B.Cu 2, inner layers from 15 down the stack.
+func viaLayerOrder(id int) int {
+	switch id {
+	case 1:
+		return 0
+	case 2:
+		return math.MaxInt
+	}
+	return id
+}
+
+// viaSpanOverlap: do the layer ranges a-b and c-d share copper? A missing id
+// (0) is not known not to, so it counts as overlapping.
+func viaSpanOverlap(a, b, c, d int) bool {
+	if a == 0 || b == 0 || c == 0 || d == 0 {
+		return true
+	}
+	a, b, c, d = viaLayerOrder(a), viaLayerOrder(b), viaLayerOrder(c), viaLayerOrder(d)
+	return max(min(a, b), min(c, d)) <= min(max(a, b), max(c, d))
+}
+
 // viaGrowConflict is why a grown via would break clearance on the board, ""
 // when nothing does; cannotCheck says a rule or a size to judge it is missing.
 // Pads are taken at their circumscribed circle: conservative, DRC has the rest.
+// Only copper on a layer the via spans counts.
 // grownAt holds the diameters the other candidates will have.
 func viaGrowConflict(g viaGrow, tracks []specctra.Track, vias []widenVia, pads []boardPad, rb *kicad.RulesReadback, grownAt map[[2]float64]float64) (why string, cannotCheck bool) {
 	own, ok := rb.Nets[g.v.Net]
@@ -80,7 +103,7 @@ func viaGrowConflict(g viaGrow, tracks []specctra.Track, vias []widenVia, pads [
 	}
 	r := float64(g.classDia) / nmPerMil / 2
 	for _, t := range tracks {
-		if t.Net == g.v.Net {
+		if t.Net == g.v.Net || !viaSpanOverlap(g.v.From, g.v.To, t.Layer, t.Layer) {
 			continue
 		}
 		if gap := pointSegDist(t.X1, t.Y1, t.X2, t.Y2, g.v.X, g.v.Y) - t.Width/2 - r; gap < need(t.Net) {
@@ -88,7 +111,7 @@ func viaGrowConflict(g viaGrow, tracks []specctra.Track, vias []widenVia, pads [
 		}
 	}
 	for _, v := range vias {
-		if v.Net == g.v.Net {
+		if v.Net == g.v.Net || !viaSpanOverlap(g.v.From, g.v.To, v.From, v.To) {
 			continue
 		}
 		d := v.Diameter
@@ -100,7 +123,7 @@ func viaGrowConflict(g viaGrow, tracks []specctra.Track, vias []widenVia, pads [
 		}
 	}
 	for _, p := range pads {
-		if p.Net == g.v.Net {
+		if p.Net == g.v.Net || !p.isThroughHole() && !viaSpanOverlap(g.v.From, g.v.To, p.Layer, p.Layer) {
 			continue
 		}
 		if p.W <= 0 || p.H <= 0 {

@@ -89,7 +89,7 @@ func buildRouteInstrumentation(
 		RouterVersion:   res.Version,
 		InputSHA256:     filePathSHA256(dsnPath),
 	}
-	if u := res.UnroutedCount; !res.Partial && u >= 0 && u <= connections {
+	if u := res.UnroutedCount; unroutedListComplete(res) && u <= connections {
 		completed := connections - u
 		ri.Unrouted, ri.Completed = &u, &completed
 	}
@@ -109,6 +109,12 @@ func filePathSHA256(path string) string {
 	return hex.EncodeToString(h[:])
 }
 
+// unroutedListComplete: the result is final and its list and its count agree.
+// Everything derived from the two needs that.
+func unroutedListComplete(res *routeResult) bool {
+	return !res.Partial && res.UnroutedCount >= 0 && len(res.Unrouted) == res.UnroutedCount
+}
+
 // connGroup is one group's connection counts; total < 0 means not known.
 type connGroup struct {
 	name            string
@@ -122,7 +128,7 @@ type connGroup struct {
 // either.
 func connGroups(res *routeResult, snap *boardSnapshot, groupOf func(net string) string) []connGroup {
 	totals := map[string]int{}
-	known := snap != nil && !res.Partial && res.UnroutedCount >= 0 && len(res.Unrouted) >= res.UnroutedCount
+	known := snap != nil && unroutedListComplete(res)
 	if known {
 		for net, n := range boardNetConnections(snap) {
 			totals[groupOf(net)] += n
@@ -219,7 +225,7 @@ func domainBreakdown(res *routeResult, classes []kicad.NetClass, snap *boardSnap
 
 // regionBreakdown classifies unrouted connections by board quadrant.
 func regionBreakdown(res *routeResult, snap *boardSnapshot) []RegionStats {
-	if res == nil || snap == nil || snap.Outline == nil || len(res.Unrouted) == 0 {
+	if res == nil || snap == nil || snap.Outline == nil || len(res.Unrouted) == 0 || !unroutedListComplete(res) {
 		return nil
 	}
 	bb := snap.Outline.BBox
@@ -240,7 +246,7 @@ func regionBreakdown(res *routeResult, snap *boardSnapshot) []RegionStats {
 			loc, ok = padLoc[u.To]
 		}
 		if !ok {
-			continue
+			return nil // partial region counts would read as complete
 		}
 		region := "SW"
 		switch {

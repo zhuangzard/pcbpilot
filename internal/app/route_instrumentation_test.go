@@ -80,13 +80,16 @@ func TestRouteInstrumentationTopLevelJSON(t *testing.T) {
 		not   []string
 	}{
 		{"complete", &routeResult{}, 50, []string{`"connections":50`, `"completed":50`, `"unrouted":0`}, []string{`"partial"`}},
-		{"unrouted", &routeResult{UnroutedCount: 3}, 50, []string{`"completed":47`, `"unrouted":3`}, nil},
+		{"unrouted", &routeResult{UnroutedCount: 3, Unrouted: make([]routeConn, 3)}, 50, []string{`"completed":47`, `"unrouted":3`}, nil},
+		{"list shorter than the count", &routeResult{UnroutedCount: 3, Unrouted: make([]routeConn, 2)}, 50, []string{`"connections":50`}, []string{`"completed"`, `"unrouted"`}},
+		{"list longer than the count", &routeResult{UnroutedCount: 3, Unrouted: make([]routeConn, 4)}, 50, []string{`"connections":50`}, []string{`"completed"`, `"unrouted"`}},
+		{"a list and a count of 0", &routeResult{Unrouted: make([]routeConn, 1)}, 50, []string{`"connections":50`}, []string{`"completed"`, `"unrouted"`}},
 		{"partial, unknown", &routeResult{UnroutedCount: -1, Partial: true}, 50, []string{`"connections":50`, `"partial":true`}, []string{`"completed"`, `"unrouted"`}},
 		{"partial at 0", &routeResult{Partial: true}, 50, []string{`"partial":true`}, []string{`"completed"`, `"unrouted"`}},
 		{"partial with a count", &routeResult{UnroutedCount: 4, Partial: true}, 50, []string{`"partial":true`}, []string{`"completed"`, `"unrouted"`}},
 		{"unknown without the flag", &routeResult{UnroutedCount: -1}, 50, nil, []string{`"completed"`, `"unrouted"`}},
-		{"more unrouted than connections", &routeResult{UnroutedCount: 60}, 50, []string{`"connections":50`}, []string{`"completed"`, `"unrouted"`}},
-		{"all unrouted", &routeResult{UnroutedCount: 50}, 50, []string{`"completed":0`, `"unrouted":50`}, nil},
+		{"more unrouted than connections", &routeResult{UnroutedCount: 60, Unrouted: make([]routeConn, 60)}, 50, []string{`"connections":50`}, []string{`"completed"`, `"unrouted"`}},
+		{"all unrouted", &routeResult{UnroutedCount: 50, Unrouted: make([]routeConn, 50)}, 50, []string{`"completed":0`, `"unrouted":50`}, nil},
 	} {
 		b, err := json.Marshal(buildRouteInstrumentation(c.res, c.conns, "", nil, nil))
 		if err != nil {
@@ -150,6 +153,7 @@ func TestRegionBreakdown(t *testing.T) {
 		},
 	}
 	res := &routeResult{
+		UnroutedCount: 3,
 		Unrouted: []routeConn{
 			{Net: "A", From: "U1.1", To: "U1.2"}, // from is NW
 			{Net: "B", From: "U1.3", To: "U1.4"}, // from is SW
@@ -169,6 +173,36 @@ func TestRegionBreakdown(t *testing.T) {
 	}
 	if s := byRegion["SE"]; s.Unrouted != 1 {
 		t.Errorf("SE unrouted = %d, want 1", s.Unrouted)
+	}
+}
+
+// Region counts are complete or absent: an endpoint that resolves to no pad, or
+// a list that disagrees with the count, leaves none.
+func TestInstrumentationRegionsCompleteOrAbsent(t *testing.T) {
+	snap := &boardSnapshot{
+		Outline:    &boardOutline{BBox: layoutBBox{MinX: 0, MinY: 0, MaxX: 100, MaxY: 100}},
+		Components: []boardComp{{Designator: "U1", Pads: []boardPad{{Number: "1", X: 25, Y: 75}, {Number: "2", X: 75, Y: 75}}}},
+	}
+	good := routeConn{Net: "A", From: "U1.1", To: "U1.2"}
+	other := routeConn{Net: "B", From: "U9.1", To: "U1.2"} // resolves by its other end
+	none := routeConn{Net: "C", From: "U9.1", To: "U9.2"}
+	for name, c := range map[string]struct {
+		res  *routeResult
+		want int
+	}{
+		"all resolve":        {&routeResult{UnroutedCount: 2, Unrouted: []routeConn{good, other}}, 2},
+		"one unresolved":     {&routeResult{UnroutedCount: 2, Unrouted: []routeConn{good, none}}, 0},
+		"list shorter":       {&routeResult{UnroutedCount: 3, Unrouted: []routeConn{good, other}}, 0},
+		"list longer":        {&routeResult{UnroutedCount: 1, Unrouted: []routeConn{good, other}}, 0},
+		"partial, list full": {&routeResult{UnroutedCount: 1, Partial: true, Unrouted: []routeConn{good}}, 0},
+	} {
+		n := 0
+		for _, s := range regionBreakdown(c.res, snap) {
+			n += s.Unrouted
+		}
+		if n != c.want {
+			t.Errorf("%s: %d", name, n)
+		}
 	}
 }
 
@@ -247,6 +281,7 @@ func TestInstrumentationBreakdownUnknownTotalsOmitted(t *testing.T) {
 		"partial":         {&routeResult{UnroutedCount: -1, Partial: true}, snap},
 		"partial, listed": {&routeResult{UnroutedCount: 1, Partial: true, Unrouted: listed}, snap},
 		"list incomplete": {&routeResult{UnroutedCount: 5, Unrouted: listed}, snap},
+		"list excess":     {&routeResult{Unrouted: listed}, snap},
 	} {
 		b, err := json.Marshal(struct {
 			C []NetClassStats

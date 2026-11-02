@@ -167,6 +167,10 @@ type viaAudit struct {
 	CannotCheck []string      `json:"cannotCheck,omitempty"`
 	Excepted    []string      `json:"excepted,omitempty"`
 	PreExisting []string      `json:"preExistingOffSize,omitempty"`
+	// The vias behind Illegal, NonConform and CannotCheck (one via can have
+	// several items, and CannotCheck can have items of no via).
+	illegalVias, offVias, uncheckedVias map[string]bool
+	uncheckedViaItems                   int
 }
 
 // viaMM converts mil to mm, to the nm.
@@ -174,7 +178,7 @@ func viaMM(mil float64) float64 { return math.Round(mil*nmPerMil) / 1e6 }
 
 // auditVias judges every via. Pure: all inputs are read by the caller.
 func auditVias(vias []routeVia, rb *kicad.RulesReadback, lim viaLimits, prov func(routeVia) string, pol viaPolicy) viaAudit {
-	var a viaAudit
+	a := viaAudit{illegalVias: map[string]bool{}, offVias: map[string]bool{}, uncheckedVias: map[string]bool{}}
 	for _, v := range vias {
 		dia, drill := int64(math.Round(v.Dia*nmPerMil)), int64(math.Round(v.Drill*nmPerMil))
 		e, resolved := rb.Nets[v.Net]
@@ -184,6 +188,15 @@ func auditVias(vias []routeVia, rb *kicad.RulesReadback, lim viaLimits, prov fun
 		add := func(list *[]string, msg string) {
 			row.Violations = append(row.Violations, msg)
 			*list = append(*list, tag+": "+msg)
+			switch list {
+			case &a.Illegal:
+				a.illegalVias[v.ID] = true
+			case &a.NonConform:
+				a.offVias[v.ID] = true
+			case &a.CannotCheck:
+				a.uncheckedVias[v.ID] = true
+				a.uncheckedViaItems++
+			}
 		}
 
 		// Legality: only a confirmed through via is judged by the board's
@@ -396,12 +409,20 @@ func (r *kicadRun) viaAuditGate(routed string, snap *boardSnapshot) gateResult {
 	r.summary["viaAudit"] = map[string]any{"file": file, "vias": len(a.Rows), "illegal": len(a.Illegal), "nonConforming": len(a.NonConform),
 		"cannotCheck": len(a.CannotCheck), "excepted": len(a.Excepted), "preExistingOffSize": len(a.PreExisting)}
 	viaAuditVerdict(&g, a)
-	if werr != nil {
-		it := "via-audit.json could not be written: " + werr.Error()
-		g.Pass, g.CannotCheck = false, len(a.Illegal)+len(a.NonConform) == 0
-		g.Items, g.Unchecked = append(g.Items, it), append(g.Unchecked, it)
-	}
+	viaAuditWriteFailed(&g, a, werr)
 	return g
+}
+
+// viaAuditWriteFailed: the verdict stands, but its evidence is missing: one more
+// item that could not be judged.
+func viaAuditWriteFailed(g *gateResult, a viaAudit, werr error) {
+	if werr == nil {
+		return
+	}
+	it := "via-audit.json could not be written: " + werr.Error()
+	g.Pass, g.CannotCheck = false, len(a.Illegal)+len(a.NonConform) == 0
+	g.Items, g.Unchecked = append(g.Items, it), append(g.Unchecked, it)
+	g.Detail += "; cannot check: " + it
 }
 
 // viaAuditVerdict fills the gate from the audit.
@@ -411,11 +432,12 @@ func viaAuditVerdict(g *gateResult, a viaAudit) {
 	g.Pass = len(g.Items) == 0
 	g.Unchecked = append([]string{}, a.CannotCheck...)
 	g.CannotCheck = len(a.CannotCheck) > 0 && len(a.Illegal)+len(a.NonConform) == 0
+	rules := len(a.CannotCheck) - a.uncheckedViaItems // custom rules: items of no via
 	switch {
 	case len(a.Illegal)+len(a.NonConform) > 0:
-		g.Detail = fmt.Sprintf("%d of %d via(s) break a manufacturing minimum, %d off their class size, %d cannot be checked", len(a.Illegal), len(a.Rows), len(a.NonConform), len(a.CannotCheck))
+		g.Detail = fmt.Sprintf("%d of %d via(s) break a manufacturing minimum, %d off their class size, %d cannot be checked, %d custom rule(s) cannot be resolved", len(a.illegalVias), len(a.Rows), len(a.offVias), len(a.uncheckedVias), rules)
 	case len(a.CannotCheck) > 0:
-		g.Detail = fmt.Sprintf("cannot check: %d item(s) over %d via(s)", len(a.CannotCheck), len(a.Rows))
+		g.Detail = fmt.Sprintf("cannot check: %d of %d via(s), %d custom rule(s) cannot be resolved", len(a.uncheckedVias), len(a.Rows), rules)
 	default:
 		g.Detail = fmt.Sprintf("%d via(s) legal and at their class size (%d declared exception(s), %d pre-existing off size)", len(a.Rows), len(a.Excepted), len(a.PreExisting))
 	}
