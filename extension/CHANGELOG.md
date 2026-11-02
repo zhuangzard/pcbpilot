@@ -1,5 +1,45 @@
 # Changelog
 
+## [0.12.4] — 2026-11-02
+
+**CLI, daemon, Skills and MCP move to 0.12.4. The connector runtime is UNCHANGED (only its version number moves); import the
+0.12.4 `pcbpilot-connector.eext` so the versions match — the daemon pauses design actions until they do.**
+
+Summary: correct via sizes and honest gates for `kicad route` on large boards. On the 1443-part test board every via now ends legal
+and at its net class size (0.12.3: all 128 router vias were the wrong size), and the whole run takes about 46 minutes instead of about
+2 hours because silkscreen placement waits for a complete route. **Routing completion did not improve:** about two thirds of that
+board's connections stay unrouted, and results vary between runs. That is the next work. Reviewed by Codex and Kimi K3.1 Pro round after
+round until no blocker remained.
+
+**Vias**
+- Fractional via padstacks (such as a via defined in mil) made fastroute fall back to its smallest via. They are rounded up to whole
+  micrometres for routing and shrunk back to the net class via after import, within 100 nm.
+- Vias that were already on the board keep their size: KiCad's session import renews and can resize them, so they are matched back by id,
+  or by net, span and position, and restored. A via that cannot be matched unambiguously is cannot-check; one that disappeared fails
+  `router-vias`. Not yet tested on a large board with fixed vias, or with a real TraceMaker run.
+- A router via that cannot reach its class size can be grown in a checked repair (geometry, then KiCad DRC against a baseline). A rejected
+  via stays in the `router-vias` evidence; there is no rip-up.
+- New mandatory `via-audit` gate on `kicad route`: every via of the final board with net, class, span, size, provenance and violation, in
+  `via-audit.json`. Manufacturing legality is separate from preferred size. Existing off-size vias are reported and not changed; unknown
+  provenance earns no exemption; `--via-policy` declares exceptions and can point at the fab contract.
+
+**Gates and exit codes**
+- **`kicad route` exit codes changed:** 0 all gates pass, 6 at least one gate fails, 5 nothing fails but something could not be checked. It
+  used to exit 1 on failed gates; update scripts that test for 1. Tool errors still exit 1.
+- One gate list drives stderr, `summary.json` and the exit code, so they can no longer disagree. Records carry status, evidence, board hash,
+  scope and duration. A partial or timed-out route never passes.
+
+**Silkscreen and timing**
+- `--silk auto|on|off`, default `auto`: placement is deferred while routing is incomplete (the 1443-part board spent about 80 minutes here).
+  The `silkscreen` gate then stays cannot-check, and known label failures stay failures. `--silk=on` keeps placing and is bounded by
+  `--silk-time-budget` (default 30 min); on expiry the last completed board is kept. `--no-silk-place` is unchanged.
+- `summary.json` gains `timingRollup` (router, post-processing, total) and `routeInstrumentation` (connections, completed, unrouted, by class,
+  domain and region). Counts that are not known are omitted rather than guessed.
+
+**Board edits**
+- `kicad` edits save through a temporary file beside the output and replace it only on success, restoring the previous board and project
+  files on failure, so a killed bridge process cannot leave a truncated board.
+
 ## [0.12.3] — 2026-10-30
 
 **CLI, daemon, Skills and MCP move to 0.12.3. The connector runtime is UNCHANGED (only its version number moves); import the
