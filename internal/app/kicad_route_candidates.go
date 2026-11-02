@@ -36,6 +36,8 @@ type routeCandidate struct {
 	// after the intent-widths gate found narrow copper outside the pad zone).
 	noNeck  map[string]bool
 	retried bool
+	// prov: where the vias of Board came from; set by commit.
+	prov *viaProvenance
 }
 
 // quickCheck judges a materialised candidate: complete (no unrouted

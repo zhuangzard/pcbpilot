@@ -427,3 +427,177 @@ func TestSizeRouterViasKeepsInputVias(t *testing.T) {
 		t.Fatalf("%+v", gates)
 	}
 }
+
+func matchVia(id, net string, x, y float64, from, to int, diaUm, drillUm float64) routeVia {
+	return routeVia{ID: id, Net: net, X: x, Y: y, From: from, To: to, Dia: diaUm * 1000 / nmPerMil, Drill: drillUm * 1000 / nmPerMil}
+}
+
+func noClassDrill(string) (int64, bool) { return 0, false }
+
+// One to one, on the same span, exact coordinates first; anything else is
+// cannot-check with no classification.
+func TestMatchInputViasStackedAndCompeting(t *testing.T) {
+	// Stacked vias of one net at one spot: each keeps its own size by its span.
+	m := matchInputVias(
+		[]routeVia{matchVia("b1", "A", 100, 100, 1, 15, 300, 150), matchVia("b2", "A", 100, 100, 15, 2, 500, 250)},
+		[]routeVia{matchVia("n2", "A", 100, 100, 2, 15, 500, 250), matchVia("n1", "A", 100, 100, 15, 1, 300, 150)}, noClassDrill)
+	if !m.input["n1"] || !m.input["n2"] || len(m.restore)+len(m.gone)+len(m.unchecked) != 0 {
+		t.Fatalf("stacked: %+v", m)
+	}
+	// A different span at the spot is not the input via.
+	m = matchInputVias([]routeVia{matchVia("b", "A", 100, 100, 1, 2, 600, 300)}, []routeVia{matchVia("n", "A", 100, 100, 1, 15, 600, 300)}, noClassDrill)
+	if m.input["n"] || len(m.gone) != 1 {
+		t.Fatalf("span: %+v", m)
+	}
+	// A router via nearby does not compete with the one at the exact place.
+	m = matchInputVias([]routeVia{matchVia("b", "A", 100, 100, 1, 2, 900, 500)},
+		[]routeVia{matchVia("near", "A", 100.3, 100, 1, 2, 600, 300), matchVia("n", "A", 100, 100, 1, 2, 900, 500)}, noClassDrill)
+	if !m.input["n"] || m.input["near"] || m.ambiguous["near"] || len(m.unchecked) != 0 {
+		t.Fatalf("exact first: %+v", m)
+	}
+	// Two within the tolerance, none exact: not a guess.
+	m = matchInputVias([]routeVia{matchVia("b", "A", 100, 100, 1, 2, 600, 300)},
+		[]routeVia{matchVia("x", "A", 100.3, 100, 1, 2, 600, 300), matchVia("y", "A", 99.7, 100, 1, 2, 600, 300)}, noClassDrill)
+	if len(m.input) != 0 || !m.ambiguous["x"] || !m.ambiguous["y"] || len(m.unchecked) != 1 || len(m.gone) != 0 {
+		t.Fatalf("two near: %+v", m)
+	}
+	// Two input vias stacked on one span, with one via left: which one is unknown.
+	m = matchInputVias([]routeVia{matchVia("b1", "A", 100, 100, 1, 2, 600, 300), matchVia("b2", "A", 100, 100, 1, 2, 800, 400)},
+		[]routeVia{matchVia("n", "A", 100, 100, 1, 2, 800, 400)}, noClassDrill)
+	if len(m.input) != 0 || !m.ambiguous["n"] || len(m.unchecked) != 2 {
+		t.Fatalf("one for two: %+v", m)
+	}
+	// Two and two, same span and spot: no pairing can be shown.
+	m = matchInputVias([]routeVia{matchVia("b1", "A", 100, 100, 1, 2, 600, 300), matchVia("b2", "A", 100, 100, 1, 2, 800, 400)},
+		[]routeVia{matchVia("n1", "A", 100, 100, 1, 2, 800, 400), matchVia("n2", "A", 100, 100, 1, 2, 600, 300)}, noClassDrill)
+	if len(m.input) != 0 || len(m.ambiguous) != 2 || len(m.restore) != 0 {
+		t.Fatalf("two for two: %+v", m)
+	}
+	// An id that came through with another net is not called input.
+	m = matchInputVias([]routeVia{matchVia("b", "A", 100, 100, 1, 2, 600, 300)}, []routeVia{matchVia("b", "B", 100, 100, 1, 2, 600, 300)}, noClassDrill)
+	if m.input["b"] || !m.ambiguous["b"] || len(m.unchecked) != 1 {
+		t.Fatalf("id: %+v", m)
+	}
+}
+
+// At an input via's coordinates, a size the import cannot make of it may be a
+// router via that replaced it: neither input, nor sized as a router via.
+func TestMatchInputViasRouterReplacement(t *testing.T) {
+	class := func(string) (int64, bool) { return 400000, true }
+	for _, c := range []struct {
+		name          string
+		b, a          routeVia
+		input, restor bool
+	}{
+		{"same size", matchVia("b", "A", 1, 1, 1, 2, 900, 500), matchVia("n", "A", 1, 1, 1, 2, 900, 500), true, false},
+		{"rounded up", matchVia("b", "A", 1, 1, 1, 2, 609.6, 304.8), matchVia("n", "A", 1, 1, 1, 2, 610, 305), true, true},
+		{"class drill", matchVia("b", "A", 1, 1, 1, 2, 600, 300), matchVia("n", "A", 1, 1, 1, 2, 600, 400), true, true},
+		{"smaller", matchVia("b", "A", 1, 1, 1, 2, 900, 500), matchVia("n", "A", 1, 1, 1, 2, 600, 300), false, false},
+		{"larger", matchVia("b", "A", 1, 1, 1, 2, 600, 300), matchVia("n", "A", 1, 1, 1, 2, 800, 400), false, false},
+		{"over a whole um", matchVia("b", "A", 1, 1, 1, 2, 609.6, 304.8), matchVia("n", "A", 1, 1, 1, 2, 611, 305), false, false},
+	} {
+		m := matchInputVias([]routeVia{c.b}, []routeVia{c.a}, class)
+		if m.input["n"] != c.input || m.ambiguous["n"] == c.input || (len(m.restore) > 0) != c.restor || len(m.gone) != 0 || (len(m.unchecked) > 0) == c.input {
+			t.Errorf("%s: %+v", c.name, m)
+		}
+	}
+}
+
+// Through sizeRouterVias: a replacement is left alone, with provenance unknown
+// and a cannot-check gate, and is not shrunk to its class.
+func TestSizeRouterViasReplacementIsCannotCheck(t *testing.T) {
+	f := &fakeViaTools{
+		before: `{"copper":{"vias":[{"primitiveId":"b","net":"A","x":1,"y":1,"fromLayer":1,"toLayer":2,"diameter":35.4331,"holeDiameter":19.685}]}}`,
+		after:  `{"copper":{"vias":[{"primitiveId":"n","net":"A","x":1,"y":1,"fromLayer":1,"toLayer":2,"diameter":31.4961,"holeDiameter":15.748}]}}`,
+		rb:     &kicad.RulesReadback{Nets: map[string]kicad.EffectiveNM{"A": {ViaDiameter: 609600, ViaDrill: 304800}}},
+	}
+	prov := &viaProvenance{}
+	board, gates := sizeRouterViasProv(f, "classed", "imported", func(s string) string { return s }, map[string]any{}, io.Discard, prov)
+	if board != "imported" || f.edited != nil || prov.input["n"] || prov.router["n"] {
+		t.Fatalf("%s %v %+v", board, f.edited, prov)
+	}
+	if len(gates) != 1 || !gates[0].CannotCheck || !strings.Contains(gates[0].Items[0], "may be a router via") {
+		t.Fatalf("%+v", gates)
+	}
+}
+
+// The TraceMaker path: input vias are recognised whatever their size, its own
+// vias are recorded as its own and judged honestly, declared exceptions apply,
+// and nothing is resized.
+func TestReconcileTracemakerVias(t *testing.T) {
+	via := func(id, net string, x float64, dia, drill float64) string {
+		return fmt.Sprintf(`{"primitiveId":%q,"net":%q,"x":%v,"y":100,"fromLayer":1,"toLayer":2,"diameter":%v,"holeDiameter":%v}`, id, net, x, dia/25.4, drill/25.4)
+	}
+	before := []string{via("offsize", "GND", 100, 900, 500)}
+	after := []string{via("offsize", "GND", 100, 900, 500), via("okay", "GND", 300, 700, 400), via("wrong", "GND", 500, 600, 300), via("stitch", "SIG", 700, 800, 400)}
+	f := &fakeViaTools{
+		before: `{"copper":{"vias":[` + strings.Join(before, ",") + `]}}`,
+		after:  `{"copper":{"vias":[` + strings.Join(after, ",") + `]}}`,
+	}
+	summary := map[string]any{}
+	prov, gates := reconcileCandidateVias(f, "classed", "routed", viaFromTracemaker, summary)
+	if len(gates) != 0 || f.edited != nil {
+		t.Fatalf("%+v %v", gates, f.edited)
+	}
+	if st := summary["routerVias"].(map[string]any); st["backend"] != viaFromTracemaker || st["created"] != 3 || st["inputVias"] != 1 {
+		t.Fatalf("%v", st)
+	}
+	r := &kicadRun{viaProv: prov, summary: map[string]any{}, stderr: io.Discard}
+	var s boardSnapshot
+	if err := json.Unmarshal([]byte(f.after), &s); err != nil {
+		t.Fatal(err)
+	}
+	vias, err := snapshotVias(&s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pol := viaPolicy{Exceptions: []viaException{{Kind: "stitching", Nets: []string{"SIG"}, Reason: "shield row"}}}
+	a := auditVias(vias, auditRB(), viaLimits{drill: 250000, annular: 100000}, r.viaProvenanceOf(), pol)
+	byID := map[string]viaAuditRow{}
+	for _, row := range a.Rows {
+		byID[row.ID] = row
+	}
+	if byID["offsize"].Provenance != viaFromInput || byID["okay"].Provenance != viaFromTracemaker || byID["wrong"].Provenance != viaFromTracemaker || byID["stitch"].Provenance != viaFromTracemaker {
+		t.Fatalf("%+v", byID)
+	}
+	if len(a.PreExisting) != 1 || !strings.Contains(a.PreExisting[0], short12("offsize")) {
+		t.Errorf("off-size input via: %+v", a.PreExisting)
+	}
+	if len(a.NonConform) != 1 || !strings.Contains(a.NonConform[0], short12("wrong")) {
+		t.Errorf("off-size TraceMaker via: %+v", a.NonConform)
+	}
+	if len(a.Excepted) != 1 || !strings.Contains(a.Excepted[0], short12("stitch")) {
+		t.Errorf("declared exception: %+v", a.Excepted)
+	}
+	if len(a.Illegal)+len(a.CannotCheck) != 0 {
+		t.Errorf("%+v", a)
+	}
+	// Reads that fail, and an input via gone, are gates.
+	_, gates = reconcileCandidateVias(&fakeViaTools{failOn: "snapshot-before"}, "classed", "routed", viaFromTracemaker, map[string]any{})
+	if len(gates) != 1 || gates[0].Pass || !gates[0].CannotCheck {
+		t.Fatalf("%+v", gates)
+	}
+	f = &fakeViaTools{before: `{"copper":{"vias":[` + before[0] + `]}}`, after: `{"copper":{"vias":[]}}`}
+	_, gates = reconcileCandidateVias(f, "classed", "routed", viaFromTracemaker, map[string]any{})
+	if len(gates) != 1 || gates[0].Pass || gates[0].CannotCheck {
+		t.Fatalf("%+v", gates)
+	}
+}
+
+// The run's provenance is the one of the candidate it is judging.
+func TestUseCandidateSwitchesViaProvenance(t *testing.T) {
+	r := &kicadRun{summary: map[string]any{}, stderr: io.Discard}
+	fr := &routeCandidate{Name: routerFastroute, Res: &routeResult{}, prov: &viaProvenance{}}
+	fr.prov.record(nil, nil, []routeVia{{ID: "v"}})
+	tm := &routeCandidate{Name: routerTracemaker, Res: &routeResult{}, prov: &viaProvenance{created: viaFromTracemaker}}
+	tm.prov.record(map[string]bool{"v": true}, map[string]bool{"v": true}, []routeVia{{ID: "v"}, {ID: "w"}})
+	r.useCandidate(fr, nil)
+	if got := r.viaProvenanceOf()(routeVia{ID: "v"}); got != viaFromRouter {
+		t.Fatal(got)
+	}
+	r.useCandidate(tm, nil)
+	of := r.viaProvenanceOf()
+	if of(routeVia{ID: "v"}) != viaFromInput || of(routeVia{ID: "w"}) != viaFromTracemaker {
+		t.Fatalf("%s %s", of(routeVia{ID: "v"}), of(routeVia{ID: "w"}))
+	}
+}

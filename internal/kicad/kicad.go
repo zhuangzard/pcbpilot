@@ -508,11 +508,19 @@ func (t *Tools) EditContext(ctx context.Context, pcb string, ops map[string]any,
 	return resultOut(raw, out), nil
 }
 
+// The file operations of commitBoard (replaced in tests).
+var (
+	commitRename = kfile.Rename
+	commitRemove = os.Remove
+)
+
 // commitBoard moves a board the bridge saved at tmp, and its sidecars, to out.
 // The board goes last: it is what makes out the new result. Sidecars follow the
 // bridge's save_board for a direct save: a new .kicad_pro / .kicad_prl replaces
 // the one at out (or, unless the board is saved over itself, one it did not
-// write removes it), and a .kicad_dru at out stays.
+// write removes it), and a .kicad_dru at out stays. Every file it will change is
+// copied beside itself first and put back on any failure; if that fails too the
+// copies stay and the error names them.
 func commitBoard(src, tmp, out string) error {
 	if _, err := os.Stat(tmp); err != nil {
 		return fmt.Errorf("the bridge reported success but saved no board: %w", err)
@@ -524,28 +532,113 @@ func commitBoard(src, tmp, out string) error {
 		}
 	}
 	tmpStem, outStem := strings.TrimSuffix(tmp, filepath.Ext(tmp)), strings.TrimSuffix(out, filepath.Ext(out))
+	type step struct{ from, to string } // from "": delete to
+	var steps []step
 	for _, ext := range []string{".kicad_pro", ".kicad_prl"} {
 		switch _, err := os.Stat(tmpStem + ext); {
 		case err == nil:
-			if err := kfile.Rename(tmpStem+ext, outStem+ext); err != nil {
+			if err := nameProjectFile(tmpStem+ext, filepath.Base(tmpStem), filepath.Base(outStem)); err != nil {
 				return err
 			}
-		case os.IsNotExist(err) && !inPlace:
-			if err := os.Remove(outStem + ext); err != nil && !os.IsNotExist(err) {
-				return err
-			}
+			steps = append(steps, step{tmpStem + ext, outStem + ext})
 		case !os.IsNotExist(err):
 			return err
+		case !inPlace:
+			if _, err := os.Stat(outStem + ext); err == nil {
+				steps = append(steps, step{"", outStem + ext})
+			}
 		}
 	}
 	if _, err := os.Stat(tmpStem + ".kicad_dru"); err == nil {
 		if _, err := os.Stat(outStem + ".kicad_dru"); os.IsNotExist(err) {
-			if err := kfile.Rename(tmpStem+".kicad_dru", outStem+".kicad_dru"); err != nil {
-				return err
-			}
+			steps = append(steps, step{tmpStem + ".kicad_dru", outStem + ".kicad_dru"})
 		}
 	}
-	return kfile.Rename(tmp, out)
+	steps = append(steps, step{tmp, out})
+
+	backup := func(to string) string { return to + filepath.Base(tmpStem)[len(filepath.Base(outStem)):] + ".bak" }
+	var backups []string
+	dropBackups := func() {
+		for _, b := range backups {
+			_ = os.Remove(b)
+		}
+	}
+	for _, st := range steps {
+		data, err := os.ReadFile(st.to)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			dropBackups()
+			return err
+		}
+		info, err := os.Stat(st.to)
+		if err != nil {
+			dropBackups()
+			return err
+		}
+		if err := os.WriteFile(backup(st.to), data, info.Mode().Perm()); err != nil {
+			dropBackups()
+			return err
+		}
+		backups = append(backups, backup(st.to))
+	}
+	// restore puts one output back to what it was; nothing to do if it still is.
+	restore := func(to string) error {
+		was, err := os.ReadFile(backup(to))
+		switch {
+		case os.IsNotExist(err):
+			if err := commitRemove(to); err != nil && !os.IsNotExist(err) {
+				return err
+			}
+			return nil
+		case err != nil:
+			return err
+		}
+		if now, err := os.ReadFile(to); err == nil && bytes.Equal(now, was) {
+			return nil
+		}
+		return commitRename(backup(to), to)
+	}
+	for i, st := range steps {
+		var err error
+		if st.from == "" {
+			err = commitRemove(st.to)
+		} else {
+			err = commitRename(st.from, st.to)
+		}
+		if err == nil {
+			continue
+		}
+		// A failed step changed nothing, unless it failed after the fact.
+		var failed []error
+		for j := i; j >= 0; j-- {
+			if rerr := restore(steps[j].to); rerr != nil {
+				failed = append(failed, rerr)
+			}
+		}
+		if len(failed) > 0 {
+			return fmt.Errorf("%w; and putting the previous files back failed (%v): they are kept as %s", err, errors.Join(failed...), strings.Join(backups, ", "))
+		}
+		dropBackups()
+		return err
+	}
+	dropBackups()
+	return nil
+}
+
+// nameProjectFile: a project file names itself (meta.filename), and pcbnew wrote
+// the temporary name.
+func nameProjectFile(path, tmpBase, outBase string) error {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	fixed := bytes.ReplaceAll(b, []byte(tmpBase), []byte(outBase))
+	if bytes.Equal(fixed, b) {
+		return nil
+	}
+	return os.WriteFile(path, fixed, 0o644)
 }
 
 // removeStem removes what a save to stem+ext left (nothing after a commit that

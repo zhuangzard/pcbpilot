@@ -30,34 +30,48 @@ import (
 
 // Provenance of a via on the final board.
 const (
-	viaFromInput   = "input"
-	viaFromRouter  = "router"
-	viaFromRepair  = "router-repaired"
-	viaFromEscape  = "escape"
-	viaFromArray   = "via-array"
-	viaFromUnknown = "unknown"
+	viaFromInput      = "input"
+	viaFromRouter     = "router"
+	viaFromTracemaker = "tracemaker"
+	viaFromRepair     = "router-repaired"
+	viaFromEscape     = "escape"
+	viaFromArray      = "via-array"
+	viaFromUnknown    = "unknown"
 )
 
-// viaProvenance records the vias sizeRouterVias saw. The methods accept nil.
+// viaProvenance records one routed candidate's vias against the input board:
+// the board's own, those its backend created (created names it, viaFromRouter
+// when empty) and those repaired. A via that could not be told is in none and
+// stays unknown. The methods accept nil.
 type viaProvenance struct {
+	created              string
 	input, router, grown map[string]bool
 }
 
-func (p *viaProvenance) record(old map[string]bool, after []routeVia) {
+// record: input holds the board's own vias on the routed board; skip those not
+// to be counted as created either (input and the ones that could not be told).
+func (p *viaProvenance) record(input, skip map[string]bool, after []routeVia) {
 	if p == nil {
 		return
 	}
 	if p.input == nil {
 		p.input, p.router, p.grown = map[string]bool{}, map[string]bool{}, map[string]bool{}
 	}
-	for id := range old {
+	for id := range input {
 		p.input[id] = true
 	}
 	for _, v := range after {
-		if !old[v.ID] {
+		if !skip[v.ID] {
 			p.router[v.ID] = true
 		}
 	}
+}
+
+func (p *viaProvenance) createdBy() string {
+	if p.created != "" {
+		return p.created
+	}
+	return viaFromRouter
 }
 
 func (p *viaProvenance) recordGrown(ids []string) {
@@ -407,7 +421,8 @@ func viaAuditVerdict(g *gateResult, a viaAudit) {
 	}
 }
 
-// viaProvenanceOf names where each via came from: the ids sizeRouterVias saw,
+// viaProvenanceOf names where each via came from: the ids the candidate's
+// reconciliation saw,
 // then route's escapes and via arrays by net and position.
 func (r *kicadRun) viaProvenanceOf() func(routeVia) string {
 	type at struct {
@@ -432,7 +447,7 @@ func (r *kicadRun) viaProvenanceOf() func(routeVia) string {
 			case p.grown[v.ID]:
 				return viaFromRepair
 			case p.router[v.ID]:
-				return viaFromRouter
+				return p.createdBy()
 			case p.input[v.ID]:
 				return viaFromInput
 			}

@@ -344,15 +344,78 @@ func TestGateRegistryExitCodePrecedence(t *testing.T) {
 	}
 }
 
-func statusOf(t *testing.T, reg *gateRegistry, id string) gate.Status {
+func recordOf(t *testing.T, reg *gateRegistry, id string) GateRecord {
 	t.Helper()
 	for _, g := range reg.Records() {
 		if g.ID == id {
-			return g.Status
+			return g
 		}
 	}
 	t.Fatalf("no record %s in %+v", id, reg.Records())
-	return ""
+	return GateRecord{}
+}
+
+func statusOf(t *testing.T, reg *gateRegistry, id string) gate.Status {
+	t.Helper()
+	return recordOf(t, reg, id).Status
+}
+
+// A partial waiver applied by the registry itself: the record, stderr and the
+// exit code all describe what is left.
+func TestGateRegistryPartialWaiver(t *testing.T) {
+	const bad, unk = "via 1: drill not smaller", "via 2: span unknown"
+	w := func(match string) gateWaiver {
+		return gateWaiver{Gate: "via-audit", Match: match, Reason: "reviewed", By: "test"}
+	}
+	for _, c := range []struct {
+		name      string
+		rec       GateRecord
+		ws        []gateWaiver
+		status    gate.Status
+		exit      int
+		items     []string
+		unchecked []string
+		waived    int
+		mark      string
+	}{
+		{"failure waived, unchecked left", GateRecord{ID: "via-audit", Status: gate.Fail, Reason: "mixed", Items: []string{bad, unk}, Unchecked: []string{unk}},
+			[]gateWaiver{w("via 1")}, gate.CannotCheck, 5, []string{unk}, []string{unk}, 1, "CANNOT-CHECK"},
+		{"unchecked waived, failure left", GateRecord{ID: "via-audit", Status: gate.Fail, Reason: "mixed", Items: []string{bad, unk}, Unchecked: []string{unk}},
+			[]gateWaiver{w("via 2")}, gate.Fail, 6, []string{bad}, nil, 1, "FAIL"},
+		{"cannot-check, one of two waived", GateRecord{ID: "via-audit", Status: gate.CannotCheck, Reason: "unknown", Items: []string{"via 2", "via 3"}, Unchecked: []string{"via 2", "via 3"}},
+			[]gateWaiver{w("via 2")}, gate.CannotCheck, 5, []string{"via 3"}, []string{"via 3"}, 1, "CANNOT-CHECK"},
+		{"all waived", GateRecord{ID: "via-audit", Status: gate.Fail, Reason: "mixed", Items: []string{bad, unk}, Unchecked: []string{unk}},
+			[]gateWaiver{w("via ")}, gate.Pass, 0, nil, nil, 2, "PASS"},
+		{"nothing waived", GateRecord{ID: "via-audit", Status: gate.Fail, Reason: "mixed", Items: []string{bad, unk}, Unchecked: []string{unk}},
+			nil, gate.Fail, 6, []string{bad, unk}, []string{unk}, 0, "FAIL"},
+		{"cannot-check without typed items stays as it was", GateRecord{ID: "via-audit", Status: gate.CannotCheck, Reason: "unknown", Items: []string{"via 2", "via 3"}},
+			[]gateWaiver{w("via 2")}, gate.CannotCheck, 5, []string{"via 2", "via 3"}, nil, 0, "CANNOT-CHECK"},
+	} {
+		var stderr bytes.Buffer
+		reg := newGateRegistry(&stderr, c.ws)
+		reg.Add(c.rec)
+		rec := reg.Records()[0]
+		if rec.Status != c.status || reg.ExitCode() != c.exit || rec.Pass != (c.status == gate.Pass) {
+			t.Errorf("%s: %+v exit %d", c.name, rec, reg.ExitCode())
+		}
+		if strings.Join(rec.Items, "|") != strings.Join(c.items, "|") || strings.Join(rec.Unchecked, "|") != strings.Join(c.unchecked, "|") || len(rec.Waived) != c.waived {
+			t.Errorf("%s: %+v", c.name, rec)
+		}
+		if !strings.Contains(stderr.String(), c.mark) || rec.Detail != rec.Reason {
+			t.Errorf("%s: stderr %q, %+v", c.name, stderr.String(), rec)
+		}
+		if c.waived > 0 && c.status != gate.Pass && !strings.Contains(stderr.String(), "waived") {
+			t.Errorf("%s: stderr %q", c.name, stderr.String())
+		}
+	}
+	// Both fields go through the adapter.
+	back := GateRecord2gateResult(GateRecord{ID: "g", Status: gate.CannotCheck, Items: []string{"x"}, Unchecked: []string{"x"}})
+	if !back.CannotCheck || len(back.Unchecked) != 1 {
+		t.Fatalf("%+v", back)
+	}
+	if rec := toRecordCC(gateResult{Gate: "g", Items: []string{"x"}, Unchecked: []string{"x"}}, "r", nil, ""); len(rec.Unchecked) != 1 {
+		t.Fatalf("%+v", rec)
+	}
 }
 
 // The cannot-check results production makes reach the registry typed: exit 5,

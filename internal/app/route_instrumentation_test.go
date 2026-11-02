@@ -85,7 +85,8 @@ func TestRouteInstrumentationTopLevelJSON(t *testing.T) {
 		{"partial at 0", &routeResult{Partial: true}, 50, []string{`"partial":true`}, []string{`"completed"`, `"unrouted"`}},
 		{"partial with a count", &routeResult{UnroutedCount: 4, Partial: true}, 50, []string{`"partial":true`}, []string{`"completed"`, `"unrouted"`}},
 		{"unknown without the flag", &routeResult{UnroutedCount: -1}, 50, nil, []string{`"completed"`, `"unrouted"`}},
-		{"more unrouted than connections", &routeResult{UnroutedCount: 60}, 50, []string{`"unrouted":60`}, []string{`"completed"`}},
+		{"more unrouted than connections", &routeResult{UnroutedCount: 60}, 50, []string{`"connections":50`}, []string{`"completed"`, `"unrouted"`}},
+		{"all unrouted", &routeResult{UnroutedCount: 50}, 50, []string{`"completed":0`, `"unrouted":50`}, nil},
 	} {
 		b, err := json.Marshal(buildRouteInstrumentation(c.res, c.conns, "", nil, nil))
 		if err != nil {

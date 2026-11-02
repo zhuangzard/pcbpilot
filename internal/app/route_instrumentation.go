@@ -89,12 +89,9 @@ func buildRouteInstrumentation(
 		RouterVersion:   res.Version,
 		InputSHA256:     filePathSHA256(dsnPath),
 	}
-	if !res.Partial && res.UnroutedCount >= 0 {
-		unrouted := res.UnroutedCount
-		ri.Unrouted = &unrouted
-		if completed := connections - unrouted; completed >= 0 {
-			ri.Completed = &completed
-		}
+	if u := res.UnroutedCount; !res.Partial && u >= 0 && u <= connections {
+		completed := connections - u
+		ri.Unrouted, ri.Completed = &u, &completed
 	}
 	ri.ByNetClass = netClassBreakdown(res, classes, snap)
 	ri.ByDomain = domainBreakdown(res, classes, snap)

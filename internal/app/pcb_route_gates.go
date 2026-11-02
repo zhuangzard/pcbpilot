@@ -79,7 +79,7 @@ func applyWaivers(g *gateResult, ws []gateWaiver) {
 		waived = append(waived, hit)
 	}
 	if len(left) == 0 {
-		g.Pass, g.Waived, g.CannotCheck, g.Unchecked = true, waived, false, nil
+		g.Pass, g.Waived, g.CannotCheck, g.Unchecked = true, append(g.Waived, waived...), false, nil
 		return
 	}
 	if len(waived) == 0 {

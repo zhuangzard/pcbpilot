@@ -33,8 +33,9 @@ package app
 //     transaction (kicad_route_via_repair.go), or the gate fails.
 //   - KiCad's SES import replaces every via with a new uuid, and sizes the ones
 //     already on the board from the session as well (a 609.6 um via renamed to
-//     610:305 comes back at 610). So an input via is found again by net and
-//     position, never touched as a router via, and put back at its own size.
+//     610:305 comes back at 610). So an input via is found again by net, span
+//     and position (matchInputVias), never touched as a router via, and put
+//     back at its own size.
 
 import (
 	"encoding/json"
@@ -410,12 +411,18 @@ func sizeRouterViasProv(t routerViaTools, classed, board string, next func(strin
 		e, ok := rb.Nets[net]
 		return e.ViaDiameter, e.ViaDrill, ok
 	}
-	old, restore, gone := inputViasAfterImport(beforeVias, afterVias)
-	prov.record(old, afterVias)
+	m := matchInputVias(beforeVias, afterVias, func(net string) (int64, bool) {
+		_, ch, ok := eff(net)
+		return ch, ok
+	})
+	restore, gone := m.restore, m.gone
+	old := m.skip()
+	prov.record(m.input, old, afterVias)
 	ops, fail, unknown, n := classViaPlan(afterVias, old, eff)
 	stats := map[string]any{"routerVias": n, "shrunkToClass": len(ops), "notReachable": len(fail), "noClassVia": len(unknown),
-		"inputVias": len(beforeVias), "inputViasRestored": len(restore), "inputViasGone": len(gone)}
+		"inputVias": len(beforeVias), "inputViasRestored": len(restore), "inputViasGone": len(gone), "inputViasUnresolved": len(m.unchecked)}
 	summary["routerVias"] = stats
+	unknown = append(unknown, m.unchecked...)
 	if len(ops)+len(restore) > 0 {
 		out := next("vias-to-class")
 		if _, err := t.Edit(board, map[string]any{"setVia": append(append([]map[string]any{}, ops...), restore...)}, out); err != nil {
@@ -446,44 +453,176 @@ func sizeRouterViasProv(t routerViaTools, classed, board string, next func(strin
 	return board, gates
 }
 
-// inputViasAfterImport finds the board's own vias on the imported board, by id
-// or else by net and position: old holds their ids there. restore puts back the
-// ones the import resized; gone describes those no longer there.
-func inputViasAfterImport(before, after []routeVia) (old map[string]bool, restore []map[string]any, gone []string) {
-	old = map[string]bool{}
-	taken := func(v routeVia) bool { return old[v.ID] }
-	match := func(b routeVia, same func(routeVia) bool) *routeVia {
-		for i := range after {
-			if !taken(after[i]) && same(after[i]) {
-				return &after[i]
-			}
-		}
-		return nil
+// inputViaMatch says which vias of a routed board are the input board's own.
+type inputViaMatch struct {
+	input     map[string]bool  // ids on the routed board that are input vias
+	ambiguous map[string]bool  // ids that may or may not be: neither input nor created
+	restore   []map[string]any // setVia ops putting back an input via's size
+	gone      []string         // input vias no longer there
+	unchecked []string         // why a via could not be told
+}
+
+// skip: the vias sizing must leave alone, input or not known to be router vias.
+func (m *inputViaMatch) skip() map[string]bool {
+	out := map[string]bool{}
+	for id := range m.input {
+		out[id] = true
 	}
+	for id := range m.ambiguous {
+		out[id] = true
+	}
+	return out
+}
+
+const viaExactMatchMil = 0.01 // the DSN's coordinate rounding
+
+func viaSpanKey(v routeVia) [2]int { return [2]int{min(v.From, v.To), max(v.From, v.To)} }
+
+// viaSizeFromImport: can the import have made a via of size a out of input via
+// b? It rounds a size up to whole um, and may take the net's class drill. Any
+// other size was not b: a router via at the same place. One of the same size
+// cannot be told from b, and changes nothing if it is taken for b.
+func viaSizeFromImport(b, a routeVia, classDrill func(string) (int64, bool)) bool {
 	nm := func(mil float64) int64 { return int64(math.Round(mil * nmPerMil)) }
-	found := make([]*routeVia, len(before))
-	// Ids first, so that a via that kept its id is not taken by a neighbour.
-	for i, b := range before {
-		if found[i] = match(b, func(a routeVia) bool { return a.ID == b.ID }); found[i] != nil {
-			old[found[i].ID] = true
+	fits := func(was, now int64) bool {
+		up := (was + 999 - viaExactTolNM) / 1000 * 1000 // the snapshot's rounding is no fraction
+		return now+viaExactTolNM >= was && now <= max(was, up)+viaExactTolNM
+	}
+	if !fits(nm(b.Dia), nm(a.Dia)) {
+		return false
+	}
+	if fits(nm(b.Drill), nm(a.Drill)) {
+		return true
+	}
+	ch, ok := classDrill(b.Net)
+	return ok && absNM(nm(a.Drill)-ch) <= viaExactTolNM
+}
+
+// matchInputVias finds the input vias on a routed board, one to one: by id, then
+// on the same net and span at exactly the same place, then within the match
+// tolerance. A via with more than one possible partner, or at a size the import
+// cannot have made, is reported and classified neither way.
+func matchInputVias(before, after []routeVia, classDrill func(string) (int64, bool)) *inputViaMatch {
+	m := &inputViaMatch{input: map[string]bool{}, ambiguous: map[string]bool{}}
+	nm := func(mil float64) int64 { return int64(math.Round(mil * nmPerMil)) }
+	used := make([]bool, len(after))
+	done := make([]bool, len(before))
+	same := func(b, a routeVia) bool { return a.Net == b.Net && viaSpanKey(a) == viaSpanKey(b) }
+	tag := func(b routeVia) string {
+		return fmt.Sprintf("%s input via %s at (%.1f, %.1f) mil", b.Net, short12(b.ID), b.X, b.Y)
+	}
+	take := func(b routeVia, ai int) {
+		a := after[ai]
+		used[ai] = true
+		m.input[a.ID] = true
+		if absNM(nm(a.Dia)-nm(b.Dia)) > viaExactTolNM || absNM(nm(a.Drill)-nm(b.Drill)) > viaExactTolNM {
+			m.restore = append(m.restore, map[string]any{"id": a.ID, "diameter": b.Dia, "drill": b.Drill})
 		}
 	}
-	for i, b := range before {
-		if found[i] == nil {
-			if found[i] = match(b, func(a routeVia) bool {
-				return a.Net == b.Net && math.Hypot(a.X-b.X, a.Y-b.Y) <= specctra.MatchTolMil
-			}); found[i] != nil {
-				old[found[i].ID] = true
+	unsure := func(ai int) {
+		used[ai] = true
+		m.ambiguous[after[ai].ID] = true
+	}
+	for bi, b := range before {
+		for ai, a := range after {
+			if used[ai] || a.ID != b.ID {
+				continue
+			}
+			done[bi] = true
+			if same(b, a) {
+				take(b, ai)
+			} else {
+				unsure(ai)
+				m.unchecked = append(m.unchecked, fmt.Sprintf("%s: its id now has net %s, span %v: cannot tell what it is", tag(b), a.Net, viaSpanKey(a)))
+			}
+			break
+		}
+	}
+	for _, tol := range []float64{viaExactMatchMil, specctra.MatchTolMil} {
+		cands := make([][]int, len(before))
+		wanted := make([]int, len(after))
+		for bi, b := range before {
+			if done[bi] {
+				continue
+			}
+			for ai, a := range after {
+				if !used[ai] && same(b, a) && math.Hypot(a.X-b.X, a.Y-b.Y) <= tol {
+					cands[bi] = append(cands[bi], ai)
+					wanted[ai]++
+				}
 			}
 		}
-		switch a := found[i]; {
-		case a == nil:
-			gone = append(gone, fmt.Sprintf("%s input via %s at (%.1f, %.1f) mil is not on the imported board", b.Net, short12(b.ID), b.X, b.Y))
-		case absNM(nm(a.Dia)-nm(b.Dia)) > viaExactTolNM || absNM(nm(a.Drill)-nm(b.Drill)) > viaExactTolNM:
-			restore = append(restore, map[string]any{"id": a.ID, "diameter": b.Dia, "drill": b.Drill})
+		for bi, b := range before {
+			switch c := cands[bi]; {
+			case len(c) == 0:
+			case len(c) == 1 && wanted[c[0]] == 1 && viaSizeFromImport(b, after[c[0]], classDrill):
+				done[bi] = true
+				take(b, c[0])
+			case len(c) == 1 && wanted[c[0]] == 1:
+				done[bi] = true
+				a := after[c[0]]
+				unsure(c[0])
+				m.unchecked = append(m.unchecked, fmt.Sprintf("%s: the via there, %s, is %.2f/%.2f mil where the input via was %.2f/%.2f: it may be a router via, cannot tell", tag(b), short12(a.ID), a.Dia, a.Drill, b.Dia, b.Drill))
+			default:
+				done[bi] = true
+				for _, ai := range c {
+					unsure(ai)
+				}
+				m.unchecked = append(m.unchecked, fmt.Sprintf("%s: %d vias there could be it: cannot tell which", tag(b), len(c)))
+			}
 		}
 	}
-	return old, restore, gone
+	for bi, b := range before {
+		if !done[bi] {
+			m.gone = append(m.gone, tag(b)+" is not on the routed board")
+		}
+	}
+	return m
+}
+
+// reconcileCandidateVias records a candidate's vias for a backend that does not
+// go through sizeRouterVias (TraceMaker): it reads the input board and the
+// routed one, nothing is resized. Whatever cannot be established is a
+// router-vias gate.
+func reconcileCandidateVias(t routerViaTools, classed, board, created string, summary map[string]any) (*viaProvenance, []gateResult) {
+	prov := &viaProvenance{created: created}
+	cannot := func(what string, err error) (*viaProvenance, []gateResult) {
+		detail := "cannot check: " + what + ", so the " + created + " vias are unknown: " + err.Error()
+		summary["routerVias"] = map[string]any{"backend": created, "error": err.Error()}
+		return prov, []gateResult{{Gate: "router-vias", Detail: detail, CannotCheck: true}}
+	}
+	read := func(pcb string) ([]routeVia, error) {
+		raw, err := t.Snapshot(pcb)
+		if err != nil {
+			return nil, err
+		}
+		var s boardSnapshot
+		if err := json.Unmarshal(raw, &s); err != nil {
+			return nil, fmt.Errorf("decode KiCad snapshot: %w", err)
+		}
+		return snapshotVias(&s)
+	}
+	before, err := read(classed)
+	if err != nil {
+		return cannot("the input board's vias could not be read", err)
+	}
+	after, err := read(board)
+	if err != nil {
+		return cannot("the routed board's vias could not be read", err)
+	}
+	m := matchInputVias(before, after, func(string) (int64, bool) { return 0, false })
+	skip := m.skip()
+	prov.record(m.input, skip, after)
+	fail := append([]string{}, m.gone...)
+	for _, op := range m.restore {
+		fail = append(fail, fmt.Sprintf("input via %s: %s changed its size to something else", short12(fmt.Sprint(op["id"])), created))
+	}
+	summary["routerVias"] = map[string]any{"backend": created, "created": len(after) - len(skip), "inputVias": len(before),
+		"inputViasGone": len(m.gone), "inputViasResized": len(m.restore), "inputViasUnresolved": len(m.unchecked)}
+	gate := func(pass bool, detail string, items ...string) []gateResult {
+		return []gateResult{{Gate: "router-vias", Pass: pass, Detail: detail, Items: items}}
+	}
+	return prov, problemGates(gate, fail, m.unchecked)
 }
 
 // problemGates is the router-vias gate for vias that are known wrong (fail)
@@ -505,8 +644,6 @@ func problemGates(gate func(bool, string, ...string) []gateResult, fail, unknown
 
 // routerViasToClass is sizeRouterVias on this run's board files.
 func (r *kicadRun) routerViasToClass(classed, board string) (string, []gateResult) {
-	if r.viaProv == nil {
-		r.viaProv = &viaProvenance{}
-	}
+	r.viaProv = &viaProvenance{}
 	return sizeRouterViasProv(r.kt, classed, board, r.next, r.summary, r.stderr, r.viaProv)
 }

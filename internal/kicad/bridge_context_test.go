@@ -233,7 +233,7 @@ func TestBridgeEditCommitTargetHeldOpen(t *testing.T) {
 	tools := &Tools{Python: os.Args[0]}
 	dir := t.TempDir()
 	pcb, out := filepath.Join(dir, "in.kicad_pcb"), filepath.Join(dir, "out.kicad_pcb")
-	writeFiles(t, map[string]string{pcb: "(kicad_pcb in)", out: "(kicad_pcb old)"})
+	writeFiles(t, map[string]string{pcb: "(kicad_pcb in)", out: "(kicad_pcb old)", filepath.Join(dir, "out.kicad_pro"): "{\"old\":1}", filepath.Join(dir, "out.kicad_prl"): "old prl"})
 	f, err := os.OpenFile(out, os.O_RDWR, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -246,11 +246,158 @@ func TestBridgeEditCommitTargetHeldOpen(t *testing.T) {
 		return
 	}
 	wantFile(t, out, "(kicad_pcb old)")
+	wantFile(t, filepath.Join(dir, "out.kicad_pro"), "{\"old\":1}") // the rules stay with the board
+	wantFile(t, filepath.Join(dir, "out.kicad_prl"), "old prl")
+	if _, err := os.Stat(filepath.Join(dir, "out.kicad_dru")); !os.IsNotExist(err) {
+		t.Fatalf("new rules beside the old board: %v", err)
+	}
 	noTemp(t, dir)
+	if left, _ := filepath.Glob(filepath.Join(dir, "*.bak")); len(left) != 0 {
+		t.Fatalf("%v", left)
+	}
 	if _, err := tools.Edit(pcb, map[string]any{}, out); err != nil {
 		t.Fatal(err)
 	}
 	wantFile(t, out, "(kicad_pcb new)")
+}
+
+// The files of an output set, absent ones as absent.
+func readSet(t *testing.T, stem string) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	for _, ext := range []string{".kicad_pcb", ".kicad_pro", ".kicad_prl", ".kicad_dru"} {
+		if b, err := os.ReadFile(stem + ext); err == nil {
+			out[ext] = string(b)
+		} else if !os.IsNotExist(err) {
+			t.Fatal(err)
+		}
+	}
+	return out
+}
+
+// Every rename and delete of a commit, failing in turn, leaves the complete
+// previous set of bytes and nothing else; so does a board held open by another
+// process, here injected for every platform.
+func TestBridgeCommitBoardRollsBack(t *testing.T) {
+	rename, remove := commitRename, commitRemove
+	defer func() { commitRename, commitRemove = rename, remove }()
+	for _, c := range []struct {
+		name string
+		prev map[string]string // files at out
+		tmp  map[string]string // files the bridge saved
+	}{
+		{"replaces the project", map[string]string{".kicad_pcb": "old", ".kicad_pro": "old pro", ".kicad_prl": "old prl", ".kicad_dru": "old dru"},
+			map[string]string{".kicad_pcb": "new", ".kicad_pro": "new pro", ".kicad_prl": "new prl", ".kicad_dru": "new dru"}},
+		{"deletes what it did not write", map[string]string{".kicad_pcb": "old", ".kicad_pro": "old pro", ".kicad_prl": "old prl"},
+			map[string]string{".kicad_pcb": "new"}},
+		{"adds new files", map[string]string{".kicad_pcb": "old"},
+			map[string]string{".kicad_pcb": "new", ".kicad_pro": "new pro", ".kicad_prl": "new prl", ".kicad_dru": "new dru"}},
+		{"no earlier result", nil, map[string]string{".kicad_pcb": "new", ".kicad_pro": "new pro", ".kicad_dru": "new dru"}},
+	} {
+		for k := 0; ; k++ {
+			dir := t.TempDir()
+			src := filepath.Join(dir, "in.kicad_pcb")
+			outStem, tmpStem := filepath.Join(dir, "out"), filepath.Join(dir, "out.pcbpilot-7")
+			writeFiles(t, map[string]string{src: "in"})
+			for ext, v := range c.prev {
+				writeFiles(t, map[string]string{outStem + ext: v})
+			}
+			for ext, v := range c.tmp {
+				writeFiles(t, map[string]string{tmpStem + ext: v})
+			}
+			ops := 0
+			boom := errors.New("injected")
+			fail := func() bool { ops++; return ops == k+1 }
+			commitRename = func(from, to string) error {
+				if fail() {
+					return boom
+				}
+				return rename(from, to)
+			}
+			commitRemove = func(p string) error {
+				if fail() {
+					return boom
+				}
+				return remove(p)
+			}
+			err := commitBoard(src, tmpStem+".kicad_pcb", outStem+".kicad_pcb")
+			if ops <= k { // past the last operation: this was the clean commit
+				if err != nil {
+					t.Fatalf("%s: %v", c.name, err)
+				}
+				if got := readSet(t, outStem); got[".kicad_pcb"] != "new" {
+					t.Fatalf("%s: %v", c.name, got)
+				}
+				if left, _ := filepath.Glob(filepath.Join(dir, "*.bak")); len(left) != 0 {
+					t.Fatalf("%s: %v", c.name, left)
+				}
+				if k == 0 {
+					t.Fatalf("%s: no operation", c.name)
+				}
+				break
+			}
+			if !errors.Is(err, boom) {
+				t.Fatalf("%s op %d: %v", c.name, k, err)
+			}
+			got := readSet(t, outStem)
+			if len(got) != len(c.prev) {
+				t.Fatalf("%s op %d: %v, want %v", c.name, k, got, c.prev)
+			}
+			for ext, v := range c.prev {
+				if got[ext] != v {
+					t.Fatalf("%s op %d: %s = %q, want %q", c.name, k, ext, got[ext], v)
+				}
+			}
+			if left, _ := filepath.Glob(filepath.Join(dir, "*.bak")); len(left) != 0 {
+				t.Fatalf("%s op %d: %v", c.name, k, left)
+			}
+		}
+	}
+}
+
+// When putting back fails too, the previous bytes are still there, and named.
+func TestBridgeCommitBoardRestoreFailureKeepsBackups(t *testing.T) {
+	rename := commitRename
+	defer func() { commitRename = rename }()
+	dir := t.TempDir()
+	outStem, tmpStem := filepath.Join(dir, "out"), filepath.Join(dir, "out.pcbpilot-7")
+	writeFiles(t, map[string]string{filepath.Join(dir, "in.kicad_pcb"): "in", outStem + ".kicad_pcb": "old", outStem + ".kicad_pro": "old pro",
+		tmpStem + ".kicad_pcb": "new", tmpStem + ".kicad_pro": "new pro"})
+	n := 0
+	commitRename = func(from, to string) error {
+		if n++; n == 1 {
+			return rename(from, to) // the project goes in
+		}
+		return errors.New("injected")
+	}
+	err := commitBoard(filepath.Join(dir, "in.kicad_pcb"), tmpStem+".kicad_pcb", outStem+".kicad_pcb")
+	if err == nil || !strings.Contains(err.Error(), "kept as") || !strings.Contains(err.Error(), ".bak") {
+		t.Fatalf("%v", err)
+	}
+	wantFile(t, outStem+".kicad_pcb", "old")
+	left, _ := filepath.Glob(filepath.Join(dir, "*.bak"))
+	found := false
+	for _, p := range left {
+		b, _ := os.ReadFile(p)
+		found = found || string(b) == "old pro"
+	}
+	if !found {
+		t.Fatalf("no backup of the project: %v", left)
+	}
+}
+
+// A committed project file names itself, not the temporary board.
+func TestBridgeCommitBoardNamesProject(t *testing.T) {
+	dir := t.TempDir()
+	outStem, tmpStem := filepath.Join(dir, "out"), filepath.Join(dir, "out.pcbpilot-7")
+	writeFiles(t, map[string]string{filepath.Join(dir, "in.kicad_pcb"): "in", tmpStem + ".kicad_pcb": "new",
+		tmpStem + ".kicad_pro": `{"meta":{"filename":"out.pcbpilot-7.kicad_pro","version":3}}`,
+		tmpStem + ".kicad_prl": `{"meta":{"filename":"out.pcbpilot-7.kicad_prl"}}`})
+	if err := commitBoard(filepath.Join(dir, "in.kicad_pcb"), tmpStem+".kicad_pcb", outStem+".kicad_pcb"); err != nil {
+		t.Fatal(err)
+	}
+	wantFile(t, outStem+".kicad_pro", `{"meta":{"filename":"out.kicad_pro","version":3}}`)
+	wantFile(t, outStem+".kicad_prl", `{"meta":{"filename":"out.kicad_prl"}}`)
 }
 
 // Real pcbnew: an edit through the temporary board gives out a board that loads,
@@ -302,6 +449,21 @@ func TestBridgeEditAtomicKiCadLive(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(dir, "out"+ext)); err != nil {
 			t.Fatal(err)
 		}
+	}
+	var pro struct {
+		Meta struct {
+			Filename string `json:"filename"`
+		} `json:"meta"`
+	}
+	proBytes, err := os.ReadFile(filepath.Join(dir, "out.kicad_pro"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(proBytes, &pro); err != nil {
+		t.Fatal(err)
+	}
+	if pro.Meta.Filename != "out.kicad_pro" || strings.Contains(string(proBytes), "pcbpilot-") {
+		t.Fatalf("meta.filename %q:\n%s", pro.Meta.Filename, proBytes)
 	}
 	rb, err := kt.RulesRead(out)
 	if err != nil {

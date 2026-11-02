@@ -65,7 +65,7 @@ func TestSilkDeferredGate(t *testing.T) {
 		return r, &stderr
 	}
 	r, stderr := run("deferred: routing incomplete (1 unrouted connection(s))", clean)
-	if statusOf(t, r.reg, "silkscreen") != gate.CannotCheck || r.reg.ExitCode() != 5 || r.gates[0].Pass || !strings.Contains(stderr.String(), "CANNOT-CHECK") {
+	if statusOf(t, r.reg, "silkscreen") != gate.CannotCheck || r.reg.ExitCode() != 5 || r.gates[0].Pass || !r.gates[0].CannotCheck || !strings.Contains(stderr.String(), "CANNOT-CHECK") {
 		t.Fatalf("%+v %s", r.reg.Records(), stderr)
 	}
 	if !strings.Contains(r.gates[0].Detail, "routing incomplete") || !strings.Contains(r.gates[0].Items[0], "--silk=on") {
@@ -80,6 +80,54 @@ func TestSilkDeferredGate(t *testing.T) {
 	r, _ = run("", clean)
 	if statusOf(t, r.reg, "silkscreen") != gate.Pass {
 		t.Fatalf("%+v", r.reg.Records())
+	}
+}
+
+// What the gate found wrong stays a failure under deferral; only the deferral
+// itself is unchecked. A waiver of the deferral leaves the failures, and on clean
+// labels passes the gate.
+func TestSilkDeferredGateKeepsFailures(t *testing.T) {
+	const reason = "deferred: routing incomplete (1 unrouted connection(s))"
+	dirty := silkGate(silkTestBoard(part0603("R1", 1000, 1000)), 45, defaultSilkTightOpts()) // label far from its part
+	if dirty.Pass || len(dirty.Items) == 0 {
+		t.Fatalf("the test needs failing labels: %+v", dirty)
+	}
+	clean := gateResult{Gate: "silkscreen", Pass: true, Detail: "ok"}
+	deferral := gateWaiver{Gate: "silkscreen", Match: "silk placement deferred", Reason: "reviewed", By: "test"}
+	run := func(g gateResult, ws ...gateWaiver) (*kicadRun, gateResult) {
+		var stderr bytes.Buffer
+		r := &kicadRun{stderr: &stderr, summary: map[string]any{}, waivers: ws, reg: newGateRegistry(&stderr, ws), silkAutoDeferred: reason}
+		r.addTailGate(g)
+		return r, r.gates[0]
+	}
+	for _, c := range []struct {
+		name   string
+		g      gateResult
+		ws     []gateWaiver
+		status gate.Status
+		exit   int
+		items  int
+	}{
+		{"failures, no waiver", dirty, nil, gate.Fail, 6, len(dirty.Items) + 1},
+		{"failures, deferral waived", dirty, []gateWaiver{deferral}, gate.Fail, 6, len(dirty.Items)},
+		{"clean, no waiver", clean, nil, gate.CannotCheck, 5, 1},
+		{"clean, deferral waived", clean, []gateWaiver{deferral}, gate.Pass, 0, 1},
+	} {
+		r, g := run(c.g, c.ws...)
+		if got := statusOf(t, r.reg, "silkscreen"); got != c.status || r.reg.ExitCode() != c.exit {
+			t.Errorf("%s: status %s exit %d %+v", c.name, got, r.reg.ExitCode(), g)
+		}
+		if c.status != gate.Pass && len(g.Items) != c.items {
+			t.Errorf("%s: items %v", c.name, g.Items)
+		}
+		if c.status == gate.Fail && g.CannotCheck {
+			t.Errorf("%s: %+v", c.name, g)
+		}
+	}
+	// A failure with no items stays unwaivable.
+	r, g := run(gateResult{Gate: "silkscreen", Detail: "broken"}, deferral)
+	if statusOf(t, r.reg, "silkscreen") != gate.Fail || len(g.Items) != 0 {
+		t.Fatalf("%+v", g)
 	}
 }
 
@@ -312,13 +360,17 @@ func TestKicadRoutePostRouteCannotCheckLive(t *testing.T) {
 		return r.reg
 	}
 	reg := run("auto", false)
-	for _, id := range []string{"silkscreen", "router-vias", "via-audit"} {
+	for _, id := range []string{"router-vias", "via-audit"} {
 		if got := statusOf(t, reg, id); got != gate.CannotCheck {
 			t.Errorf("%s: %s", id, got)
 		}
 	}
+	// The fixture's labels fail the gate: that stays a failure, with the deferral beside it.
+	if rec := recordOf(t, reg, "silkscreen"); rec.Status != gate.Fail || len(rec.Unchecked) != 1 || !strings.Contains(rec.Reason, "routing incomplete") {
+		t.Errorf("silkscreen: %+v", rec)
+	}
 	reg = run("auto", true)
-	if got := statusOf(t, reg, "silkscreen"); got == gate.CannotCheck {
-		t.Errorf("--no-silk-place: silkscreen %s", got)
+	if rec := recordOf(t, reg, "silkscreen"); rec.Status == gate.CannotCheck || len(rec.Unchecked) != 0 {
+		t.Errorf("--no-silk-place: silkscreen %+v", rec)
 	}
 }

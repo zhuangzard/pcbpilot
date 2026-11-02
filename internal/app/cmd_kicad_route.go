@@ -647,7 +647,7 @@ func (r *kicadRun) run() error {
 		if !ok && c.Name == routerTracemaker && !c.retried && gateFailed(r.gates, "intent-widths") {
 			if nets := r.narrowIntentNets(nb); len(nets) > 0 {
 				c.retried, c.noNeck = true, nets
-				first, firstBoard, firstOut, firstPass := c.Res, c.Board, board, ok
+				first, firstBoard, firstOut, firstPass, firstProv := c.Res, c.Board, board, ok, c.prov
 				fmt.Fprintf(r.stderr, "router %s: %d net(s) narrower than intent outside the pad zone; routing again without neck-down on them\n", c.Name, len(nets))
 				if err := r.rerunCandidate(c); err == nil {
 					if b2, err := c.commit(c.Res); err == nil {
@@ -662,7 +662,7 @@ func (r *kicadRun) run() error {
 						// power net that no longer fits leaves more connections unrouted.
 						if !ok {
 							fmt.Fprintf(r.stderr, "router %s: the no-neck-down round did not pass either (%d unrouted vs %d); keeping the first result\n", c.Name, c.Res.UnroutedCount, first.UnroutedCount)
-							c.Res, c.Board = first, firstBoard
+							c.Res, c.Board, c.prov = first, firstBoard, firstProv
 							r.useCandidate(c, cands)
 							if nb3, ok3, err := r.postRoute(firstBoard, inSnap); err == nil {
 								board, pass, c.FullPass, ok = nb3, ok3, ok3, ok3
@@ -1160,14 +1160,26 @@ func (r *kicadRun) silkDecision() (reason string, auto bool, budget time.Duratio
 }
 
 // silkDeferredGate: the silkscreen gate of a board whose labels --silk=auto did
-// not place is cannot-check, even when the labels as routed are clean.
+// not place is not satisfied, even when the labels as routed are clean: the
+// deferral is one more item that could not be judged, and what the gate found
+// wrong on the board stays a failure.
 func silkDeferredGate(g gateResult, reason string) gateResult {
 	if g.Gate != "silkscreen" {
 		return g
 	}
-	g.Items = append([]string{"silk placement " + reason + "; route the rest, or place anyway with --silk=on"}, g.Items...)
-	g.Detail = "cannot check: silk placement " + reason + "; labels as routed: " + g.Detail
-	g.Pass, g.CannotCheck, g.Waived, g.Unchecked = false, true, nil, append([]string{}, g.Items...)
+	if !g.Pass && len(g.Items) == 0 { // a failure without items is never waivable: keep it so
+		g.Detail = "silk placement " + reason + "; " + g.Detail
+		return g
+	}
+	item := "silk placement " + reason + "; route the rest, or place anyway with --silk=on"
+	if g.Pass {
+		g.Detail = "cannot check: silk placement " + reason + "; labels as routed: " + g.Detail
+		g.CannotCheck = true
+	} else {
+		g.Detail = "silk placement " + reason + "; labels as routed: " + g.Detail
+	}
+	g.Items = append([]string{item}, g.Items...)
+	g.Pass, g.Unchecked = false, []string{item}
 	return g
 }
 
@@ -1175,6 +1187,7 @@ func silkDeferredGate(g gateResult, reason string) gateResult {
 func (r *kicadRun) addTailGate(g gateResult) {
 	if r.silkAutoDeferred != "" {
 		g = silkDeferredGate(g, r.silkAutoDeferred)
+		applyWaivers(&g, r.waivers) // tailGates waived the rest, not this item
 	}
 	r.gates = append(r.gates, g)
 	// D3: register on the registry (which handles stderr).

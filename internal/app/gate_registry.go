@@ -47,8 +47,6 @@ func newGateRegistry(stderr io.Writer, waivers []gateWaiver) *gateRegistry {
 
 // Add applies waivers, prints the gate to stderr, and appends the record.
 func (reg *gateRegistry) Add(g GateRecord) {
-	// Fill legacy fields.
-	g.Gate, g.Pass, g.Detail = g.ID, g.Status.OK(), g.Reason
 	// Fill board SHA from current if not set.
 	if g.BoardSHA == "" && g.Scope == "board" {
 		g.BoardSHA = reg.boardSHA
@@ -56,13 +54,18 @@ func (reg *gateRegistry) Add(g GateRecord) {
 	// Apply waivers through the legacy adapter.
 	legacy := GateRecord2gateResult(g)
 	applyWaivers(&legacy, reg.waivers)
-	if legacy.Pass && !g.Pass {
+	g.Items, g.Unchecked, g.Waived, g.Reason = legacy.Items, legacy.Unchecked, legacy.Waived, legacy.Detail
+	switch {
+	case legacy.Pass && !g.Status.OK():
 		// Waivers turned a fail into a pass.
-		g.Status = gate.Pass
-		g.Waived = legacy.Waived
-		g.Items = nil
+		g.Status, g.Items = gate.Pass, nil
+	case legacy.CannotCheck:
+		g.Status = gate.CannotCheck
+	case g.Status == gate.CannotCheck && !legacy.Pass:
+		g.Status = gate.Fail
 	}
-	g.Pass = g.Status.OK()
+	// Fill legacy fields.
+	g.Gate, g.Pass, g.Detail = g.ID, g.Status.OK(), g.Reason
 	reg.records = append(reg.records, g)
 	// stderr: unified format for every gate.
 	mark := statusMark(g.Status)
@@ -162,7 +165,7 @@ func toRecord(g gateResult, evidence []string, scope string, dur time.Duration) 
 func toRecordCC(g gateResult, reason string, evidence []string, scope string) GateRecord {
 	return GateRecord{
 		ID: g.Gate, Status: gate.CannotCheck, Reason: reason,
-		Items: g.Items, Info: g.Info,
+		Items: g.Items, Unchecked: g.Unchecked, Info: g.Info,
 		Evidence: evidence, Scope: scope,
 	}
 }
@@ -172,6 +175,7 @@ func GateRecord2gateResult(g GateRecord) gateResult {
 	return gateResult{
 		Gate: g.ID, Pass: g.Status.OK(), Detail: g.Reason,
 		Items: g.Items, Waived: g.Waived, Info: g.Info,
+		CannotCheck: g.Status == gate.CannotCheck, Unchecked: g.Unchecked,
 	}
 }
 

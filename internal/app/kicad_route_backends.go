@@ -113,6 +113,7 @@ func (r *kicadRun) rerunCandidate(c *routeCandidate) error {
 // gate and the report read).
 func (r *kicadRun) useCandidate(c *routeCandidate, all []*routeCandidate) {
 	r.route = c.Res
+	r.viaProv = c.prov // the provenance of this candidate's board, not the last one committed
 	r.summary["router"] = c.Name
 	r.summary["routeResult"] = c.Res
 	fmt.Fprintf(r.stderr, "router %s: running the full gates on its result (%d unrouted)\n", c.Name, c.Res.UnroutedCount)
@@ -185,6 +186,7 @@ func (r *kicadRun) fastrouteCandidate(classed, dsnPath string) *routeCandidate {
 		// run): each router via goes to its own net's class via.
 		// Every failure to size them is a router-vias gate on this result.
 		imported, res.Gates = r.routerViasToClass(classed, imported)
+		c.prov = r.viaProv
 		return r.addEscapes(imported, ses)
 	}
 	return c
@@ -244,6 +246,7 @@ func (r *kicadRun) tracemakerCandidate(classed string, reqs map[string]kicad.Net
 		if _, err := r.kt.Fill(board); err != nil {
 			return "", fmt.Errorf("zone refill after tracemaker: %w", err)
 		}
+		c.prov, res.Gates = reconcileCandidateVias(r.kt, classed, board, viaFromTracemaker, r.summary)
 		r.summary["tracemaker"] = map[string]any{"bin": o.tm.bin, "constraints": cons, "report": report, "result": res}
 		return board, nil
 	}

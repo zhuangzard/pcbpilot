@@ -286,3 +286,63 @@ func TestViaRepairDRCBaselineIdentityAcrossEditKiCadLive(t *testing.T) {
 		t.Fatalf("the same board's violations look new after an unrelated edit: %v\nbase %+v\npost %+v", d, base.Violations, post.Violations)
 	}
 }
+
+// The TraceMaker candidate's commit on real KiCad, with the board it would have
+// written: an off-size input via stays input, the via it added is its own and
+// off-size is judged, whether or not its uuids survive. Needs PCBPILOT_KICAD_LIVE=1.
+func TestTracemakerCommitViaProvenanceKiCadLive(t *testing.T) {
+	pcb, kt := viaLiveBoard(t, `{"board":{"design_settings":{"rules":{"min_via_annular_width":0.05,"min_through_hole_diameter":0.15,"min_via_diameter":0.3,"min_clearance":0.1}}},
+ "net_settings":{"classes":[{"name":"Default","clearance":0.2,"track_width":0.25,"via_diameter":0.6,"via_drill":0.3,"priority":2147483647}]},
+ "meta":{"filename":"vias.kicad_pro","version":3}}`)
+	dir := filepath.Dir(pcb)
+	r := &kicadRun{kt: kt, work: dir, summary: map[string]any{}, stderr: os.Stderr, o: kicadRouteOpts{outDir: dir}}
+	in, _, err := r.snapshot(pcb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bb := in.Outline.BBox
+	x, y := bb.MinX+60, bb.MinY+60
+	classed := filepath.Join(dir, "classed.kicad_pcb")
+	if _, err := kt.Edit(pcb, map[string]any{"addVias": []map[string]any{{"net": "VCC", "x": x, "y": y, "diameter": 900 / 25.4, "drill": 500 / 25.4}}}, classed); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "tracemaker"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := kt.Edit(classed, map[string]any{"addVias": []map[string]any{{"net": "A", "x": x + 100, "y": y, "diameter": 800 / 25.4, "drill": 400 / 25.4}}}, filepath.Join(dir, "tracemaker", "out.kicad_pcb")); err != nil {
+		t.Fatal(err)
+	}
+	c := r.tracemakerCandidate(classed, nil, 0)
+	c.Res = &routeResult{Router: routerTracemaker}
+	board, err := c.commit(c.Res)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Res.Gates) != 0 {
+		t.Fatalf("%+v", c.Res.Gates)
+	}
+	r.useCandidate(c, nil)
+	snap, _, err := r.snapshot(board)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := r.viaAuditGate(board, snap)
+	vias, err := snapshotVias(snap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	of := r.viaProvenanceOf()
+	for _, v := range vias {
+		want := viaFromInput
+		if v.Net == "A" {
+			want = viaFromTracemaker
+		}
+		if got := of(v); got != want {
+			t.Errorf("via on %s: %s, want %s", v.Net, got, want)
+		}
+	}
+	// The off-size input via is reported; the off-size TraceMaker via fails.
+	if g.Pass || g.CannotCheck || len(g.Items) != 1 || !strings.Contains(g.Items[0], viaFromTracemaker) || len(g.Info) != 1 {
+		t.Fatalf("%+v", g)
+	}
+}
