@@ -59,6 +59,7 @@ func (r *kicadRun) routeBackends(classed string, reqs map[string]kicad.NetRequir
 	if err != nil {
 		return nil, err
 	}
+	r.dsnPath = dsnPath // D5: saved for route instrumentation
 	var cands []*routeCandidate
 	if o.router != routerTracemaker {
 		cands = append(cands, r.fastrouteCandidate(classed, dsnPath))
