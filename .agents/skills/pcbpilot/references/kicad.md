@@ -498,8 +498,16 @@ pcbpilot kicad route --pcb board-b-v5a.kicad_pcb --intent intent.json --sim sim.
    一个过孔（自动布线仍按各类 `use_via`，已实测）：所有类过孔里最大的直径**和**最大的孔径（类 0.8/0.2 与 0.7/0.4 → 0.8/0.4；没有这样的类就按 KiCad 的命名
    `Via[…]_<径>:<孔>_um` 加一个 padstack，SES 导入时 KiCad 从名字读孔径——实测导入为 0.8/0.4），作为列表里唯一的过孔（`summary.routerViaPadstack`、
    `dsnViaOrder`）。导入后每个布线器过孔**缩**到它所在网的有效类过孔（KiCad 回读；bridge edit `setVia`，`summary.routerVias`）：
-   两个尺寸都只缩不放，fastroute 按大过孔留的间距都还在，每个类过孔（含它自己的环宽）都缩得到。缩不到类过孔的（某一维比类小）
-   判 `router-vias` 失败，网没有有效类过孔的判 cannot-check——都不会悄悄跳过。
+   两个尺寸都只缩不放，fastroute 按大过孔留的间距都还在，每个类过孔（含它自己的环宽）都缩得到。
+   **小数 µm 的过孔名**：KiCad 导出 24 mil 类时名字是 `…_609.6:304.8_um`，fastroute 不认这种 `use_via`，该类的过孔会落到 DSN 里最小的类过孔
+   （实板 128 个全是 600:300）。所以 route 先把所有带小数的过孔 padstack（名字、圆、所有引用）**向上取整到整 µm**（609.6:304.8 → 610:305），导入后再缩回类过孔；名字全是整数的 DSN 一字不变。
+   **导入的孔径**：名字等于 Default 类过孔时，KiCad 不读名字里的孔径，改用该网类的孔径——600:300 落在 0.7/0.4 类的网上就是 0.6/0.4，环宽 0.10 mm，违规。
+   **放大只作为修复**：缩不到类过孔的（某一维比类小）每个过孔单独做一次候选，同一事务里先查几何（对其他网的线、过孔、焊盘的外接圆），写板后跑 KiCad DRC，DRC 点名的过孔退出并重试一次，仍不过就整事务丢弃；被拒的过孔保持原样，
+   带证据判 `router-vias` 失败（缺净距规则等判 cannot-check），成功的列在 gate Info 和 `summary.routerVias.grownToClass`。不拆线、不循环。网没有有效类过孔的判 cannot-check——都不会悄悄跳过。
+   **`via-audit` 门禁**（只读，所有几何步骤之后）：最终板上每个过孔一行写入 `via-audit.json`：网、解析出的类、跨层、径/孔/环宽、来源（input / router / router-repaired / escape / via-array / unknown）、违反的约束。
+   制造合法性（环宽、孔、径 对板子最小值、自定义规则和合同）与首选尺寸（类过孔）分开判：不合法一律失败，输入板已有的过孔也失败但绝不改；尺寸不符只有 input（列在 Info）和声明的例外放行，
+   route 自己的意图逃逸过孔是内建的 neckdown-escape 例外（列在 Info）。`--via-policy FILE`（JSON：`contract` 合同路径；`exceptions` 每项 `kind` = neckdown-escape / stitching（要 `nets`，只免首选尺寸）或 microvia / blind-buried（要 `minDrillMm`、`minAnnularMm`，非通孔按它判合法性），都要 `reason`）。
+   来源 unknown 不享受任何例外；未声明的非通孔、带条件或数值读不出的 via_diameter / hole_size / annular_width 自定义规则判 cannot-check。
    **DRC 时限**：kicad-cli DRC 的时限按板文件大小放大（15 min + 每 MB 2 min，最多 2 h；`PCBPILOT_KICAD_DRC_TIMEOUT` 覆盖），
    超时报 `kicad-cli pcb drc on <板> timed out after <时限>`。铺铜后的 starved-thermal 修复、widen 的 DRC 回退是可选步骤：
    它们的 DRC 没跑成（超时）时记一个 cannot-check 门禁（`starved-thermals` / `widen-drc`），照样写 routed 板、跑其余门禁，

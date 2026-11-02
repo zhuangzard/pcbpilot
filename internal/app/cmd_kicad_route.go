@@ -59,6 +59,7 @@ type kicadRouteOpts struct {
 	noSilkPlace             bool
 	pourCredit              bool
 	noManual                bool
+	viaPolicy               string
 	projectConfig           string
 	requirements            []string
 	reviewers               string
@@ -178,6 +179,7 @@ Exits non-zero when any gate fails; --waivers takes signed {gate,match,reason,by
 	f.Float64Var(&o.rules.ClearanceMil, "clearance-mil", 0, "board minimum clearance + Default netclass clearance (default for a board without .kicad_pro: intent copper.clearanceMil)")
 	f.Float64Var(&o.rules.TrackMil, "track-mil", 0, "Default netclass track width; refused below the board minimum (--min-track-mil, else the project's)")
 	f.Float64Var(&o.rules.MinTrackMil, "min-track-mil", 0, "board minimum track width (default for a board without .kicad_pro: intent copper.minTrackMil)")
+	f.StringVar(&o.viaPolicy, "via-policy", "", "JSON: declared via exceptions (microvia, blind-buried, neckdown-escape, stitching) and an optional fab contract for the final via-audit gate")
 	f.Float64Var(&o.rules.ViaDiaMil, "via-dia-mil", 0, "Default netclass via diameter (default without .kicad_pro: intent copper.viaDiaMil); refused below the project's min via diameter / annular ring")
 	f.Float64Var(&o.rules.ViaDrillMil, "via-drill-mil", 0, "Default netclass via drill (default without .kicad_pro: intent copper.viaDrillMil); refused below the project's min through-hole")
 	f.Float64Var(&o.rules.EdgeMil, "edge-mil", 0, "copper-to-board-edge clearance (default without .kicad_pro: max(intent edge.outerMil, edge.innerMil))")
@@ -205,6 +207,7 @@ const noReviewMatch = "--no-review"
 
 // kicadRun is one kicad route execution.
 type kicadRun struct {
+	viaProv *viaProvenance // which via came from where (kicad_route_via_audit.go)
 	// stepGates: cannot-check gates from post-route steps whose own check
 	// did not run (postRoute resets them, qualityGates reports them).
 	stepGates []gateResult
@@ -1172,6 +1175,7 @@ func (r *kicadRun) qualityGates(board string) (bool, error) {
 		r.add(padNetDiffGate(r.netlist.PinNets(), boardPinNets(snap), o.sch, filepath.Join(o.outDir, "net-diff.json")))
 	}
 	r.add(kicadIntentRulesGate(raw, r.classes))
+	r.add(r.viaAuditGate(routed, snap))
 
 	qo := qualityGateOpts{intent: o.intent, sim: o.sim, outDir: o.outDir, waivers: r.waivers, widthBasis: o.widthBasis,
 		source: "kicad route (" + routed + ")", silk: o.silk, noManual: o.noManual, projectConfig: o.projectConfig,

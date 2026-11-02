@@ -110,6 +110,14 @@ type fakeViaTools struct {
 	edited map[string]any
 	// before / after replace the snapshots' JSON when set.
 	before, after string
+	// rb replaces the class readback, drc / drcErr answer DRC (repair path).
+	rb     *kicad.RulesReadback
+	drc    *kicad.DRCReport
+	drcErr error
+}
+
+func (f *fakeViaTools) DRC(pcb, out string) (*kicad.DRCReport, error) {
+	return f.drc, f.drcErr
 }
 
 func (f *fakeViaTools) Snapshot(pcb string) ([]byte, error) {
@@ -131,6 +139,9 @@ func (f *fakeViaTools) Snapshot(pcb string) ([]byte, error) {
 func (f *fakeViaTools) RulesRead(pcb string) (*kicad.RulesReadback, error) {
 	if f.failOn == "rules-read" {
 		return nil, errors.New("bridge rules-read failed")
+	}
+	if f.rb != nil {
+		return f.rb, nil
 	}
 	return &kicad.RulesReadback{Nets: map[string]kicad.EffectiveNM{"A": {ViaDiameter: 800000, ViaDrill: 200000}}}, nil
 }
