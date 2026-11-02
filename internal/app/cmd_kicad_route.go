@@ -1214,8 +1214,10 @@ func (r *kicadRun) silkPlaceWith(t silkTools, board string, budget time.Duration
 		opt.deadline = silkStart.Add(budget)
 	}
 	stoppedAt := ""
+	// By the clock as well: the planners stop by it, and the context's timer may
+	// not have fired yet when they return an incomplete plan.
 	expired := func(at string) bool {
-		if ctx.Err() == nil {
+		if ctx.Err() == nil && !opt.expired() {
 			return false
 		}
 		stoppedAt = at
