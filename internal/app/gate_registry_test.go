@@ -451,7 +451,7 @@ func TestRouteCannotCheckExitCodes(t *testing.T) {
 }
 
 // A kicad-cli DRC that did not run is cannot-check on the registry.
-func TestKicadDRCCannotCheckRecord(t *testing.T) {
+func TestGateKicadDRCCannotCheckRecord(t *testing.T) {
 	var stderr bytes.Buffer
 	r := &kicadRun{stderr: &stderr, summary: map[string]any{}, reg: newGateRegistry(&stderr, nil)}
 	r.add(kicadDRCCannotCheck(errors.New("timed out")))

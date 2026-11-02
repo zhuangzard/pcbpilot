@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zhuangzard/pcbpilot/internal/gate"
 	"github.com/zhuangzard/pcbpilot/internal/kicad"
 )
 
@@ -108,7 +110,11 @@ func TestRepairRouterVias(t *testing.T) {
 	}{
 		{"grown", fakeRepairTools(farTrack, &kicad.DRCReport{}, nil), "vias-repair.kicad_pcb", true, "grown"},
 		{"geometry refuses", fakeRepairTools(nearTrack, &kicad.DRCReport{}, nil), "imported", false, "mil to a track of B"},
-		{"DRC names the via", fakeRepairTools(farTrack, &kicad.DRCReport{Violations: []kicad.Violation{{Rule: "clearance", Message: "too close", Objs: []string{"v1"}}}}, nil), "imported", false, "DRC: clearance"},
+		{"DRC names the via", func() *fakeViaTools {
+			f := fakeRepairTools(farTrack, &kicad.DRCReport{Violations: []kicad.Violation{{Rule: "clearance", Message: "too close", Objs: []string{"v1"}}}}, nil)
+			f.base = &kicad.DRCReport{}
+			return f
+		}(), "imported", false, "DRC: clearance"},
 		{"DRC cannot run", fakeRepairTools(farTrack, nil, errors.New("kicad-cli died")), "imported", false, "cannot check: DRC"},
 	}
 	for _, c := range cases {
@@ -136,10 +142,25 @@ func TestRepairRouterVias(t *testing.T) {
 func TestRepairRouterViasDRCBaseline(t *testing.T) {
 	next := func(s string) string { return s + ".kicad_pcb" }
 	farTrack := `{"primitiveId":"t","net":"B","layer":1,"startX":200,"startY":200,"endX":300,"endY":200,"lineWidth":8}`
-	neighbour := kicad.Violation{Rule: "clearance", Message: "actual 0.1 mm", Objs: []string{"t", "p9"}}
+	neighbour := kicad.Violation{Rule: "clearance", Message: "Clearance violation (netclass 'A' clearance 0.2000 mm; actual 0.1000 mm)", Objs: []string{"t", "p9"}}
 	rep := func(vs ...kicad.Violation) *kicad.DRCReport { return &kicad.DRCReport{Violations: vs} }
 	worse := neighbour
-	worse.Message = "actual 0.05 mm"
+	worse.Message = "Clearance violation (netclass 'A' clearance 0.2000 mm; actual 0.0500 mm)"
+	better := neighbour
+	better.Message = "Clearance violation (netclass 'A' clearance 0.2000 mm; actual 0.1500 mm)"
+	reworded := neighbour
+	reworded.Message = "Clearance violation (netclass 'B' clearance 0.2000 mm; actual 0.1000 mm)"
+	relimit := neighbour
+	relimit.Message = "Clearance violation (netclass 'A' clearance 0.1000 mm; actual 0.0900 mm)"
+	viaOwn := kicad.Violation{Rule: "clearance", Message: "Clearance violation (netclass 'A' clearance 0.2000 mm; actual 0.1000 mm)", Objs: []string{"v1", "t"}}
+	viaOwnWorse := viaOwn
+	viaOwnWorse.Message = "Clearance violation (netclass 'A' clearance 0.2000 mm; actual 0.0500 mm)"
+	viaOwnBetter := viaOwn
+	viaOwnBetter.Message = "Clearance violation (netclass 'A' clearance 0.2000 mm; actual 0.1500 mm)"
+	ring := kicad.Violation{Rule: "annular_width", Message: "Annular width (board setting min 0.1300 mm; actual 0.1000 mm)", Objs: []string{"v1"}}
+	reversed := viaOwn
+	reversed.Objs = []string{"t", "v1"}
+	noObjs := kicad.Violation{Rule: "items_not_allowed", Message: "somewhere"}
 	unconn := kicad.Violation{Rule: "unconnected_items", Section: "unconnected_items", Message: "open"}
 	for _, c := range []struct {
 		name       string
@@ -151,7 +172,18 @@ func TestRepairRouterViasDRCBaseline(t *testing.T) {
 		{"new, neighbour only", rep(), rep(neighbour), "imported", false, "naming no grown via"},
 		{"already on the board", rep(neighbour), rep(neighbour), "vias-repair.kicad_pcb", true, "grown"},
 		{"one more of the same", rep(neighbour), rep(neighbour, neighbour), "imported", false, "naming no grown via"},
-		{"worse than before", rep(neighbour), rep(worse), "imported", false, "naming no grown via"},
+		{"worse than before", rep(neighbour), rep(worse), "imported", false, "worse than: Clearance"},
+		{"better than before", rep(neighbour), rep(better), "vias-repair.kicad_pcb", true, "grown"},
+		{"text changed, same measurement", rep(neighbour), rep(reworded), "vias-repair.kicad_pcb", true, "grown"},
+		{"limit changed fails closed", rep(neighbour), rep(relimit), "imported", false, "worse than: Clearance"},
+		{"baseline names the candidate, unchanged", rep(viaOwn), rep(viaOwn), "vias-repair.kicad_pcb", true, "grown"},
+		{"same objects in another order", rep(viaOwn), rep(reversed), "vias-repair.kicad_pcb", true, "grown"},
+		{"baseline names the candidate, better", rep(viaOwn), rep(viaOwnBetter), "vias-repair.kicad_pcb", true, "grown"},
+		{"baseline names the candidate, worse", rep(viaOwn), rep(viaOwnWorse), "imported", false, "DRC: clearance"},
+		{"new, names the candidate", rep(), rep(viaOwn), "imported", false, "DRC: clearance"},
+		{"the repair clears one", rep(ring), rep(), "vias-repair.kicad_pcb", true, "grown"},
+		{"no objects, new", rep(), rep(noObjs), "imported", false, "naming no grown via"},
+		{"no objects, unchanged", rep(noObjs), rep(noObjs), "vias-repair.kicad_pcb", true, "grown"},
 		{"unconnected is not the repair's", rep(), rep(unconn), "vias-repair.kicad_pcb", true, "grown"},
 	} {
 		f := fakeRepairTools(farTrack, c.post, nil)
@@ -192,6 +224,29 @@ func TestRepairRouterViasRetryWithoutNamedVia(t *testing.T) {
 	board, gates := sizeRouterVias(f, "classed", "imported", func(s string) string { return s + ".kicad_pcb" }, map[string]any{}, io.Discard)
 	if board != "vias-repair.kicad_pcb" || len(gates) != 1 || gates[0].Pass || gates[0].CannotCheck || len(gates[0].Items) != 1 || !strings.Contains(gates[0].Items[0], "DRC: clearance") || len(gates[0].Info) != 1 {
 		t.Fatalf("%s %+v", board, gates)
+	}
+}
+
+func TestViaRepairDRCWorsened(t *testing.T) {
+	m := func(limit, actual string) string { return "x (clearance " + limit + " mm; actual " + actual + " mm)" }
+	for _, c := range []struct {
+		was, now string
+		want     bool
+	}{
+		{m("0.2000", "0.1000"), m("0.2000", "0.0999"), true},
+		{m("0.2000", "0.1000"), m("0.2000", "0.1000"), false},
+		{m("0.2000", "0.1000"), m("0.2000", "0.1500"), false},
+		{m("0.2000", "0.1000"), m("0.20", "0.10"), false},                        // formatted differently
+		{"x (max 5.0 mm; actual 6.0 mm)", "x (max 5.0 mm; actual 7.0 mm)", true}, // a maximum
+		{"x (max 5.0 mm; actual 6.0 mm)", "x (max 5.0 mm; actual 5.5 mm)", false},
+		{m("0.2000", "0.1000"), "x (clearance 7.8 mil; actual 3.9 mil)", true}, // unit changed
+		{m("0.2000", "0.1000"), "no measurement", true},
+		{"no measurement", m("0.2000", "0.1000"), true},
+		{"words", "other words", false},
+	} {
+		if got := drcWorsened(c.was, c.now); got != c.want {
+			t.Errorf("%q -> %q: %v", c.was, c.now, got)
+		}
 	}
 }
 
@@ -354,6 +409,149 @@ func TestAuditViasPreferredToleranceBoundary(t *testing.T) {
 		if a.Rows[0].Preferred != c.want || (len(a.NonConform) > 0) != (c.want == "differs") {
 			t.Errorf("%v/%v: %+v", c.d, c.h, a.Rows[0])
 		}
+	}
+}
+
+// A drill that leaves no copper is a known failure on any span, with the span's
+// cannot-check evidence kept beside it.
+func TestAuditViasDrillNotSmallerOnUnknownSpan(t *testing.T) {
+	from := func(p string) func(routeVia) string { return func(routeVia) string { return p } }
+	for name, c := range map[string]struct {
+		dia, drill float64
+		from, to   int
+		prov       string
+	}{
+		"span unknown":              {300, 300, 0, 0, viaFromRouter},
+		"span unknown, larger":      {300, 400, 0, 0, viaFromRouter},
+		"undeclared non-through":    {300, 300, 1, 15, viaFromRouter},
+		"unknown provenance":        {300, 300, 0, 0, viaFromUnknown},
+		"input board, span unknown": {300, 300, 0, 2, viaFromInput},
+	} {
+		v := auditVia("v", "SIG", c.dia, c.drill)
+		v.From, v.To = c.from, c.to
+		a := auditVias([]routeVia{v}, auditRB(), viaLimits{}, from(c.prov), viaPolicy{})
+		if a.Rows[0].Legal != "no" || len(a.Illegal) != 1 || len(a.CannotCheck) != 1 {
+			t.Errorf("%s: %+v", name, a)
+		}
+		g := gateResult{Gate: "via-audit"}
+		viaAuditVerdict(&g, a)
+		var stderr bytes.Buffer
+		r := &kicadRun{stderr: &stderr, summary: map[string]any{}, reg: newGateRegistry(&stderr, nil)}
+		r.add(g)
+		if r.reg.ExitCode() != 6 || !strings.Contains(strings.Join(g.Items, "|"), "not smaller") || len(g.Unchecked) != 1 {
+			t.Errorf("%s: exit %d %+v", name, r.reg.ExitCode(), g)
+		}
+	}
+	// The minimums still wait for limits that apply: no made-up failure.
+	v := auditVia("v", "SIG", 300, 100)
+	v.From, v.To = 0, 0
+	a := auditVias([]routeVia{v}, auditRB(), viaLimits{drill: 250000}, from(viaFromRouter), viaPolicy{})
+	if a.Rows[0].Legal != "cannot-check" || len(a.Illegal) != 0 {
+		t.Fatalf("%+v", a)
+	}
+}
+
+// Legality uses the sizing step's 100 nm: a via it calls the class via is not
+// below a manufacturing minimum that equals that class via.
+func TestAuditViasLegalityToleranceBoundary(t *testing.T) {
+	via := func(dia, drill int64) routeVia {
+		return routeVia{ID: "v", Net: "GND", Dia: float64(dia) / nmPerMil, Drill: float64(drill) / nmPerMil, From: 1, To: 2}
+	}
+	prov := func(routeVia) string { return viaFromRouter }
+	for _, c := range []struct {
+		name       string
+		dia, drill int64
+		lim        viaLimits
+		legal      string
+	}{
+		{"diameter at", 700000, 400000, viaLimits{diameter: 700000}, "yes"},
+		{"diameter 100 under", 699900, 400000, viaLimits{diameter: 700000}, "yes"},
+		{"diameter 101 under", 699899, 400000, viaLimits{diameter: 700000}, "no"},
+		{"drill 50 under", 700000, 399950, viaLimits{drill: 400000}, "yes"},
+		{"drill 100 under", 700000, 399900, viaLimits{drill: 400000}, "yes"},
+		{"drill 101 under", 700000, 399899, viaLimits{drill: 400000}, "no"},
+		{"annular 100 under", 700000, 400000, viaLimits{annular: 150100}, "yes"},
+		{"annular 101 under", 700000, 400000, viaLimits{annular: 150101}, "no"},
+	} {
+		a := auditVias([]routeVia{via(c.dia, c.drill)}, auditRB(), c.lim, prov, viaPolicy{})
+		if a.Rows[0].Legal != c.legal || (len(a.Illegal) > 0) != (c.legal == "no") {
+			t.Errorf("%s: %+v %v", c.name, a.Rows[0], a.Illegal)
+		}
+		// The sizing step agrees on the same via, for a class equal to the minimum.
+		short := []routeVia{via(c.dia, c.drill)}
+		if c.lim.annular == 0 {
+			cd, ch := max(c.lim.diameter, c.dia), max(c.lim.drill, c.drill)
+			if got := len(viaGrowCandidates(short, nil, func(string) (int64, int64, bool) { return cd, ch, true })) == 0; got != (c.legal == "yes") {
+				t.Errorf("%s: sizing says reachable=%v, audit %s", c.name, got, c.legal)
+			}
+		}
+	}
+}
+
+// A partial waiver recomputes the status from what is left, through r.add.
+func TestViaAuditPartialWaiver(t *testing.T) {
+	spanless := auditVia("span", "SIG", 600, 300)
+	spanless.From, spanless.To = 0, 0
+	ring := auditVia("ring", "GND", 600, 400)
+	a := auditVias([]routeVia{spanless, ring}, auditRB(), viaLimits{annular: 130000}, func(routeVia) string { return viaFromRouter }, viaPolicy{})
+	if len(a.Illegal) != 1 || len(a.CannotCheck) != 1 {
+		t.Fatalf("%+v", a)
+	}
+	base := gateResult{Gate: "via-audit"}
+	viaAuditVerdict(&base, a)
+	run := func(ws ...gateWaiver) (*kicadRun, gateResult) {
+		var stderr bytes.Buffer
+		r := &kicadRun{stderr: &stderr, summary: map[string]any{}, waivers: ws, reg: newGateRegistry(&stderr, ws)}
+		g := base
+		r.add(g)
+		return r, r.gates[0]
+	}
+	w := func(match string) gateWaiver {
+		return gateWaiver{Gate: "via-audit", Match: match, Reason: "reviewed", By: "test"}
+	}
+	for _, c := range []struct {
+		name   string
+		ws     []gateWaiver
+		status gate.Status
+		exit   int
+		left   int
+	}{
+		{"no waiver", nil, gate.Fail, 6, 3},
+		{"every failure waived, unknown span left", []gateWaiver{w("break"), w("ring"), w("short"), w(short12("ring"))}, gate.CannotCheck, 5, 1},
+		{"unknown span waived, failures left", []gateWaiver{w("via span unknown")}, gate.Fail, 6, 2},
+		{"one of two failures waived", []gateWaiver{w("annular ring")}, gate.Fail, 6, 2},
+		{"all waived", []gateWaiver{w(" via ")}, gate.Pass, 0, 0},
+	} {
+		r, g := run(c.ws...)
+		if got := statusOf(t, r.reg, "via-audit"); got != c.status || r.reg.ExitCode() != c.exit {
+			t.Errorf("%s: status %s exit %d %+v", c.name, got, r.reg.ExitCode(), g)
+		}
+		if c.status != gate.Pass && len(g.Items) != c.left {
+			t.Errorf("%s: left %v", c.name, g.Items)
+		}
+		if g.CannotCheck != (c.status == gate.CannotCheck) {
+			t.Errorf("%s: CannotCheck %v", c.name, g.CannotCheck)
+		}
+		if c.ws != nil && len(g.Waived) == 0 {
+			t.Errorf("%s: nothing recorded as waived: %+v", c.name, g)
+		}
+	}
+}
+
+// The same through router-vias: a known failure and a via without a class via.
+func TestRouterViasPartialWaiver(t *testing.T) {
+	gate1 := problemGates(func(pass bool, detail string, items ...string) []gateResult {
+		return []gateResult{{Gate: "router-vias", Pass: pass, Detail: detail, Items: items}}
+	}, []string{"A via 1: cannot be shrunk"}, []string{"NOCLASS via 2: no class via"})
+	if len(gate1) != 1 || gate1[0].CannotCheck {
+		t.Fatalf("%+v", gate1)
+	}
+	var stderr bytes.Buffer
+	ws := []gateWaiver{{Gate: "router-vias", Match: "A via 1", Reason: "reviewed", By: "test"}}
+	r := &kicadRun{stderr: &stderr, summary: map[string]any{}, waivers: ws, reg: newGateRegistry(&stderr, ws)}
+	r.add(gate1[0])
+	if r.reg.ExitCode() != 5 || !r.gates[0].CannotCheck || len(r.gates[0].Items) != 1 {
+		t.Fatalf("exit %d %+v", r.reg.ExitCode(), r.gates[0])
 	}
 }
 

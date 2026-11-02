@@ -12,7 +12,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"regexp"
+	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/zhuangzard/pcbpilot/internal/kicad"
@@ -196,8 +199,8 @@ func repairRouterVias(t routerViaTools, board string, cands []viaGrow, rb *kicad
 			allUnchecked(pass, fmt.Sprintf("DRC of the repaired board: %v", err))
 			return board, res
 		}
-		bad := viasNamedByDRC(rep, pass)
 		fresh := newDRCViolations(base, rep)
+		bad := viasNamedByDRC(fresh, pass)
 		if len(bad) == 0 && len(fresh) > 0 {
 			// A violation on a neighbour only: no way to tell which via caused
 			// it, so none of them is kept.
@@ -230,49 +233,108 @@ func drcRelevant(v kicad.Violation) bool {
 	return !strings.HasPrefix(v.Rule, "unconnected") && v.Section != "unconnected_items"
 }
 
-// newDRCViolations lists the relevant violations of rep beyond those of base,
-// counted per rule, message and objects (rule: message). A violation whose
-// measured value changed is a new one.
-func newDRCViolations(base, rep *kicad.DRCReport) []string {
+// drcDelta is a violation the repair answers for: new, or worse than before.
+type drcDelta struct {
+	v   kicad.Violation
+	was string // the message before, for one that got worse
+}
+
+func (d drcDelta) String() string {
+	if d.was != "" {
+		return d.v.Rule + ": " + d.v.Message + " (worse than: " + d.was + ")"
+	}
+	return d.v.Rule + ": " + d.v.Message
+}
+
+// newDRCViolations is what the repair added to the board's violations: those of
+// rep that base does not have, matched per rule and object identities (a
+// violation without objects has only its message to go by), plus those whose
+// measurement got worse. An unchanged violation, or one whose text changed
+// without its measurement getting worse, is the board's own.
+func newDRCViolations(base, rep *kicad.DRCReport) []drcDelta {
 	key := func(v kicad.Violation) string {
 		objs := append([]string{}, v.Objs...)
 		sort.Strings(objs)
-		return v.Rule + "|" + v.Message + "|" + strings.Join(objs, ",")
+		if len(objs) == 0 {
+			return v.Rule + "||" + v.Message
+		}
+		return v.Rule + "|" + strings.Join(objs, ",")
 	}
-	had := map[string]int{}
+	had := map[string][]string{} // messages per key
 	for _, v := range base.Violations {
 		if drcRelevant(v) {
-			had[key(v)]++
+			had[key(v)] = append(had[key(v)], v.Message)
 		}
 	}
-	var out []string
+	// Same text first, so that of several on one key only a changed one pairs up.
+	var changed []kicad.Violation
 	for _, v := range rep.Violations {
 		if !drcRelevant(v) {
 			continue
 		}
-		if k := key(v); had[k] > 0 {
-			had[k]--
+		k := key(v)
+		if i := slices.Index(had[k], v.Message); i >= 0 {
+			had[k] = slices.Delete(had[k], i, i+1)
 		} else {
-			out = append(out, v.Rule+": "+v.Message)
+			changed = append(changed, v)
+		}
+	}
+	var out []drcDelta
+	for _, v := range changed {
+		k := key(v)
+		if len(had[k]) == 0 {
+			out = append(out, drcDelta{v: v})
+			continue
+		}
+		was := had[k][0]
+		had[k] = had[k][1:]
+		if drcWorsened(was, v.Message) {
+			out = append(out, drcDelta{v: v, was: was})
 		}
 	}
 	return out
 }
 
-// viasNamedByDRC: the candidates a design-rule violation names (rule: message).
-func viasNamedByDRC(rep *kicad.DRCReport, gs []viaGrow) map[string]string {
+// reDRCMeasure reads KiCad's "(clearance 0.2000 mm; actual 0.1500 mm)".
+var reDRCMeasure = regexp.MustCompile(`([0-9]*\.?[0-9]+)\s*([a-zA-Zµ]*)\s*;\s*actual\s+([0-9]*\.?[0-9]+)\s*([a-zA-Zµ]*)`)
+
+// drcWorsened compares two messages of one violation: worse when the measured
+// value moved away from the limit. Fails closed: a limit or unit that changed,
+// or a measurement in only one of them, cannot be shown not to be worse. Two
+// messages without a measurement differ in words only.
+func drcWorsened(was, now string) bool {
+	a, b := reDRCMeasure.FindStringSubmatch(was), reDRCMeasure.FindStringSubmatch(now)
+	if a == nil && b == nil {
+		return false
+	}
+	if a == nil || b == nil || a[1] != b[1] && !sameNumber(a[1], b[1]) || a[2] != b[2] || a[4] != b[4] {
+		return true
+	}
+	num := func(s string) float64 {
+		v, _ := strconv.ParseFloat(s, 64)
+		return v
+	}
+	limit := num(a[1])
+	return math.Abs(num(b[3])-limit) > math.Abs(num(a[3])-limit)+1e-9
+}
+
+func sameNumber(a, b string) bool {
+	x, e1 := strconv.ParseFloat(a, 64)
+	y, e2 := strconv.ParseFloat(b, 64)
+	return e1 == nil && e2 == nil && x == y
+}
+
+// viasNamedByDRC: the candidates those violations name (rule: message).
+func viasNamedByDRC(ds []drcDelta, gs []viaGrow) map[string]string {
 	ids := map[string]bool{}
 	for _, g := range gs {
 		ids[g.v.ID] = true
 	}
 	out := map[string]string{}
-	for _, v := range rep.Violations {
-		if !drcRelevant(v) {
-			continue
-		}
-		for _, o := range v.Objs {
+	for _, d := range ds {
+		for _, o := range d.v.Objs {
 			if ids[o] {
-				out[o] = v.Rule + ": " + v.Message
+				out[o] = d.String()
 			}
 		}
 	}

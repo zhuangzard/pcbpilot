@@ -17,9 +17,12 @@ import (
 // RouteInstrumentation is the structured routing outcome report written to
 // summary["routeInstrumentation"].
 type RouteInstrumentation struct {
-	Connections     int     `json:"connections"`
-	Completed       int     `json:"completed"`
-	Unrouted        int     `json:"unrouted"`
+	Connections int `json:"connections"`
+	// Completed and Unrouted are absent when not known: a partial result (the
+	// router stopped before its final count) or a count that does not add up.
+	Completed       *int    `json:"completed,omitempty"`
+	Unrouted        *int    `json:"unrouted,omitempty"`
+	Partial         bool    `json:"partial,omitempty"`
 	RouterWallTimeS float64 `json:"routerWallTimeS"`
 	RouterVersion   string  `json:"routerVersion,omitempty"`
 	InputSHA256     string  `json:"inputSha256,omitempty"`
@@ -79,17 +82,19 @@ func buildRouteInstrumentation(
 	if res == nil {
 		return nil
 	}
-	completed := connections - res.UnroutedCount
-	if res.UnroutedCount < 0 || completed < 0 || completed > connections {
-		completed = 0 // partial: unrouted count may be unknown (-1)
-	}
 	ri := &RouteInstrumentation{
 		Connections:     connections,
-		Unrouted:        res.UnroutedCount,
-		Completed:       completed,
+		Partial:         res.Partial,
 		RouterWallTimeS: res.Seconds,
 		RouterVersion:   res.Version,
 		InputSHA256:     filePathSHA256(dsnPath),
+	}
+	if !res.Partial && res.UnroutedCount >= 0 {
+		unrouted := res.UnroutedCount
+		ri.Unrouted = &unrouted
+		if completed := connections - unrouted; completed >= 0 {
+			ri.Completed = &completed
+		}
 	}
 	ri.ByNetClass = netClassBreakdown(res, classes, snap)
 	ri.ByDomain = domainBreakdown(res, classes, snap)

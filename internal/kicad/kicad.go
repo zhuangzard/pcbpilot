@@ -23,6 +23,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/zhuangzard/pcbpilot/internal/kfile"
 )
 
 //go:embed bridge.py
@@ -480,8 +482,9 @@ func (t *Tools) Edit(pcb string, ops map[string]any, out string) (json.RawMessag
 	return t.EditContext(context.Background(), pcb, ops, out)
 }
 
-// EditContext is Edit, killing the bridge when ctx ends (out is then not a
-// result, and pcb is untouched).
+// EditContext is Edit, killing the bridge when ctx ends. The bridge saves to a
+// temporary board beside out, which replaces out only when it succeeded: a
+// bridge killed mid-save leaves out and pcb as they were.
 func (t *Tools) EditContext(ctx context.Context, pcb string, ops map[string]any, out string) (json.RawMessage, error) {
 	path := strings.TrimSuffix(out, filepath.Ext(out)) + fmt.Sprintf("-edit-%d.json", time.Now().UnixNano())
 	b, err := json.MarshalIndent(ops, "", "  ")
@@ -491,7 +494,87 @@ func (t *Tools) EditContext(ctx context.Context, pcb string, ops map[string]any,
 	if err := os.WriteFile(path, b, 0o644); err != nil {
 		return nil, err
 	}
-	return t.runBridge(ctx, nil, "edit", pcb, path, out)
+	stem := strings.TrimSuffix(out, filepath.Ext(out))
+	tmpStem := fmt.Sprintf("%s.pcbpilot-%d", stem, time.Now().UnixNano())
+	tmp := tmpStem + filepath.Ext(out)
+	defer removeStem(tmpStem)
+	raw, err := t.runBridge(ctx, nil, "edit", pcb, path, tmp)
+	if err != nil {
+		return raw, err
+	}
+	if err := commitBoard(pcb, tmp, out); err != nil {
+		return raw, fmt.Errorf("kicad bridge edit: %w", err)
+	}
+	return resultOut(raw, out), nil
+}
+
+// commitBoard moves a board the bridge saved at tmp, and its sidecars, to out.
+// The board goes last: it is what makes out the new result. Sidecars follow the
+// bridge's save_board for a direct save: a new .kicad_pro / .kicad_prl replaces
+// the one at out (or, unless the board is saved over itself, one it did not
+// write removes it), and a .kicad_dru at out stays.
+func commitBoard(src, tmp, out string) error {
+	if _, err := os.Stat(tmp); err != nil {
+		return fmt.Errorf("the bridge reported success but saved no board: %w", err)
+	}
+	inPlace := false
+	if a, err := os.Stat(src); err == nil {
+		if b, err := os.Stat(out); err == nil {
+			inPlace = os.SameFile(a, b)
+		}
+	}
+	tmpStem, outStem := strings.TrimSuffix(tmp, filepath.Ext(tmp)), strings.TrimSuffix(out, filepath.Ext(out))
+	for _, ext := range []string{".kicad_pro", ".kicad_prl"} {
+		switch _, err := os.Stat(tmpStem + ext); {
+		case err == nil:
+			if err := kfile.Rename(tmpStem+ext, outStem+ext); err != nil {
+				return err
+			}
+		case os.IsNotExist(err) && !inPlace:
+			if err := os.Remove(outStem + ext); err != nil && !os.IsNotExist(err) {
+				return err
+			}
+		case !os.IsNotExist(err):
+			return err
+		}
+	}
+	if _, err := os.Stat(tmpStem + ".kicad_dru"); err == nil {
+		if _, err := os.Stat(outStem + ".kicad_dru"); os.IsNotExist(err) {
+			if err := kfile.Rename(tmpStem+".kicad_dru", outStem+".kicad_dru"); err != nil {
+				return err
+			}
+		}
+	}
+	return kfile.Rename(tmp, out)
+}
+
+// removeStem removes what a save to stem+ext left (nothing after a commit that
+// moved it all); best effort, a killed process may still hold a file a moment.
+func removeStem(stem string) {
+	dir, prefix := filepath.Dir(stem), filepath.Base(stem)+"."
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), prefix) {
+			_ = os.Remove(filepath.Join(dir, e.Name()))
+		}
+	}
+}
+
+// resultOut is a bridge result naming out as its output.
+func resultOut(raw json.RawMessage, out string) json.RawMessage {
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return raw
+	}
+	m["out"] = out
+	b, err := json.Marshal(m)
+	if err != nil {
+		return raw
+	}
+	return b
 }
 
 // NetclassesIso is Netclasses plus insulation pairs: [{a, b, aNets, bNets,

@@ -376,3 +376,54 @@ func TestDSNWholeUmViasMergeKeepsLargerShapes(t *testing.T) {
 		t.Fatalf("%s", out)
 	}
 }
+
+// KiCad's import replaces every via's uuid and resizes the board's own: they are
+// found again by net and position, put back at their own size, and neither
+// shrunk to a class nor counted as router vias.
+func TestSizeRouterViasKeepsInputVias(t *testing.T) {
+	const big, bigDrill = 35.4331, 19.685 // 900/500 um
+	f := &fakeViaTools{
+		before: fmt.Sprintf(`{"copper":{"vias":[
+			{"primitiveId":"in-big","net":"A","x":100,"y":100,"diameter":%v,"holeDiameter":%v},
+			{"primitiveId":"in-frac","net":"A","x":300,"y":100,"diameter":24,"holeDiameter":12},
+			{"primitiveId":"in-same","net":"B","x":500,"y":100,"diameter":24,"holeDiameter":12},
+			{"primitiveId":"in-gone","net":"A","x":700,"y":100,"diameter":24,"holeDiameter":12}]}}`, big, bigDrill),
+		after: fmt.Sprintf(`{"copper":{"vias":[
+			{"primitiveId":"new1","net":"A","x":100,"y":100,"diameter":%v,"holeDiameter":%v},
+			{"primitiveId":"new2","net":"A","x":300,"y":100,"diameter":24.0157,"holeDiameter":12.0079},
+			{"primitiveId":"in-same","net":"B","x":500,"y":100,"diameter":24,"holeDiameter":12},
+			{"primitiveId":"other-net","net":"B","x":700,"y":100,"diameter":31.4961,"holeDiameter":15.748},
+			{"primitiveId":"router","net":"A","x":900,"y":100,"diameter":31.4961,"holeDiameter":15.748}]}}`, big, bigDrill),
+		rb: &kicad.RulesReadback{Nets: map[string]kicad.EffectiveNM{"A": {ViaDiameter: 609600, ViaDrill: 304800}, "B": {ViaDiameter: 609600, ViaDrill: 304800}}},
+	}
+	summary := map[string]any{}
+	prov := &viaProvenance{}
+	board, gates := sizeRouterViasProv(f, "classed", "imported", func(s string) string { return s }, summary, io.Discard, prov)
+	if board != "vias-to-class" {
+		t.Fatalf("board %s", board)
+	}
+	ops := map[string]map[string]any{}
+	for _, op := range f.edited["setVia"].([]map[string]any) {
+		ops[op["id"].(string)] = op
+	}
+	if len(ops) != 3 || ops["new1"] != nil || ops["in-same"] != nil {
+		t.Fatalf("ops %v", ops)
+	}
+	if op := ops["new2"]; op == nil || op["diameter"] != 24.0 || op["drill"] != 12.0 {
+		t.Fatalf("input via not restored: %v", op)
+	}
+	if ops["router"] == nil || ops["other-net"] == nil { // router vias, one where an input via of another net was
+		t.Fatalf("ops %v", ops)
+	}
+	stats := summary["routerVias"].(map[string]any)
+	if stats["routerVias"] != 2 || stats["shrunkToClass"] != 2 || stats["inputViasRestored"] != 1 || stats["inputViasGone"] != 1 {
+		t.Fatalf("%v", stats)
+	}
+	if !prov.input["new1"] || !prov.input["new2"] || !prov.input["in-same"] || !prov.router["router"] || prov.input["router"] {
+		t.Fatalf("%+v", prov)
+	}
+	// An input via that is gone is a known failure.
+	if len(gates) != 1 || gates[0].Pass || gates[0].CannotCheck || !strings.Contains(gates[0].Items[0], "in-gone") {
+		t.Fatalf("%+v", gates)
+	}
+}

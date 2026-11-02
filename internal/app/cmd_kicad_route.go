@@ -1167,7 +1167,7 @@ func silkDeferredGate(g gateResult, reason string) gateResult {
 	}
 	g.Items = append([]string{"silk placement " + reason + "; route the rest, or place anyway with --silk=on"}, g.Items...)
 	g.Detail = "cannot check: silk placement " + reason + "; labels as routed: " + g.Detail
-	g.Pass, g.CannotCheck, g.Waived = false, true, nil
+	g.Pass, g.CannotCheck, g.Waived, g.Unchecked = false, true, nil, append([]string{}, g.Items...)
 	return g
 }
 
@@ -1360,11 +1360,12 @@ func (r *kicadRun) qualityGates(board string) (bool, error) {
 		// D3: register router-produced gates (router-vias) on the registry so
 		// they appear on stderr. Previously these bypassed r.add().
 		for _, g := range r.route.Gates {
+			applyWaivers(&g, r.waivers)
+			keep = append(keep, g)
 			if r.reg != nil {
 				r.reg.Add(toRecord(g, nil, "board", 0))
 			}
 		}
-		keep = append(keep, r.route.Gates...)
 	}
 	r.gates = keep
 	routed := filepath.Join(o.outDir, "routed.kicad_pcb")

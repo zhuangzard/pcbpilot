@@ -31,6 +31,10 @@ package app
 //     on a 0.7/0.4 net comes in as 0.6/0.4, an illegal annular ring. Such a via
 //     cannot be shrunk to its class; it is repaired only per via, in a
 //     transaction (kicad_route_via_repair.go), or the gate fails.
+//   - KiCad's SES import replaces every via with a new uuid, and sizes the ones
+//     already on the board from the session as well (a 609.6 um via renamed to
+//     610:305 comes back at 610). So an input via is found again by net and
+//     position, never touched as a router via, and put back at its own size.
 
 import (
 	"encoding/json"
@@ -42,6 +46,7 @@ import (
 	"strings"
 
 	"github.com/zhuangzard/pcbpilot/internal/kicad"
+	"github.com/zhuangzard/pcbpilot/internal/pcb/specctra"
 )
 
 var (
@@ -386,10 +391,6 @@ func sizeRouterViasProv(t routerViaTools, classed, board string, next func(strin
 		summary["routerVias"] = map[string]any{"error": err.Error()}
 		return board, cannot("the board before the import has no readable vias, so the router vias are unknown (none resized): " + err.Error())
 	}
-	old := map[string]bool{}
-	for _, v := range beforeVias {
-		old[v.ID] = true
-	}
 	after, err := snap(board)
 	if err != nil {
 		summary["routerVias"] = map[string]any{"error": err.Error()}
@@ -409,18 +410,20 @@ func sizeRouterViasProv(t routerViaTools, classed, board string, next func(strin
 		e, ok := rb.Nets[net]
 		return e.ViaDiameter, e.ViaDrill, ok
 	}
+	old, restore, gone := inputViasAfterImport(beforeVias, afterVias)
 	prov.record(old, afterVias)
 	ops, fail, unknown, n := classViaPlan(afterVias, old, eff)
-	stats := map[string]any{"routerVias": n, "shrunkToClass": len(ops), "notReachable": len(fail), "noClassVia": len(unknown)}
+	stats := map[string]any{"routerVias": n, "shrunkToClass": len(ops), "notReachable": len(fail), "noClassVia": len(unknown),
+		"inputVias": len(beforeVias), "inputViasRestored": len(restore), "inputViasGone": len(gone)}
 	summary["routerVias"] = stats
-	if len(ops) > 0 {
+	if len(ops)+len(restore) > 0 {
 		out := next("vias-to-class")
-		if _, err := t.Edit(board, map[string]any{"setVia": ops}, out); err != nil {
+		if _, err := t.Edit(board, map[string]any{"setVia": append(append([]map[string]any{}, ops...), restore...)}, out); err != nil {
 			stats["error"] = err.Error()
-			g := gate(false, fmt.Sprintf("%d router via(s) are larger than their class via and the resize could not be written: %v", len(ops), err))
-			return board, append(g, problemGates(gate, fail, unknown)...)
+			g := gate(false, fmt.Sprintf("%d router via(s) are larger than their class via, %d input via(s) changed by the import, and the resize could not be written: %v", len(ops), len(restore), err))
+			return board, append(g, problemGates(gate, append(fail, gone...), unknown)...)
 		}
-		fmt.Fprintf(stderr, "vias: %d of %d router via(s) shrunk to their net's class via\n", len(ops), n)
+		fmt.Fprintf(stderr, "vias: %d of %d router via(s) shrunk to their net's class via, %d input via(s) back at their own size\n", len(ops), n, len(restore))
 		board = out
 	}
 	var info []string
@@ -432,7 +435,7 @@ func sizeRouterViasProv(t routerViaTools, classed, board string, next func(strin
 		unknown = append(unknown, rep.unchecked...)
 		fmt.Fprintf(stderr, "vias: %d via(s) below their class via grown in a checked transaction, %d not\n", len(rep.grown), len(fail)+len(rep.unchecked))
 	}
-	gates := problemGates(gate, fail, unknown)
+	gates := problemGates(gate, append(fail, gone...), unknown)
 	switch {
 	case len(info) == 0:
 	case len(gates) == 0:
@@ -443,6 +446,46 @@ func sizeRouterViasProv(t routerViaTools, classed, board string, next func(strin
 	return board, gates
 }
 
+// inputViasAfterImport finds the board's own vias on the imported board, by id
+// or else by net and position: old holds their ids there. restore puts back the
+// ones the import resized; gone describes those no longer there.
+func inputViasAfterImport(before, after []routeVia) (old map[string]bool, restore []map[string]any, gone []string) {
+	old = map[string]bool{}
+	taken := func(v routeVia) bool { return old[v.ID] }
+	match := func(b routeVia, same func(routeVia) bool) *routeVia {
+		for i := range after {
+			if !taken(after[i]) && same(after[i]) {
+				return &after[i]
+			}
+		}
+		return nil
+	}
+	nm := func(mil float64) int64 { return int64(math.Round(mil * nmPerMil)) }
+	found := make([]*routeVia, len(before))
+	// Ids first, so that a via that kept its id is not taken by a neighbour.
+	for i, b := range before {
+		if found[i] = match(b, func(a routeVia) bool { return a.ID == b.ID }); found[i] != nil {
+			old[found[i].ID] = true
+		}
+	}
+	for i, b := range before {
+		if found[i] == nil {
+			if found[i] = match(b, func(a routeVia) bool {
+				return a.Net == b.Net && math.Hypot(a.X-b.X, a.Y-b.Y) <= specctra.MatchTolMil
+			}); found[i] != nil {
+				old[found[i].ID] = true
+			}
+		}
+		switch a := found[i]; {
+		case a == nil:
+			gone = append(gone, fmt.Sprintf("%s input via %s at (%.1f, %.1f) mil is not on the imported board", b.Net, short12(b.ID), b.X, b.Y))
+		case absNM(nm(a.Dia)-nm(b.Dia)) > viaExactTolNM || absNM(nm(a.Drill)-nm(b.Drill)) > viaExactTolNM:
+			restore = append(restore, map[string]any{"id": a.ID, "diameter": b.Dia, "drill": b.Drill})
+		}
+	}
+	return old, restore, gone
+}
+
 // problemGates is the router-vias gate for vias that are known wrong (fail)
 // or cannot be judged (unknown); none when both are empty.
 func problemGates(gate func(bool, string, ...string) []gateResult, fail, unknown []string) []gateResult {
@@ -451,10 +494,12 @@ func problemGates(gate func(bool, string, ...string) []gateResult, fail, unknown
 	}
 	items := append(append([]string{}, fail...), unknown...)
 	if len(fail) > 0 {
-		return gate(false, fmt.Sprintf("%d router via(s) cannot be shrunk to their class via, %d without a class via", len(fail), len(unknown)), items...)
+		gs := gate(false, fmt.Sprintf("%d via(s) cannot be shrunk to their class via or left the board, %d without a class via", len(fail), len(unknown)), items...)
+		gs[0].Unchecked = append([]string{}, unknown...)
+		return gs
 	}
 	gs := gate(false, fmt.Sprintf("cannot check: %d router via(s) on nets without a class via or with a repair that could not be checked", len(unknown)), items...)
-	gs[0].CannotCheck = true
+	gs[0].CannotCheck, gs[0].Unchecked = true, append([]string{}, unknown...)
 	return gs
 }
 

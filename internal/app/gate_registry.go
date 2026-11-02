@@ -15,15 +15,16 @@ import (
 
 // GateRecord is one gate as the registry sees it.
 type GateRecord struct {
-	ID        string      `json:"id"`                 // stable, e.g. "kicad-drc"
-	Status    gate.Status `json:"status"`             // pass | fail | cannot-check
-	Reason    string      `json:"reason"`             // human-readable detail
-	Items     []string    `json:"items,omitempty"`    // per-item failures
-	Waived    []string    `json:"waived,omitempty"`   // waived items
-	Info      []string    `json:"info,omitempty"`     // passing notes
-	Evidence  []string    `json:"evidence,omitempty"` // file paths
-	BoardSHA  string      `json:"boardSha,omitempty"` // sha256 of the board this gate checked
-	Scope     string      `json:"scope,omitempty"`    // "board" | "session" | "report" | ""
+	ID        string      `json:"id"`                  // stable, e.g. "kicad-drc"
+	Status    gate.Status `json:"status"`              // pass | fail | cannot-check
+	Reason    string      `json:"reason"`              // human-readable detail
+	Items     []string    `json:"items,omitempty"`     // per-item failures
+	Unchecked []string    `json:"unchecked,omitempty"` // those of Items that could not be judged
+	Waived    []string    `json:"waived,omitempty"`    // waived items
+	Info      []string    `json:"info,omitempty"`      // passing notes
+	Evidence  []string    `json:"evidence,omitempty"`  // file paths
+	BoardSHA  string      `json:"boardSha,omitempty"`  // sha256 of the board this gate checked
+	Scope     string      `json:"scope,omitempty"`     // "board" | "session" | "report" | ""
 	DurationS float64     `json:"durationS,omitempty"`
 	// Legacy fields for backward-compatible summary.json consumers.
 	Gate   string `json:"gate"`   // == ID
@@ -150,7 +151,7 @@ func toRecord(g gateResult, evidence []string, scope string, dur time.Duration) 
 	}
 	return GateRecord{
 		ID: g.Gate, Status: st, Reason: g.Detail,
-		Items: g.Items, Waived: g.Waived, Info: g.Info,
+		Items: g.Items, Unchecked: g.Unchecked, Waived: g.Waived, Info: g.Info,
 		Evidence: evidence, Scope: scope,
 		DurationS: dur.Seconds(),
 	}

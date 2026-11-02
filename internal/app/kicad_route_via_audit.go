@@ -36,9 +36,6 @@ const (
 	viaFromEscape  = "escape"
 	viaFromArray   = "via-array"
 	viaFromUnknown = "unknown"
-
-	viaAuditTolNM  = 5             // snapshot rounding
-	viaPreferTolNM = viaExactTolNM // as viaNotReachable
 )
 
 // viaProvenance records the vias sizeRouterVias saw. The methods accept nil.
@@ -200,19 +197,19 @@ func auditVias(vias []routeVia, rb *kicad.RulesReadback, lim viaLimits, prov fun
 				add(&a.CannotCheck, fmt.Sprintf("non-through via (layers %d-%d) with no declared microvia / blind-buried minimums", v.From, v.To))
 			}
 		}
-		if row.Legal == "yes" {
-			if drill >= dia {
-				add(&a.Illegal, fmt.Sprintf("drill %.3f mm is not smaller than the diameter %.3f mm", row.DrillMm, row.DiameterMm))
-				row.Legal = "no"
-			} else {
-				for _, c := range []struct {
-					what     string
-					val, min int64
-				}{{"annular ring", (dia - drill) / 2, use.annular}, {"drill", drill, use.drill}, {"diameter", dia, use.diameter}} {
-					if c.min > 0 && c.val+viaAuditTolNM < c.min {
-						add(&a.Illegal, fmt.Sprintf("%s %.3f mm below the minimum %.3f mm", c.what, float64(c.val)/1e6, float64(c.min)/1e6))
-						row.Legal = "no"
-					}
+		// A drill that leaves no copper is illegal on any span; the minimums
+		// need limits that apply to this via. Same tolerance as the sizing step.
+		if drill >= dia {
+			add(&a.Illegal, fmt.Sprintf("drill %.3f mm is not smaller than the diameter %.3f mm", row.DrillMm, row.DiameterMm))
+			row.Legal = "no"
+		} else if row.Legal == "yes" {
+			for _, c := range []struct {
+				what     string
+				val, min int64
+			}{{"annular ring", (dia - drill) / 2, use.annular}, {"drill", drill, use.drill}, {"diameter", dia, use.diameter}} {
+				if c.min > 0 && c.val+viaExactTolNM < c.min {
+					add(&a.Illegal, fmt.Sprintf("%s %.3f mm below the minimum %.3f mm", c.what, float64(c.val)/1e6, float64(c.min)/1e6))
+					row.Legal = "no"
 				}
 			}
 		}
@@ -224,7 +221,7 @@ func auditVias(vias []routeVia, rb *kicad.RulesReadback, lim viaLimits, prov fun
 			if row.Provenance != viaFromInput {
 				add(&a.CannotCheck, "the net resolves to no class via")
 			}
-		case absNM(dia-e.ViaDiameter) <= viaPreferTolNM && absNM(drill-e.ViaDrill) <= viaPreferTolNM:
+		case absNM(dia-e.ViaDiameter) <= viaExactTolNM && absNM(drill-e.ViaDrill) <= viaExactTolNM:
 			row.Preferred = "conforms"
 		default:
 			row.Preferred = "differs"
@@ -386,8 +383,9 @@ func (r *kicadRun) viaAuditGate(routed string, snap *boardSnapshot) gateResult {
 		"cannotCheck": len(a.CannotCheck), "excepted": len(a.Excepted), "preExistingOffSize": len(a.PreExisting)}
 	viaAuditVerdict(&g, a)
 	if werr != nil {
+		it := "via-audit.json could not be written: " + werr.Error()
 		g.Pass, g.CannotCheck = false, len(a.Illegal)+len(a.NonConform) == 0
-		g.Items = append(g.Items, "via-audit.json could not be written: "+werr.Error())
+		g.Items, g.Unchecked = append(g.Items, it), append(g.Unchecked, it)
 	}
 	return g
 }
@@ -397,6 +395,7 @@ func viaAuditVerdict(g *gateResult, a viaAudit) {
 	g.Items = append(append(append([]string{}, a.Illegal...), a.NonConform...), a.CannotCheck...)
 	g.Info = append(append([]string{}, a.Excepted...), a.PreExisting...)
 	g.Pass = len(g.Items) == 0
+	g.Unchecked = append([]string{}, a.CannotCheck...)
 	g.CannotCheck = len(a.CannotCheck) > 0 && len(a.Illegal)+len(a.NonConform) == 0
 	switch {
 	case len(a.Illegal)+len(a.NonConform) > 0:

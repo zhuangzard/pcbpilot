@@ -41,11 +41,11 @@ func TestBuildRouteInstrumentationBasic(t *testing.T) {
 	if ri.Connections != 100 {
 		t.Errorf("Connections = %d", ri.Connections)
 	}
-	if ri.Completed != 97 {
-		t.Errorf("Completed = %d", ri.Completed)
+	if ri.Completed == nil || *ri.Completed != 97 {
+		t.Errorf("Completed = %v", ri.Completed)
 	}
-	if ri.Unrouted != 3 {
-		t.Errorf("Unrouted = %d", ri.Unrouted)
+	if ri.Unrouted == nil || *ri.Unrouted != 3 {
+		t.Errorf("Unrouted = %v", ri.Unrouted)
 	}
 	if ri.RouterVersion != "0.1.14" {
 		t.Errorf("RouterVersion = %q", ri.RouterVersion)
@@ -64,8 +64,43 @@ func TestBuildRouteInstrumentationPartial(t *testing.T) {
 		Seconds:       120,
 	}
 	ri := buildRouteInstrumentation(res, 50, "", nil, nil)
-	if ri.Completed != 0 {
-		t.Errorf("Completed should be 0 for unknown unrouted, got %d", ri.Completed)
+	if ri.Completed != nil || ri.Unrouted != nil || !ri.Partial {
+		t.Errorf("%+v", ri)
+	}
+}
+
+// Top-level counts appear only when known: never completed:0, unrouted:-1, or
+// everything completed because a partial result last counted 0.
+func TestRouteInstrumentationTopLevelJSON(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		res   *routeResult
+		conns int
+		want  []string
+		not   []string
+	}{
+		{"complete", &routeResult{}, 50, []string{`"connections":50`, `"completed":50`, `"unrouted":0`}, []string{`"partial"`}},
+		{"unrouted", &routeResult{UnroutedCount: 3}, 50, []string{`"completed":47`, `"unrouted":3`}, nil},
+		{"partial, unknown", &routeResult{UnroutedCount: -1, Partial: true}, 50, []string{`"connections":50`, `"partial":true`}, []string{`"completed"`, `"unrouted"`}},
+		{"partial at 0", &routeResult{Partial: true}, 50, []string{`"partial":true`}, []string{`"completed"`, `"unrouted"`}},
+		{"partial with a count", &routeResult{UnroutedCount: 4, Partial: true}, 50, []string{`"partial":true`}, []string{`"completed"`, `"unrouted"`}},
+		{"unknown without the flag", &routeResult{UnroutedCount: -1}, 50, nil, []string{`"completed"`, `"unrouted"`}},
+		{"more unrouted than connections", &routeResult{UnroutedCount: 60}, 50, []string{`"unrouted":60`}, []string{`"completed"`}},
+	} {
+		b, err := json.Marshal(buildRouteInstrumentation(c.res, c.conns, "", nil, nil))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, w := range c.want {
+			if !strings.Contains(string(b), w) {
+				t.Errorf("%s: no %s in %s", c.name, w, b)
+			}
+		}
+		for _, n := range c.not {
+			if strings.Contains(string(b), n) {
+				t.Errorf("%s: %s in %s", c.name, n, b)
+			}
+		}
 	}
 }
 
@@ -173,12 +208,12 @@ func netSnap(pads map[string]int) *boardSnapshot {
 
 // One unrouted connection in a class with 100 routed is 1 of 101, not 1 of 1;
 // a class with nothing unrouted is still listed.
-func TestBreakdownTotals(t *testing.T) {
+func TestInstrumentationBreakdownTotals(t *testing.T) {
 	res := &routeResult{UnroutedCount: 1, Unrouted: []routeConn{{Net: "BIG", From: "U1.1", To: "U1.2"}}}
 	classes := []kicad.NetClass{{Name: "PP1", Nets: []string{"BIG"}}, {Name: "PPD_HV", Nets: []string{"HV"}}}
 	snap := netSnap(map[string]int{"BIG": 102, "HV": 3, "OTHER": 2, "LONE": 1})
 	ri := buildRouteInstrumentation(res, boardConnections(snap), "", classes, snap)
-	if ri.Connections != 104 || ri.Completed != 103 {
+	if ri.Connections != 104 || ri.Completed == nil || *ri.Completed != 103 {
 		t.Fatalf("%+v", ri)
 	}
 	b, err := json.Marshal(ri)
@@ -199,7 +234,7 @@ func TestBreakdownTotals(t *testing.T) {
 }
 
 // What is not known is absent, never a made-up number.
-func TestBreakdownUnknownTotalsOmitted(t *testing.T) {
+func TestInstrumentationBreakdownUnknownTotalsOmitted(t *testing.T) {
 	classes := []kicad.NetClass{{Name: "PP1", Nets: []string{"BIG"}}, {Name: "PPD_HV", Nets: []string{"HV"}}}
 	snap := netSnap(map[string]int{"BIG": 102, "HV": 3})
 	listed := []routeConn{{Net: "BIG", From: "U1.1", To: "U1.2"}}
@@ -235,7 +270,7 @@ func TestBreakdownUnknownTotalsOmitted(t *testing.T) {
 
 // The stage list of a real run: router time is the routing stage, not the
 // import that follows it.
-func TestTimingRollupRouterStages(t *testing.T) {
+func TestInstrumentationTimingRollupRouterStages(t *testing.T) {
 	roll := func(stages ...stageTime) (router, post float64) {
 		m := timingRollup(stages, 2751)
 		if m["totalSeconds"] != 2751.0 {
