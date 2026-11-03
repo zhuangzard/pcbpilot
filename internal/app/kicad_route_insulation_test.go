@@ -54,6 +54,33 @@ func TestDSNInsulationRules(t *testing.T) {
 	}
 }
 
+func TestDSNInsulationClassOnBothSides(t *testing.T) {
+	iso := []map[string]any{{"a": "domain:a", "b": "domain:b", "clearanceMm": 8.0}}
+	both := `(pcb t (network (class "PP1+PPD_domain_a+PPD_domain_b" A (rule (clearance 200)))) (wiring))`
+	if _, _, err := dsnInsulationRules(both, iso, 5.08); err == nil {
+		t.Fatal("a class on both sides must be an error")
+	}
+}
+
+// Every round, resumed ones too, keeps pcbpilot's own arguments and the choice
+// about --diagnose, with the extra arguments last.
+func TestFastrouteArgsExtraAndDiagnose(t *testing.T) {
+	o := fastrouteOpts{noDiagnose: true, extraArgs: []string{"--no-time-limits"}}
+	for _, initial := range []string{"", "prev.ses"} {
+		args := fastrouteArgs(o, "d.dsn", "o.ses", "r.json", initial)
+		joined := strings.Join(args, " ")
+		if strings.Contains(joined, "--diagnose") || args[len(args)-1] != "--no-time-limits" || !strings.Contains(joined, "-do o.ses") {
+			t.Fatalf("initial %q: %v", initial, args)
+		}
+		if initial != "" && !strings.Contains(joined, "--initial-session=prev.ses") {
+			t.Fatalf("resume lost: %v", args)
+		}
+	}
+	if args := strings.Join(fastrouteArgs(fastrouteOpts{}, "d.dsn", "o.ses", "r.json", ""), " "); !strings.Contains(args, "--diagnose") {
+		t.Fatalf("--diagnose is the default: %s", args)
+	}
+}
+
 func TestCheckRouterArgs(t *testing.T) {
 	for _, bad := range []string{"--initial-session=x.ses", "-do=x", "--report=x", "--max-time=9", "--diagnose", "x.ses", "--router.autorouter.max_threads=8"} {
 		if err := checkRouterArgs([]string{bad}); err == nil {

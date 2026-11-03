@@ -78,6 +78,9 @@ func dsnInsulationRules(dsn string, iso []map[string]any, marginUm float64) (str
 		}
 		ca, cb := domainClass(fmt.Sprint(p["a"])), domainClass(fmt.Sprint(p["b"]))
 		for _, x := range names {
+			if member(x, ca) && member(x, cb) {
+				return dsn, 0, fmt.Errorf("DSN class %s is on both sides of insulation pair %v|%v", x, p["a"], p["b"])
+			}
 			for _, y := range names {
 				if x >= y || !(member(x, ca) && member(y, cb) || member(x, cb) && member(y, ca)) {
 					continue
