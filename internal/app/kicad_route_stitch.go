@@ -349,10 +349,23 @@ func (r *kicadRun) stitchPours(board string, nets []string) (string, error) {
 		}
 		var open []boardPad
 		refused := map[string]string{}
-		refOf := map[string]string{}
+		pinOf := map[string]stitchPin{}
 		for i := range s.Components {
 			for _, p := range s.Components[i].Pads {
-				refOf[p.ID] = s.Components[i].Designator
+				pinOf[p.ID] = stitchPin{s.Components[i].Designator, p.Number}
+			}
+		}
+		// Each pad's group: what a via on it would feed.
+		groupOf := map[string][]stitchPin{}
+		for _, gs := range groups {
+			for _, g := range gs {
+				pins := make([]stitchPin, 0, len(g.Pads))
+				for _, id := range g.Pads {
+					pins = append(pins, pinOf[id])
+				}
+				for _, id := range g.Pads {
+					groupOf[id] = pins
+				}
 			}
 		}
 		for _, p := range pads {
@@ -360,8 +373,8 @@ func (r *kicadRun) stitchPours(board string, nets []string) (string, error) {
 				continue
 			}
 			sz := size[p.Net]
-			if why := stitchRefusal(r.in, p.Net, refOf[p.ID], p.Number, sz.Drill); why != "" {
-				refused[refOf[p.ID]+"."+p.Number] = why
+			if why := stitchRefusal(r.in, p.Net, groupOf[p.ID], sz.Drill); why != "" {
+				refused[pinOf[p.ID].Ref+"."+p.Number] = why
 				continue
 			}
 			open = append(open, p)
@@ -597,26 +610,32 @@ func stitchCutters(lost map[string]bool, plan []stitch, at map[string][2]float64
 	return cut
 }
 
-// stitchRefusal says why one via may not feed this pad: its current is above one
-// barrel's limit, or the simulation gives none for it. Empty when it may.
-func stitchRefusal(in *designIntent, net, ref, pin string, drillMil float64) string {
+// stitchPin names a pad for the current lookup.
+type stitchPin struct{ Ref, Pin string }
+
+// stitchRefusal says why one via may not feed this copper: the pads a track
+// already joins to the pad all draw through it, so their currents add, and none
+// may be unknown. Empty when it may.
+func stitchRefusal(in *designIntent, net string, pins []stitchPin, drillMil float64) string {
 	if in == nil || in.Nets[net] == nil {
 		return "no simulated current for the net"
 	}
-	n := in.Nets[net]
-	limit := pcbauto.ViaAmpacity(drillMil, stitchPlatingMil, stitchTempRiseC)
-	for _, p := range n.Pins {
-		if p.Ref == ref && p.Pin == pin {
-			if p.CurrentA == nil {
-				return "no simulated current for the pad"
-			}
-			if i := math.Abs(*p.CurrentA); i > limit {
-				return fmt.Sprintf("%.3f A is above one via's %.3f A", i, limit)
-			}
-			return ""
-		}
+	current := map[stitchPin]*float64{}
+	for _, p := range in.Nets[net].Pins {
+		current[stitchPin{p.Ref, p.Pin}] = p.CurrentA
 	}
-	return "no simulated current for the pad"
+	sum := 0.0
+	for _, pin := range pins {
+		i := current[pin]
+		if i == nil {
+			return fmt.Sprintf("no simulated current for %s.%s", pin.Ref, pin.Pin)
+		}
+		sum += math.Abs(*i)
+	}
+	if limit := pcbauto.ViaAmpacity(drillMil, stitchPlatingMil, stitchTempRiseC); sum > limit {
+		return fmt.Sprintf("%.3f A is above one via's %.3f A", sum, limit)
+	}
+	return ""
 }
 
 // stitchNets are the nets stitching works on: those with a planned pour, when

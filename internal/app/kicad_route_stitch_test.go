@@ -200,23 +200,28 @@ func TestNewViolationsByObjectAndGap(t *testing.T) {
 func TestStitchRefusal(t *testing.T) {
 	low, high := 0.02, 5.0
 	in := &designIntent{Nets: map[string]*intentNet{"P": {Pins: []intentPin{{Ref: "C1", Pin: "1", CurrentA: &low}, {Ref: "U1", Pin: "3", CurrentA: &high}, {Ref: "C2", Pin: "1"}}}}}
-	if why := stitchRefusal(in, "P", "C2", "1", 12); why == "" {
-		t.Error("a pin with no current value accepted")
-	}
-	if why := stitchRefusal(nil, "P", "C1", "1", 12); why == "" {
-		t.Error("no intent accepted")
-	}
-	if why := stitchRefusal(in, "P", "C1", "1", 12); why != "" {
+	c1 := stitchPin{"C1", "1"}
+	if why := stitchRefusal(in, "P", []stitchPin{c1}, 12); why != "" {
 		t.Errorf("low current refused: %s", why)
 	}
-	if why := stitchRefusal(in, "P", "U1", "3", 12); why == "" {
+	if why := stitchRefusal(in, "P", []stitchPin{{"U1", "3"}}, 12); why == "" {
 		t.Error("5 A through one via accepted")
 	}
-	if why := stitchRefusal(in, "P", "C9", "1", 12); why == "" {
-		t.Error("a pad with no current accepted")
+	// A capacitor a track joins to a 5 A load feeds that load too.
+	if why := stitchRefusal(in, "P", []stitchPin{c1, {"U1", "3"}}, 12); why == "" {
+		t.Error("the group's current was not added up")
 	}
-	if why := stitchRefusal(in, "Q", "C1", "1", 12); why == "" {
+	if why := stitchRefusal(in, "P", []stitchPin{{"C2", "1"}}, 12); why == "" {
+		t.Error("a pin with no current value accepted")
+	}
+	if why := stitchRefusal(in, "P", []stitchPin{{"C9", "1"}}, 12); why == "" {
+		t.Error("a pad with no record accepted")
+	}
+	if why := stitchRefusal(in, "Q", []stitchPin{c1}, 12); why == "" {
 		t.Error("a net with no intent accepted")
+	}
+	if why := stitchRefusal(nil, "P", []stitchPin{c1}, 12); why == "" {
+		t.Error("no intent accepted")
 	}
 }
 
