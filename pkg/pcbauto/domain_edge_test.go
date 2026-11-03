@@ -154,6 +154,29 @@ func TestPlanEdgeZonesRefuses(t *testing.T) {
 	}
 }
 
+func TestPlanEdgeZonesRefusesMoreCases(t *testing.T) {
+	// A small domain's fixed part inside another small domain's rectangle.
+	b, c, m, region := edgeZoneBoard(t)
+	extra := &Part{Ref: "JX", Pos: Point{2000, 7600}, Fixed: true}
+	extra.SetBody(Rect{1900, 7500, 2100, 7700})
+	b.Parts = append(b.Parts, extra)
+	for _, d := range c.Domains {
+		if d.ID == "B" {
+			d.Parts = append(d.Parts, "JX")
+		}
+	}
+	if _, err := PlanEdgeZones(b, c, m, region, 20); err == nil || !strings.Contains(err.Error(), "lies inside") {
+		t.Errorf("small in small: %v", err)
+	}
+	// A domain too large to fit against its edge.
+	b, c, m, region = edgeZoneBoard(t)
+	b2 := Rect{0, 0, 1000, 8000}
+	b.Outline = b2.Corners()
+	if _, err := PlanEdgeZones(b, c, m, b2.Expand(-80), 20); err == nil {
+		t.Error("a board too small must be refused")
+	}
+}
+
 func TestLargestFreeRect(t *testing.T) {
 	r, ok := largestFreeRect(Rect{0, 0, 100, 100}, []Rect{{80, 0, 100, 100}})
 	if !ok || r != (Rect{0, 0, 80, 100}) {

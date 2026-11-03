@@ -89,17 +89,18 @@ func TestPlanStitchesNoSite(t *testing.T) {
 }
 
 func TestOpenPadsOf(t *testing.T) {
-	open := openPadsOf(map[string][][]string{
-		"GND":  {{"a", "b", "c"}, {"d"}},
-		"+3V3": {{"e"}, {"f"}},
-		"OK":   {{"g", "h"}},
+	open := openPadsOf(map[string][]kicad.PadGroup{
+		"GND":  {{Pads: []string{"a", "b", "c"}, Zone: true}, {Pads: []string{"d"}}},
+		"+3V3": {{Pads: []string{"e"}}, {Pads: []string{"f"}}},
+		// Three pads on a track, two on the pour: the pour's group is the main one.
+		"P": {{Pads: []string{"g", "h", "i"}}, {Pads: []string{"j", "k"}, Zone: true}},
 	})
-	for _, id := range []string{"d", "e", "f"} {
+	for _, id := range []string{"d", "e", "f", "g", "h", "i"} {
 		if !open[id] {
 			t.Errorf("%s not open", id)
 		}
 	}
-	for _, id := range []string{"a", "b", "c", "g", "h"} {
+	for _, id := range []string{"a", "b", "c", "j", "k"} {
 		if open[id] {
 			t.Errorf("%s open", id)
 		}
@@ -166,7 +167,7 @@ func TestStitchNetsFollowTheProfile(t *testing.T) {
 func TestNewViolationsIgnoresItemOrder(t *testing.T) {
 	a, b := kicad.DRCItem{Description: "Pad 1"}, kicad.DRCItem{Description: "Pad 2"}
 	base := &kicad.DRCReport{Violations: []kicad.Violation{{Rule: "clearance", Message: "actual 0.1991 mm", Items: []kicad.DRCItem{a, b}}}}
-	cur := &kicad.DRCReport{Violations: []kicad.Violation{{Rule: "clearance", Message: "actual 0.1983 mm", Items: []kicad.DRCItem{b, a}}}}
+	cur := &kicad.DRCReport{Violations: []kicad.Violation{{Rule: "clearance", Message: "actual 0.1985 mm", Items: []kicad.DRCItem{b, a}}}}
 	if got := newViolations(base, cur); len(got) != 0 {
 		t.Fatalf("same objects reported as new: %+v", got)
 	}
@@ -176,8 +177,35 @@ func TestNewViolationsIgnoresItemOrder(t *testing.T) {
 	}
 }
 
+// Two vias of one net read the same; a new one must not pass for an old one, and
+// the same objects closer together are worse.
+func TestNewViolationsByObjectAndGap(t *testing.T) {
+	via := func(id string) kicad.DRCItem { return kicad.DRCItem{Description: "Via [GND]", UUID: id} }
+	pad := kicad.DRCItem{Description: "Pad 1", UUID: "p"}
+	base := &kicad.DRCReport{Violations: []kicad.Violation{{Rule: "clearance", Message: "actual 0.190 mm", Items: []kicad.DRCItem{via("old"), pad}}}}
+	cur := &kicad.DRCReport{Violations: []kicad.Violation{{Rule: "clearance", Message: "actual 0.190 mm", Items: []kicad.DRCItem{via("new"), pad}}}}
+	if got := newViolations(base, cur); len(got) != 1 {
+		t.Fatalf("a new via hid behind an old one: %+v", got)
+	}
+	cur.Violations[0].Items = []kicad.DRCItem{via("old"), pad}
+	if got := newViolations(base, cur); len(got) != 0 {
+		t.Fatalf("same objects, same gap: %+v", got)
+	}
+	cur.Violations[0].Message = "actual 0.150 mm"
+	if got := newViolations(base, cur); len(got) != 1 {
+		t.Fatalf("a worse gap passed: %+v", got)
+	}
+}
+
 func TestStitchRefusal(t *testing.T) {
-	in := &designIntent{Nets: map[string]*intentNet{"P": {Pins: []intentPin{{Ref: "C1", Pin: "1", CurrentA: 0.02}, {Ref: "U1", Pin: "3", CurrentA: 5}}}}}
+	low, high := 0.02, 5.0
+	in := &designIntent{Nets: map[string]*intentNet{"P": {Pins: []intentPin{{Ref: "C1", Pin: "1", CurrentA: &low}, {Ref: "U1", Pin: "3", CurrentA: &high}, {Ref: "C2", Pin: "1"}}}}}
+	if why := stitchRefusal(in, "P", "C2", "1", 12); why == "" {
+		t.Error("a pin with no current value accepted")
+	}
+	if why := stitchRefusal(nil, "P", "C1", "1", 12); why == "" {
+		t.Error("no intent accepted")
+	}
 	if why := stitchRefusal(in, "P", "C1", "1", 12); why != "" {
 		t.Errorf("low current refused: %s", why)
 	}

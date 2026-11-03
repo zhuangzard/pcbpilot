@@ -26,7 +26,7 @@
 #   ses PCB IN.ses OUT.kicad_pcb    ImportSpecctraSES + zone fill + save
 #   fill PCB                        zone fill + save in place
 #   connectivity PCB                unconnected ratsnest edges on the saved fills (read only)
-#   pad-groups PCB NETS.json        per net, its pads grouped by copper connection (read only)
+#   pad-groups PCB NETS.json        per net, its pads grouped by copper connection, and which groups hold a zone (read only)
 #   rules PCB RULES.json OUT        design rules + Default netclass (mil)
 #   pours PCB SPEC.json OUT         board-outline copper pours + fill
 #   edit PCB OPS.json OUT           track widths, vias, stubs, silk texts + fill
@@ -1243,12 +1243,14 @@ def pad_groups(pcb, nets_path):
             key = p.m_Uuid.AsString()
             if key in seen:
                 continue
-            group = {key}
+            group, zone = {key}, False
             for item in conn.GetConnectedItems(p, 0):
                 if item.Type() == pcbnew.PCB_PAD_T:
                     group.add(item.m_Uuid.AsString())
+                elif item.Type() == pcbnew.PCB_ZONE_T:
+                    zone = True
             seen |= group
-            groups.append(sorted(group))
+            groups.append({"pads": sorted(group), "zone": zone})
         out[net] = groups
     return {"ok": True, "groups": out}
 

@@ -48,9 +48,9 @@ type intentCopper struct {
 
 // intentPin is one pin's simulated worst-case current.
 type intentPin struct {
-	Ref      string  `json:"ref"`
-	Pin      string  `json:"pin"`
-	CurrentA float64 `json:"currentA"`
+	Ref      string   `json:"ref"`
+	Pin      string   `json:"pin"`
+	CurrentA *float64 `json:"currentA"` // nil: the pin has no simulated current
 }
 
 type intentNet struct {

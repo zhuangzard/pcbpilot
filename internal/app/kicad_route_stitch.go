@@ -11,7 +11,9 @@ import (
 	"fmt"
 	"math"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/zhuangzard/pcbpilot/internal/kicad"
@@ -23,6 +25,7 @@ const (
 	stitchMaxPasses = 3
 	stitchMaxRounds = 3  // edits to settle one pass
 	stitchMinGain   = 10 // a pass keeping fewer ends the search: each costs minutes
+	stitchWorseMm   = 0.002
 	// stitchReachMil: how far from the pad edge a via may sit. Within the pad
 	// escape zone the intent-widths gate allows for a track narrower than its
 	// class.
@@ -169,23 +172,23 @@ func planStitches(open, pads []boardPad, tracks []specctra.Track, vias []widenVi
 	return out, noSite
 }
 
-// openPadsOf picks the pads outside each net's main group, the group with the
-// most pads. A net whose groups are all single pads has no main group yet: all
-// of them are open.
-func openPadsOf(groups map[string][][]string) map[string]bool {
+// openPadsOf picks the pads outside each net's main group: of the groups holding
+// zone copper, the one with the most pads. Pads a net's pours do not reach are
+// all open, however many a track joins.
+func openPadsOf(groups map[string][]kicad.PadGroup) map[string]bool {
 	open := map[string]bool{}
 	for _, gs := range groups {
-		main, most := -1, 1
+		main, most := -1, 0
 		for i, g := range gs {
-			if len(g) > most {
-				main, most = i, len(g)
+			if g.Zone && len(g.Pads) > most {
+				main, most = i, len(g.Pads)
 			}
 		}
 		for i, g := range gs {
 			if i == main {
 				continue
 			}
-			for _, id := range g {
+			for _, id := range g.Pads {
 				open[id] = true
 			}
 		}
@@ -210,35 +213,68 @@ func stitchNearViolation(v kicad.Violation, s stitch) bool {
 	return segDist([2]float64{*v.X, *v.Y}, a, b) <= stitchNearMil
 }
 
-// violationKey names a violation by its rule and the objects in it: KiCad lists
-// the same two objects in either order from one run to the next, and rewords the
-// measured gap by a few micrometres after a refill.
+var reDRCActual = regexp.MustCompile(`actual ([0-9.]+) mm`)
+
+// violationKey names a violation by its rule and objects, in any order: KiCad
+// lists the same two either way round from run to run. Objects count by uuid,
+// since two vias of a net have the same description.
 func violationKey(v kicad.Violation) string {
 	if len(v.Items) == 0 {
 		return v.Rule + "|" + v.Message
 	}
 	items := make([]string, 0, len(v.Items))
 	for _, it := range v.Items {
-		items = append(items, it.Description)
+		if it.UUID != "" {
+			items = append(items, it.UUID)
+		} else {
+			items = append(items, it.Description)
+		}
 	}
 	sort.Strings(items)
 	return v.Rule + "|" + strings.Join(items, "|")
 }
 
-// newViolations lists what cur has and base did not, by rule and objects.
+func violationActual(v kicad.Violation) (float64, bool) {
+	m := reDRCActual.FindStringSubmatch(v.Message)
+	if m == nil {
+		return 0, false
+	}
+	a, err := strconv.ParseFloat(m[1], 64)
+	return a, err == nil
+}
+
+// newViolations lists what cur has and base did not, by rule and objects, and
+// what got worse: a gap shrinking by more than stitchWorseMm between the same
+// objects. Open connections are judged by pad groups instead.
 func newViolations(base, cur *kicad.DRCReport) []kicad.Violation {
-	seen := map[string]int{}
+	type entry struct {
+		n      int
+		actual float64
+		known  bool
+	}
+	seen := map[string]*entry{}
 	for _, v := range base.Violations {
-		seen[violationKey(v)]++
+		k := violationKey(v)
+		e := seen[k]
+		if e == nil {
+			e = &entry{}
+			seen[k] = e
+		}
+		e.n++
+		e.actual, e.known = violationActual(v)
 	}
 	var out []kicad.Violation
 	for _, v := range cur.Violations {
-		k := violationKey(v)
-		if seen[k] > 0 {
-			seen[k]--
+		if v.Rule == "unconnected_items" {
 			continue
 		}
-		if v.Rule != "unconnected_items" {
+		e := seen[violationKey(v)]
+		if e == nil || e.n == 0 {
+			out = append(out, v)
+			continue
+		}
+		e.n--
+		if a, ok := violationActual(v); ok && e.known && a < e.actual-stitchWorseMm {
 			out = append(out, v)
 		}
 	}
@@ -348,7 +384,7 @@ func (r *kicadRun) stitchPours(board string, nets []string) (string, error) {
 			cannot("stitch edit: " + err.Error())
 			return cur, nil
 		}
-		good, reasons, err := r.stitchProve(trial, plan, nets, base, pass)
+		good, reasons, err := r.stitchProve(trial, plan, nets, base, openIDs, pass)
 		if err != nil {
 			cannot(err.Error())
 			return cur, nil
@@ -372,7 +408,7 @@ func (r *kicadRun) stitchPours(board string, nets []string) (string, error) {
 				cannot("stitch edit: " + err.Error())
 				return cur, nil
 			}
-			held, again, err := r.stitchProve(next, good, nets, base, pass)
+			held, again, err := r.stitchProve(next, good, nets, base, openIDs, pass)
 			if err != nil {
 				cannot(err.Error())
 				return cur, nil
@@ -423,7 +459,7 @@ func stitchOps(ss []stitch) map[string]any {
 // net's main group with no new DRC error at them. A new error at no stitch at
 // all rejects nothing here but is an error of the pass: the caller keeps the
 // board from before it.
-func (r *kicadRun) stitchProve(board string, plan []stitch, nets []string, base *kicad.DRCReport, pass int) ([]stitch, map[string]string, error) {
+func (r *kicadRun) stitchProve(board string, plan []stitch, nets []string, base *kicad.DRCReport, before map[string]bool, pass int) ([]stitch, map[string]string, error) {
 	rep, err := r.kt.DRC(board, filepath.Join(r.work, fmt.Sprintf("%02d-stitch-drc%d.json", r.step, pass)))
 	if err != nil {
 		return nil, nil, fmt.Errorf("DRC after stitching: %w", err)
@@ -435,6 +471,14 @@ func (r *kicadRun) stitchProve(board string, plan []stitch, nets []string, base 
 	open := openPadsOf(groups)
 	fresh := newViolations(base, rep)
 	reasons := map[string]string{}
+	// A stitch can cut a plane in two at its neck: any pad joined before and
+	// open now fails the pass, whichever stitch did it.
+	for id := range open {
+		if !before[id] {
+			reasons["board"] = "pad " + id + " lost its pour"
+			break
+		}
+	}
 	var good []stitch
 	claimed := make([]bool, len(fresh))
 	for _, c := range plan {
@@ -457,7 +501,7 @@ func (r *kicadRun) stitchProve(board string, plan []stitch, nets []string, base 
 		good = append(good, c)
 	}
 	for i, v := range fresh {
-		if !claimed[i] {
+		if !claimed[i] && reasons["board"] == "" {
 			reasons["board"] = "new DRC " + v.Rule + " away from any stitch"
 			break
 		}
@@ -468,15 +512,18 @@ func (r *kicadRun) stitchProve(board string, plan []stitch, nets []string, base 
 // stitchRefusal says why one via may not feed this pad: its current is above one
 // barrel's limit, or the simulation gives none for it. Empty when it may.
 func stitchRefusal(in *designIntent, net, ref, pin string, drillMil float64) string {
-	n := in.Nets[net]
-	if n == nil {
+	if in == nil || in.Nets[net] == nil {
 		return "no simulated current for the net"
 	}
+	n := in.Nets[net]
 	limit := pcbauto.ViaAmpacity(drillMil, stitchPlatingMil, stitchTempRiseC)
 	for _, p := range n.Pins {
 		if p.Ref == ref && p.Pin == pin {
-			if math.Abs(p.CurrentA) > limit {
-				return fmt.Sprintf("%.3f A is above one via's %.3f A", math.Abs(p.CurrentA), limit)
+			if p.CurrentA == nil {
+				return "no simulated current for the pad"
+			}
+			if i := math.Abs(*p.CurrentA); i > limit {
+				return fmt.Sprintf("%.3f A is above one via's %.3f A", i, limit)
 			}
 			return ""
 		}

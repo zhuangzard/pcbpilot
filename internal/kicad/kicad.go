@@ -360,9 +360,16 @@ func (t *Tools) ImportSES(pcb, ses, out string) (json.RawMessage, error) {
 // Fill refills every zone of pcb and saves it in place.
 func (t *Tools) Fill(pcb string) (json.RawMessage, error) { return t.RunBridge("fill", pcb) }
 
-// PadGroups returns, for each named net, its pads' uuids grouped by copper
-// connection on the board as saved.
-func (t *Tools) PadGroups(pcb string, nets []string) (map[string][][]string, error) {
+// PadGroup is the pads one piece of a net's copper joins, by uuid, and whether
+// that copper holds a zone.
+type PadGroup struct {
+	Pads []string `json:"pads"`
+	Zone bool     `json:"zone"`
+}
+
+// PadGroups returns, for each named net, its pads grouped by copper connection
+// on the board as saved.
+func (t *Tools) PadGroups(pcb string, nets []string) (map[string][]PadGroup, error) {
 	f, err := os.CreateTemp("", "pcbpilot-pad-groups-*.json")
 	if err != nil {
 		return nil, err
@@ -380,7 +387,7 @@ func (t *Tools) PadGroups(pcb string, nets []string) (map[string][][]string, err
 		return nil, err
 	}
 	var res struct {
-		Groups map[string][][]string `json:"groups"`
+		Groups map[string][]PadGroup `json:"groups"`
 	}
 	if err := json.Unmarshal(raw, &res); err != nil {
 		return nil, err

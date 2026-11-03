@@ -317,6 +317,12 @@ func PlanEdgeZones(b *Board, c *Circuit, m *Mechanics, region Rect, spacing floa
 		}
 	}
 
+	// Depth into the board: a rectangle deeper than the board is not a layout.
+	for _, e := range small {
+		if e.rect.MinX < region.MinX-1e-6 || e.rect.MaxX > region.MaxX+1e-6 || e.rect.MinY < region.MinY-1e-6 || e.rect.MaxY > region.MaxY+1e-6 {
+			return nil, fmt.Errorf("domain zones: domain %s does not fit the board against the %s edge", e.id, e.edge)
+		}
+	}
 	// Every pair, including ones on different edges: corners and neighbours.
 	for i, x := range small {
 		for _, y := range small[i+1:] {
@@ -338,16 +344,27 @@ func PlanEdgeZones(b *Board, c *Circuit, m *Mechanics, region Rect, spacing floa
 	if fill := area[big.ID] / rest.Area(); fill > edgeZoneMaxFill {
 		return nil, fmt.Errorf("domain zones: domain %s needs %.0f mil² in a rectangle of %.0f (fill %.2f, limit %.2f)", big.ID, area[big.ID], rest.Area(), fill, edgeZoneMaxFill)
 	}
-	// Its fixed parts must not end up in another domain's rectangle.
-	for _, ref := range big.Parts {
-		p := b.Part(ref)
-		if p == nil || !(p.Fixed || m.Fixed[ref]) || c.IsBridge(ref) {
-			continue
-		}
-		body, _ := edgeFixedBody(p, m, bb)
-		for _, e := range small {
-			if rectGap(body, e.rect) <= 0 {
-				return nil, fmt.Errorf("domain zones: %s of domain %s lies inside the zone of domain %s (part %+v, zone %+v)", ref, big.ID, e.id, body, e.rect)
+	// No fixed part may end up in another domain's rectangle: it cannot move out.
+	zoneOf := map[string]Rect{big.ID: rest}
+	for _, e := range small {
+		zoneOf[e.id] = e.rect
+	}
+	ids := make([]string, 0, len(zoneOf))
+	for id := range zoneOf {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, d := range doms {
+		for _, ref := range d.Parts {
+			p := b.Part(ref)
+			if p == nil || !(p.Fixed || m.Fixed[ref]) || c.IsBridge(ref) {
+				continue
+			}
+			body, _ := edgeFixedBody(p, m, bb)
+			for _, id := range ids {
+				if id != d.ID && rectGap(body, zoneOf[id]) <= 0 {
+					return nil, fmt.Errorf("domain zones: %s of domain %s lies inside the zone of domain %s (part %+v, zone %+v)", ref, d.ID, id, body, zoneOf[id])
+				}
 			}
 		}
 	}
