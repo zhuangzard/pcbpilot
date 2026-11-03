@@ -6,6 +6,10 @@ import (
 )
 
 const insulationDSN = `(pcb t
+  (parser
+    (string_quote ")
+    (space_in_quoted_tokens on)
+  )
   (network
     (net A (pins U1-1))
     (class "PP1_W8+PPD_domain_a+Default" A
@@ -46,6 +50,10 @@ func TestDSNInsulationRules(t *testing.T) {
 	out, n, err = dsnInsulationRules(quoted, iso, 5.08)
 	if err != nil || n != 1 || strings.Index(out, "class_class") < strings.Index(out, "PP5_W10") {
 		t.Fatalf("quoted name: %d %v\n%s", n, err, out)
+	}
+	// Pairs with none of their domains in any class: nothing would protect them.
+	if _, _, err := dsnInsulationRules(`(pcb t (parser (string_quote ")) (network (class "A" B (rule (clearance 1)))) (wiring))`, iso, 5.08); err == nil {
+		t.Fatal("pairs and no class of their domains must be an error")
 	}
 	// Rules that are needed but cannot be written fail.
 	broken := strings.Replace(insulationDSN, "(network", "(netwrk", 1)
@@ -101,7 +109,7 @@ func TestCheckRouterArgs(t *testing.T) {
 }
 
 func TestDSNIsolateNets(t *testing.T) {
-	dsn := `(pcb t (network
+	dsn := `(pcb t (parser (string_quote ")) (network
     (class "P8+D" "+3V3" RAW
       (rule (width 400) (clearance 205)))
     (class "P16+D" GND

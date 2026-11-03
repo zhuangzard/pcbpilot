@@ -21,10 +21,18 @@ var (
 )
 
 // dsnFindAll returns where each "(" + word + delimiter starts outside quotes.
+// The parser section's (string_quote ") holds one lone quote character, which
+// is not the start of a string.
 func dsnFindAll(dsn, word string) []int {
 	var at []int
 	inQ := false
 	for i := 0; i < len(dsn); i++ {
+		if !inQ && strings.HasPrefix(dsn[i:], "(string_quote") {
+			if j := strings.IndexByte(dsn[i:], ')'); j >= 0 {
+				i += j
+				continue
+			}
+		}
 		switch dsn[i] {
 		case '"':
 			inQ = !inQ
@@ -75,13 +83,16 @@ func dsnInsulationRules(dsn string, iso []map[string]any, marginUm float64) (str
 	}
 	seen := map[string]float64{}
 	var order []string
+	wanted, domainSeen := false, false
 	for _, p := range iso {
 		mm, _ := p["clearanceMm"].(float64)
 		if mm <= 0 {
 			continue
 		}
 		ca, cb := domainClass(fmt.Sprint(p["a"])), domainClass(fmt.Sprint(p["b"]))
+		wanted = true
 		for _, x := range names {
+			domainSeen = domainSeen || member(x, ca) || member(x, cb)
 			if member(x, ca) && member(x, cb) {
 				return dsn, 0, fmt.Errorf("DSN class %s is on both sides of insulation pair %v|%v", x, p["a"], p["b"])
 			}
@@ -107,6 +118,9 @@ func dsnInsulationRules(dsn string, iso []map[string]any, marginUm float64) (str
 		}
 	}
 	if len(order) == 0 {
+		if wanted && !domainSeen {
+			return dsn, 0, fmt.Errorf("insulation pairs but no DSN class of their domains (%d classes read)", len(names))
+		}
 		return dsn, 0, nil
 	}
 	nets := dsnFindAll(dsn, "network")
