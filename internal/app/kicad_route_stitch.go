@@ -521,8 +521,10 @@ func (r *kicadRun) stitchProve(board string, plan []stitch, nets []string, base 
 }
 
 // padsSplit lists the pads of each earlier group that are no longer with the
-// largest part of that group. A growing group splits nothing, and a net's main
-// group changing from one piece of copper to another is not a cut.
+// largest part of that group, or have lost the zone that group held. A growing
+// group splits nothing, and a net's main group changing from one piece of copper
+// to another is not a cut. A pour cut in two whose pads a track still joins does
+// not show here; the post-layout simulation sees that copper.
 func padsSplit(before, after map[string][]kicad.PadGroup) map[string]bool {
 	lost := map[string]bool{}
 	for net, gs := range before {
@@ -537,6 +539,17 @@ func padsSplit(before, after map[string][]kicad.PadGroup) map[string]bool {
 			for _, id := range g.Pads {
 				if w, ok := where[id]; ok {
 					parts[w] = append(parts[w], id)
+				}
+			}
+			// Copper that held a zone and no longer does was cut off it, even
+			// a single pad with no group to leave.
+			if g.Zone {
+				for w, ids := range parts {
+					if !after[net][w].Zone {
+						for _, id := range ids {
+							lost[id] = true
+						}
+					}
 				}
 			}
 			if len(parts) < 2 {

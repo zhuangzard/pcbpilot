@@ -16,10 +16,11 @@ import (
 )
 
 const (
-	edgeZoneFill    = 0.6  // room a rectangle is sized for: parts / area
-	edgeZoneMaxFill = 0.85 // above this the largest domain's rectangle is refused
-	edgeZoneAspect  = 2.5  // width along the edge / depth into the board: shallow leaves the largest domain room
-	edgeZoneDefGap  = 40.0 // mil between two domains with no barrier between them
+	edgeZoneFill       = 0.6  // room a rectangle is sized for: parts / area
+	edgeZoneMaxFill    = 0.85 // above this the largest domain's rectangle is refused
+	edgeZoneAspect     = 2.5  // width along the edge / depth into the board: shallow leaves the largest domain room
+	edgeZoneDefGap     = 40.0 // mil between two domains with no barrier between them
+	edgeZoneMinOutline = 0.98 // outline / bounding box: rounded corners pass, cutouts do not
 )
 
 // EdgeZonePlan is a domain layout and what the report says about it.
@@ -86,6 +87,10 @@ func edgeFixedBody(p *Part, m *Mechanics, bb Rect) (Rect, string) {
 func PlanEdgeZones(b *Board, c *Circuit, m *Mechanics, region Rect, spacing float64) (*EdgeZonePlan, error) {
 	if m == nil {
 		m = &Mechanics{Edge: map[string]MechEdge{}, Fixed: map[string]bool{}}
+	}
+	// Zones are rectangles: on a board that is not one they could leave it.
+	if bbox := b.Bounds(); len(b.Outline) >= 3 && polygonArea(b.Outline) < edgeZoneMinOutline*bbox.Area() {
+		return nil, fmt.Errorf("domain zones: the board outline is not a rectangle (%.0f %% of its bounding box); give zones with --mech", 100*polygonArea(b.Outline)/bbox.Area())
 	}
 	netDomain := map[string]string{}
 	var doms []*Domain
@@ -317,6 +322,26 @@ func PlanEdgeZones(b *Board, c *Circuit, m *Mechanics, region Rect, spacing floa
 		}
 	}
 
+	// A foreign fixed part too near a rectangle: trim the side that loses least,
+	// if the anchor stays inside and the parts still fit.
+	for _, e := range small {
+		for _, d := range c.Domains {
+			if d.ID == e.id {
+				continue
+			}
+			for _, ref := range d.Parts {
+				p := b.Part(ref)
+				if p == nil || !(p.Fixed || m.Fixed[ref]) || c.IsBridge(ref) || byDomain[e.id][ref] != nil {
+					continue
+				}
+				body, _ := edgeFixedBody(p, m, bb)
+				if t, ok := trimClear(e.rect, body, gapIf(c, d.ID, e.id), e.anchor, spacing, e.edge == "top" || e.edge == "bottom"); ok && t.Area()*edgeZoneMaxFill >= area[e.id] {
+					e.rect = t
+				}
+			}
+		}
+	}
+
 	// Depth into the board: a rectangle deeper than the board is not a layout.
 	for _, e := range small {
 		if e.rect.MinX < region.MinX-1e-6 || e.rect.MaxX > region.MaxX+1e-6 || e.rect.MinY < region.MinY-1e-6 || e.rect.MaxY > region.MaxY+1e-6 {
@@ -354,7 +379,8 @@ func PlanEdgeZones(b *Board, c *Circuit, m *Mechanics, region Rect, spacing floa
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
-	for _, d := range doms {
+	// Every domain's parts, those in no pair too.
+	for _, d := range c.Domains {
 		for _, ref := range d.Parts {
 			p := b.Part(ref)
 			if p == nil || !(p.Fixed || m.Fixed[ref]) || c.IsBridge(ref) {
@@ -362,8 +388,24 @@ func PlanEdgeZones(b *Board, c *Circuit, m *Mechanics, region Rect, spacing floa
 			}
 			body, _ := edgeFixedBody(p, m, bb)
 			for _, id := range ids {
-				if id != d.ID && rectGap(body, zoneOf[id]) <= 0 {
-					return nil, fmt.Errorf("domain zones: %s of domain %s lies inside the zone of domain %s (part %+v, zone %+v)", ref, d.ID, id, body, zoneOf[id])
+				// A part with pads of that domain belongs there too: a
+				// connector shared by two domains is not foreign to either.
+				if id == d.ID || byDomain[id][ref] != nil {
+					continue
+				}
+				need := 0.0
+				if barred[d.ID] {
+					need = gapIf(c, d.ID, id)
+				}
+				if g := rectGap(body, zoneOf[id]); g <= 0 || g < need-1e-6 {
+					// A small domain's fixed part away from any edge (a mounting
+					// hole on a chassis net): the design's question, not the
+					// layout's. The isolation gate judges its copper.
+					if _, onEdge := m.Edge[ref]; !onEdge && d.ID != big.ID {
+						plan.Notes = append(plan.Notes, fmt.Sprintf("%s of domain %s sits %.0f mil from the zone of domain %s", ref, d.ID, g, id))
+						continue
+					}
+					return nil, fmt.Errorf("domain zones: %s of domain %s lies inside the zone of domain %s or too near it, %.0f mil from it, %.0f needed (part %+v, zone %+v)", ref, d.ID, id, g, need, body, zoneOf[id])
 				}
 			}
 		}
@@ -374,6 +416,57 @@ func PlanEdgeZones(b *Board, c *Circuit, m *Mechanics, region Rect, spacing floa
 	}
 	plan.Notes = append(plan.Notes, "domain zones against the connectors: bridges are placed freely, no isolation strips (KiCad's rules and the router's pair clearances hold the gaps)")
 	return plan, nil
+}
+
+// gapIf is the pair's insulation distance, 0 when they are no pair.
+func gapIf(c *Circuit, a, b string) float64 {
+	for _, br := range c.Barriers {
+		if br.A == a && br.B == b || br.A == b && br.B == a {
+			return math.Max(br.CreepageMil, br.ClearanceMil)
+		}
+	}
+	return 0
+}
+
+// polygonArea is the area of a closed outline.
+func polygonArea(ps []Point) float64 {
+	sum := 0.0
+	for i, p := range ps {
+		q := ps[(i+1)%len(ps)]
+		sum += p.X*q.Y - q.X*p.Y
+	}
+	return math.Abs(sum) / 2
+}
+
+// trimClear moves one side of r in so that it clears body by need, losing as
+// little area as it can and keeping anchor inside. Nothing to do or no way to do
+// it returns false.
+func trimClear(r, body Rect, need float64, anchor Rect, spacing float64, horizontal bool) (Rect, bool) {
+	if rectGap(r, body) >= need && rectGap(r, body) > 0 {
+		return r, false
+	}
+	var cands []Rect
+	if t := (Rect{body.MaxX + need, r.MinY, r.MaxX, r.MaxY}); t.MinX > r.MinX {
+		cands = append(cands, t)
+	}
+	if t := (Rect{r.MinX, r.MinY, body.MinX - need, r.MaxY}); t.MaxX < r.MaxX {
+		cands = append(cands, t)
+	}
+	if t := (Rect{r.MinX, body.MaxY + need, r.MaxX, r.MaxY}); t.MinY > r.MinY {
+		cands = append(cands, t)
+	}
+	if t := (Rect{r.MinX, r.MinY, r.MaxX, body.MinY - need}); t.MaxY < r.MaxY {
+		cands = append(cands, t)
+	}
+	best, found := Rect{}, false
+	for _, t := range cands {
+		// Along the edge only: the connector itself reaches past the region.
+		held := rectHolds(t.Expand(spacing), anchor, horizontal)
+		if t.W() > 0 && t.H() > 0 && held && (!found || t.Area() > best.Area()) {
+			best, found = t, true
+		}
+	}
+	return best, found
 }
 
 // rectHolds says whether outer covers inner along the edge's direction.

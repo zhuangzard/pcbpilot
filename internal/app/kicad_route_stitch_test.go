@@ -228,9 +228,14 @@ func TestPadsSplit(t *testing.T) {
 		t.Fatalf("growth: %v", got)
 	}
 	// The main group moves to other copper: a lone pad cannot be cut off.
-	moved := map[string][]kicad.PadGroup{"P": {{Pads: []string{"a", "b", "c"}}, {Pads: []string{"d", "e", "f", "g"}, Zone: true}}}
+	moved := map[string][]kicad.PadGroup{"P": {{Pads: []string{"a", "b", "c"}, Zone: true}, {Pads: []string{"d", "e", "f", "g"}, Zone: true}}}
 	if got := padsSplit(before, moved); len(got) != 0 {
 		t.Fatalf("main group moved: %v", got)
+	}
+	// A lone pad on a zone loses it.
+	lone := map[string][]kicad.PadGroup{"Q": {{Pads: []string{"x"}, Zone: true}}}
+	if got := padsSplit(lone, map[string][]kicad.PadGroup{"Q": {{Pads: []string{"x"}}}}); !got["x"] {
+		t.Fatalf("lone pad: %v", got)
 	}
 	// c is cut off from a and b.
 	cut := map[string][]kicad.PadGroup{"P": {{Pads: []string{"a", "b"}, Zone: true}, {Pads: []string{"c"}}, {Pads: []string{"d"}}}}

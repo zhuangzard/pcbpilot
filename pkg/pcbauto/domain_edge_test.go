@@ -165,8 +165,60 @@ func TestPlanEdgeZonesRefusesMoreCases(t *testing.T) {
 			d.Parts = append(d.Parts, "JX")
 		}
 	}
+	p, err := PlanEdgeZones(b, c, m, region, 20)
+	if err != nil || !strings.Contains(strings.Join(p.Notes, "
+"), "JX") {
+		t.Errorf("a small domain's part off the edges is reported, not refused: %v", err)
+	}
+	// The same part on an edge is refused.
+	m.Edge["JX"] = MechEdge{Ref: "JX", Edge: "top", At: 2000}
 	if _, err := PlanEdgeZones(b, c, m, region, 20); err == nil || !strings.Contains(err.Error(), "lies inside") {
 		t.Errorf("small in small: %v", err)
+	}
+	// A fixed part just outside a zone but inside the pair's gap.
+	b, c, m, region = edgeZoneBoard(t)
+	a0, err := PlanEdgeZones(b, c, m, region, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	az := zoneOf(t, a0, "A")
+	// Beside the zone's left end, away from its connector: the left side moves in.
+	b, c, m, region = edgeZoneBoard(t)
+	near := &Part{Ref: "JN", Pos: Point{az.MinX - 50, az.Center().Y}, Fixed: true}
+	near.SetBody(Rect{az.MinX - 70, az.Center().Y - 20, az.MinX - 30, az.Center().Y + 20})
+	b.Parts = append(b.Parts, near)
+	c.Domains[0].Parts = append(c.Domains[0].Parts, "JN")
+	// The zone gives way, and clears it by the pair's gap.
+	a1, err := PlanEdgeZones(b, c, m, region, 20)
+	if err != nil {
+		t.Fatalf("fixed part in the gap: %v", err)
+	}
+	if g := rectGap(zoneOf(t, a1, "A"), near.Body()); g < 315-1e-6 {
+		t.Errorf("zone A is %.0f mil from it", g)
+	}
+	// One it cannot give way to: right at its connector.
+	b, c, m, region = edgeZoneBoard(t)
+	tight := &Part{Ref: "JN", Pos: Point{2000, 7700}, Fixed: true}
+	tight.SetBody(Rect{1980, 7680, 2020, 7760})
+	b.Parts = append(b.Parts, tight)
+	c.Domains[0].Parts = append(c.Domains[0].Parts, "JN")
+	if _, err := PlanEdgeZones(b, c, m, region, 20); err == nil || !strings.Contains(err.Error(), "lies inside") {
+		t.Errorf("fixed part at the connector: %v", err)
+	}
+	// A fixed part of a domain in no pair inside a zone.
+	b, c, m, region = edgeZoneBoard(t)
+	free := &Part{Ref: "JF", Pos: Point{2000, 7600}, Fixed: true}
+	free.SetBody(Rect{1900, 7500, 2100, 7700})
+	b.Parts = append(b.Parts, free)
+	c.Domains = append(c.Domains, &Domain{ID: "FREE", Parts: []string{"JF"}})
+	if _, err := PlanEdgeZones(b, c, m, region, 20); err == nil || !strings.Contains(err.Error(), "lies inside") {
+		t.Errorf("unpaired domain's fixed part: %v", err)
+	}
+	// An L-shaped board.
+	b, c, m, region = edgeZoneBoard(t)
+	b.Outline = []Point{{0, 0}, {10000, 0}, {10000, 4000}, {5000, 4000}, {5000, 8000}, {0, 8000}}
+	if _, err := PlanEdgeZones(b, c, m, region, 20); err == nil || !strings.Contains(err.Error(), "not a rectangle") {
+		t.Errorf("L-shaped board: %v", err)
 	}
 	// A domain too large to fit against its edge.
 	b, c, m, region = edgeZoneBoard(t)
