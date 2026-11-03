@@ -166,8 +166,7 @@ func TestPlanEdgeZonesRefusesMoreCases(t *testing.T) {
 		}
 	}
 	p, err := PlanEdgeZones(b, c, m, region, 20)
-	if err != nil || !strings.Contains(strings.Join(p.Notes, "
-"), "JX") {
+	if err != nil || !strings.Contains(strings.Join(p.Notes, "\n"), "JX") {
 		t.Errorf("a small domain's part off the edges is reported, not refused: %v", err)
 	}
 	// The same part on an edge is refused.
@@ -205,14 +204,20 @@ func TestPlanEdgeZonesRefusesMoreCases(t *testing.T) {
 	if _, err := PlanEdgeZones(b, c, m, region, 20); err == nil || !strings.Contains(err.Error(), "lies inside") {
 		t.Errorf("fixed part at the connector: %v", err)
 	}
-	// A fixed part of a domain in no pair inside a zone.
+	// A fixed part of a domain in no pair inside a zone: on an edge it is refused,
+	// off the edges it is reported.
 	b, c, m, region = edgeZoneBoard(t)
 	free := &Part{Ref: "JF", Pos: Point{2000, 7600}, Fixed: true}
 	free.SetBody(Rect{1900, 7500, 2100, 7700})
 	b.Parts = append(b.Parts, free)
 	c.Domains = append(c.Domains, &Domain{ID: "FREE", Parts: []string{"JF"}})
-	if _, err := PlanEdgeZones(b, c, m, region, 20); err == nil || !strings.Contains(err.Error(), "lies inside") {
+	pf, err := PlanEdgeZones(b, c, m, region, 20)
+	if err != nil || !strings.Contains(strings.Join(pf.Notes, "\n"), "JF") {
 		t.Errorf("unpaired domain's fixed part: %v", err)
+	}
+	m.Edge["JF"] = MechEdge{Ref: "JF", Edge: "top", At: 2000}
+	if _, err := PlanEdgeZones(b, c, m, region, 20); err == nil || !strings.Contains(err.Error(), "lies inside") {
+		t.Errorf("unpaired domain's fixed part on an edge: %v", err)
 	}
 	// An L-shaped board.
 	b, c, m, region = edgeZoneBoard(t)
