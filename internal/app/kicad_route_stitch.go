@@ -221,14 +221,19 @@ var reDRCActual = regexp.MustCompile(`actual ([0-9.]+) mm`)
 // since two vias of a net have the same description.
 func violationKey(v kicad.Violation) string {
 	if len(v.Items) == 0 {
-		return v.Rule + "|" + v.Message
+		at := ""
+		if v.X != nil && v.Y != nil {
+			at = fmt.Sprintf("@%.1f,%.1f", *v.X, *v.Y)
+		}
+		return v.Rule + "|" + v.Message + at
 	}
 	items := make([]string, 0, len(v.Items))
 	for _, it := range v.Items {
 		if it.UUID != "" {
 			items = append(items, it.UUID)
 		} else {
-			items = append(items, it.Description)
+			// With no uuid only the place tells two like objects apart.
+			items = append(items, fmt.Sprintf("%s@%.1f,%.1f", it.Description, it.X, it.Y))
 		}
 	}
 	sort.Strings(items)

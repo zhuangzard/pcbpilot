@@ -197,6 +197,21 @@ func TestNewViolationsByObjectAndGap(t *testing.T) {
 	}
 }
 
+// Without a uuid, the same words at another place are another violation.
+func TestNewViolationsByPlace(t *testing.T) {
+	x1, x2, y := 1.0, 900.0, 2.0
+	base := &kicad.DRCReport{Violations: []kicad.Violation{{Rule: "r", Message: "m", X: &x1, Y: &y}}}
+	cur := &kicad.DRCReport{Violations: []kicad.Violation{{Rule: "r", Message: "m", X: &x2, Y: &y}}}
+	if got := newViolations(base, cur); len(got) != 1 {
+		t.Fatalf("itemless: %+v", got)
+	}
+	base = &kicad.DRCReport{Violations: []kicad.Violation{{Rule: "r", Items: []kicad.DRCItem{{Description: "Via [GND]", X: 1, Y: 2}}}}}
+	cur = &kicad.DRCReport{Violations: []kicad.Violation{{Rule: "r", Items: []kicad.DRCItem{{Description: "Via [GND]", X: 900, Y: 2}}}}}
+	if got := newViolations(base, cur); len(got) != 1 {
+		t.Fatalf("no uuid: %+v", got)
+	}
+}
+
 func TestStitchRefusal(t *testing.T) {
 	low, high := 0.02, 5.0
 	in := &designIntent{Nets: map[string]*intentNet{"P": {Pins: []intentPin{{Ref: "C1", Pin: "1", CurrentA: &low}, {Ref: "U1", Pin: "3", CurrentA: &high}, {Ref: "C2", Pin: "1"}}}}}

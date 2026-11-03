@@ -186,14 +186,21 @@ func runKicadPlace(o kicadPlaceOpts, deps kicadPlaceDeps, stderr io.Writer) (*ki
 	if err != nil {
 		return nil, err
 	}
-	renamed, err := placeIntentOnBoard(power.Intent, b)
+	var placeNotes []string
+	renamed, missing, err := placeIntentOnBoard(power.Intent, b)
 	if err != nil {
 		return nil, err
 	}
 	if len(renamed) > 0 {
 		fmt.Fprintf(stderr, "placement: %d intent net(s) resolved to the board's net names\n", len(renamed))
 	}
+	if len(missing) > 0 {
+		note := fmt.Sprintf("%d intent net(s) are not on the board and constrain nothing: %s", len(missing), strings.Join(firstN(missing, 8), ", "))
+		fmt.Fprintf(stderr, "placement: WARNING %s\n", rep0)
+		placeNotes = append(placeNotes, note)
+	}
 	rep := &kicadPlaceReport{PCB: o.pcb, Out: o.out, Fixed: fixed, path: o.report}
+	rep.Notes = append(rep.Notes, placeNotes...)
 	for _, n := range kicadKeptNotes(kept) {
 		rep.Notes = append(rep.Notes, n)
 		fmt.Fprintf(stderr, "placement: %s\n", n)
@@ -420,9 +427,9 @@ func mustAbs(p string) string {
 
 // placeIntentOnBoard gives the intent the board's net names, as kicad route does:
 // a short name that stays short has no domain and no current on the board.
-func placeIntentOnBoard(in *pcbauto.Intent, b *pcbauto.Board) (map[string]string, error) {
+func placeIntentOnBoard(in *pcbauto.Intent, b *pcbauto.Board) (map[string]string, []string, error) {
 	if in == nil {
-		return nil, nil
+		return nil, nil, nil
 	}
 	var names []string
 	for _, n := range b.Nets() {
@@ -448,12 +455,14 @@ func placeIntentOnBoard(in *pcbauto.Intent, b *pcbauto.Board) (map[string]string
 	}
 	to := map[string]string{}
 	dest := map[string]string{}
-	var problems []string
+	var problems, missing []string
 	for _, name := range sortedKeysOf(refs) {
 		id, m := r.Resolve(name)
 		switch m {
 		case netname.Ambiguous:
 			problems = append(problems, fmt.Sprintf("%q could be board net %s", name, strings.Join(r.Candidates(name), " or ")))
+		case netname.Unknown:
+			missing = append(missing, name)
 		case netname.Found:
 			if other, dup := dest[id]; dup {
 				problems = append(problems, fmt.Sprintf("intent names %s and %s both name board net %s", other, name, id))
@@ -466,7 +475,7 @@ func placeIntentOnBoard(in *pcbauto.Intent, b *pcbauto.Board) (map[string]string
 		}
 	}
 	if len(problems) > 0 {
-		return nil, fmt.Errorf("intent nets do not resolve to one board net each: %s", strings.Join(problems, "; "))
+		return nil, nil, fmt.Errorf("intent nets do not resolve to one board net each: %s", strings.Join(problems, "; "))
 	}
 	if len(to) > 0 {
 		in.RenameNets(func(n string) string {
@@ -476,7 +485,14 @@ func placeIntentOnBoard(in *pcbauto.Intent, b *pcbauto.Board) (map[string]string
 			return n
 		})
 	}
-	return to, nil
+	return to, missing, nil
+}
+
+func firstN(ss []string, n int) []string {
+	if len(ss) > n {
+		return ss[:n]
+	}
+	return ss
 }
 
 // kicadPlacePower reads --power / --sim / --intent like pcb auto run.
