@@ -131,6 +131,10 @@ func TestStitchNearViolation(t *testing.T) {
 	if stitchNearViolation(kicad.Violation{X: &far, Y: &zero}, s) {
 		t.Error("far away")
 	}
+	// The violation's own position is far away; its via object is at the stitch.
+	if !stitchNearViolation(kicad.Violation{X: &far, Y: &far, Items: []kicad.DRCItem{{X: 900, Y: 900}, {X: 100, Y: 0}}}, s) {
+		t.Error("an object of the violation at the stitch")
+	}
 	if stitchNearViolation(kicad.Violation{}, s) {
 		t.Error("no position")
 	}
@@ -155,5 +159,35 @@ func TestStitchNetsFollowTheProfile(t *testing.T) {
 	r.summary = map[string]any{}
 	if n := r.stitchNets(ps); len(n) != 2 {
 		t.Fatalf("on: %v", n)
+	}
+}
+
+// KiCad lists the same two objects in either order between runs.
+func TestNewViolationsIgnoresItemOrder(t *testing.T) {
+	a, b := kicad.DRCItem{Description: "Pad 1"}, kicad.DRCItem{Description: "Pad 2"}
+	base := &kicad.DRCReport{Violations: []kicad.Violation{{Rule: "clearance", Message: "actual 0.1991 mm", Items: []kicad.DRCItem{a, b}}}}
+	cur := &kicad.DRCReport{Violations: []kicad.Violation{{Rule: "clearance", Message: "actual 0.1983 mm", Items: []kicad.DRCItem{b, a}}}}
+	if got := newViolations(base, cur); len(got) != 0 {
+		t.Fatalf("same objects reported as new: %+v", got)
+	}
+	cur.Violations[0].Items = []kicad.DRCItem{a, {Description: "Via"}}
+	if got := newViolations(base, cur); len(got) != 1 {
+		t.Fatal("different objects must be new")
+	}
+}
+
+func TestStitchRefusal(t *testing.T) {
+	in := &designIntent{Nets: map[string]*intentNet{"P": {Pins: []intentPin{{Ref: "C1", Pin: "1", CurrentA: 0.02}, {Ref: "U1", Pin: "3", CurrentA: 5}}}}}
+	if why := stitchRefusal(in, "P", "C1", "1", 12); why != "" {
+		t.Errorf("low current refused: %s", why)
+	}
+	if why := stitchRefusal(in, "P", "U1", "3", 12); why == "" {
+		t.Error("5 A through one via accepted")
+	}
+	if why := stitchRefusal(in, "P", "C9", "1", 12); why == "" {
+		t.Error("a pad with no current accepted")
+	}
+	if why := stitchRefusal(in, "Q", "C1", "1", 12); why == "" {
+		t.Error("a net with no intent accepted")
 	}
 }

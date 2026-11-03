@@ -16,15 +16,21 @@ import (
 
 	"github.com/zhuangzard/pcbpilot/internal/kicad"
 	"github.com/zhuangzard/pcbpilot/internal/pcb/specctra"
+	"github.com/zhuangzard/pcbpilot/pkg/pcbauto"
 )
 
 const (
 	stitchMaxPasses = 3
+	stitchMaxRounds = 3  // edits to settle one pass
+	stitchMinGain   = 10 // a pass keeping fewer ends the search: each costs minutes
 	// stitchReachMil: how far from the pad edge a via may sit. Within the pad
 	// escape zone the intent-widths gate allows for a track narrower than its
 	// class.
 	stitchReachMil = 45.0
 	stitchNearMil  = 30.0 // a new DRC error this close to a stitch is its own
+	// One barrel's current limit: 25 um plating, 10 C rise.
+	stitchPlatingMil = 1.0
+	stitchTempRiseC  = 10.0
 )
 
 // stitchSize is the via and track a net's stitches use (mil).
@@ -189,24 +195,45 @@ func openPadsOf(groups map[string][][]string) map[string]bool {
 
 // stitchNearViolation says whether a violation sits at one of the stitches.
 func stitchNearViolation(v kicad.Violation, s stitch) bool {
+	a := [2]float64{s.Track.X1, s.Track.Y1}
+	b := [2]float64{s.Via.X, s.Via.Y}
+	// Any object of it: an insulation error names the via and a track whose
+	// reported position can be millimetres away.
+	for _, it := range v.Items {
+		if segDist([2]float64{it.X, it.Y}, a, b) <= stitchNearMil {
+			return true
+		}
+	}
 	if v.X == nil || v.Y == nil {
 		return false
 	}
-	q := [2]float64{*v.X, *v.Y}
-	a := [2]float64{s.Track.X1, s.Track.Y1}
-	b := [2]float64{s.Via.X, s.Via.Y}
-	return segDist(q, a, b) <= stitchNearMil
+	return segDist([2]float64{*v.X, *v.Y}, a, b) <= stitchNearMil
 }
 
-// newViolations lists what cur has and base did not, by rule and message.
+// violationKey names a violation by its rule and the objects in it: KiCad lists
+// the same two objects in either order from one run to the next, and rewords the
+// measured gap by a few micrometres after a refill.
+func violationKey(v kicad.Violation) string {
+	if len(v.Items) == 0 {
+		return v.Rule + "|" + v.Message
+	}
+	items := make([]string, 0, len(v.Items))
+	for _, it := range v.Items {
+		items = append(items, it.Description)
+	}
+	sort.Strings(items)
+	return v.Rule + "|" + strings.Join(items, "|")
+}
+
+// newViolations lists what cur has and base did not, by rule and objects.
 func newViolations(base, cur *kicad.DRCReport) []kicad.Violation {
 	seen := map[string]int{}
 	for _, v := range base.Violations {
-		seen[v.Rule+"|"+v.Message]++
+		seen[violationKey(v)]++
 	}
 	var out []kicad.Violation
 	for _, v := range cur.Violations {
-		k := v.Rule + "|" + v.Message
+		k := violationKey(v)
 		if seen[k] > 0 {
 			seen[k]--
 			continue
@@ -280,12 +307,25 @@ func (r *kicadRun) stitchPours(board string, nets []string) (string, error) {
 			return cur, nil
 		}
 		var open []boardPad
-		for _, p := range pads {
-			if openIDs[p.ID] {
-				open = append(open, p)
+		refused := map[string]string{}
+		refOf := map[string]string{}
+		for i := range s.Components {
+			for _, p := range s.Components[i].Pads {
+				refOf[p.ID] = s.Components[i].Designator
 			}
 		}
-		info := map[string]any{"pass": pass, "open": len(open)}
+		for _, p := range pads {
+			if !openIDs[p.ID] {
+				continue
+			}
+			sz := size[p.Net]
+			if why := stitchRefusal(r.in, p.Net, refOf[p.ID], p.Number, sz.Drill); why != "" {
+				refused[refOf[p.ID]+"."+p.Number] = why
+				continue
+			}
+			open = append(open, p)
+		}
+		info := map[string]any{"pass": pass, "open": len(open), "refused": refused}
 		passes = append(passes, info)
 		if len(open) == 0 {
 			stop = "no open pads"
@@ -322,27 +362,42 @@ func (r *kicadRun) stitchPours(board string, nets []string) (string, error) {
 			continue
 		}
 		// Only what held goes on the board, and that board is checked again:
-		// taking one out can change another's reach.
-		next := r.next("stitch")
-		if _, err := r.kt.Edit(cur, stitchOps(good), next); err != nil {
-			cannot("stitch edit: " + err.Error())
-			return cur, nil
+		// taking one out can change another's reach. Each round drops what
+		// failed; a pass that cannot settle changes nothing.
+		next := ""
+		settled := false
+		for round := 0; round < stitchMaxRounds && len(good) > 0; round++ {
+			next = r.next("stitch")
+			if _, err := r.kt.Edit(cur, stitchOps(good), next); err != nil {
+				cannot("stitch edit: " + err.Error())
+				return cur, nil
+			}
+			held, again, err := r.stitchProve(next, good, nets, base, pass)
+			if err != nil {
+				cannot(err.Error())
+				return cur, nil
+			}
+			if len(again) == 0 {
+				settled = true
+				break
+			}
+			info[fmt.Sprintf("dropped%d", round+1)] = again
+			if _, away := again["board"]; away && len(held) == len(good) {
+				break // a new error at no stitch: nothing left to drop
+			}
+			good = held
 		}
-		held, again, err := r.stitchProve(next, good, nets, base, pass)
-		if err != nil {
-			cannot(err.Error())
-			return cur, nil
-		}
-		if len(again) > 0 || len(held) != len(good) {
-			info["discarded"] = again
-			stop = "a pass did not hold after its failures came out"
+		if !settled {
+			stop = "a pass did not settle after its failures came out"
 			break
 		}
 		cur = next
 		kept = append(kept, good...)
 		info["kept"] = len(good)
-		// The new board's own errors are the baseline only for what was already
-		// there; a kept stitch has none by the check above.
+		if len(good) < stitchMinGain {
+			stop = fmt.Sprintf("a pass kept under %d", stitchMinGain)
+			break
+		}
 	}
 	byNet := map[string]int{}
 	for _, c := range kept {
@@ -408,6 +463,25 @@ func (r *kicadRun) stitchProve(board string, plan []stitch, nets []string, base 
 		}
 	}
 	return good, reasons, nil
+}
+
+// stitchRefusal says why one via may not feed this pad: its current is above one
+// barrel's limit, or the simulation gives none for it. Empty when it may.
+func stitchRefusal(in *designIntent, net, ref, pin string, drillMil float64) string {
+	n := in.Nets[net]
+	if n == nil {
+		return "no simulated current for the net"
+	}
+	limit := pcbauto.ViaAmpacity(drillMil, stitchPlatingMil, stitchTempRiseC)
+	for _, p := range n.Pins {
+		if p.Ref == ref && p.Pin == pin {
+			if math.Abs(p.CurrentA) > limit {
+				return fmt.Sprintf("%.3f A is above one via's %.3f A", math.Abs(p.CurrentA), limit)
+			}
+			return ""
+		}
+	}
+	return "no simulated current for the pad"
 }
 
 // stitchNets are the nets stitching works on: those with a planned pour, when
