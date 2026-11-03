@@ -55,6 +55,20 @@ func TestDSNInsulationRules(t *testing.T) {
 	if _, _, err := dsnInsulationRules(`(pcb t (parser (string_quote ")) (network (class "A" B (rule (clearance 1)))) (wiring))`, iso, 5.08); err == nil {
 		t.Fatal("pairs and no class of their domains must be an error")
 	}
+	// Each pair on its own: one good pair does not cover another.
+	two := []map[string]any{iso[0], {"a": "domain:c", "b": "domain:d", "clearanceMm": 8.0}}
+	if _, _, err := dsnInsulationRules(insulationDSN, two, 5.08); err == nil {
+		t.Fatal("a second pair with no classes must be an error")
+	}
+	oneSided := []map[string]any{{"a": "domain:a", "b": "domain:c", "clearanceMm": 8.0}}
+	if _, _, err := dsnInsulationRules(insulationDSN, oneSided, 5.08); err == nil {
+		t.Fatal("a pair with one side in no class must be an error")
+	}
+	// A side the intent gives no net has nothing to protect.
+	empty := []map[string]any{{"a": "domain:a", "b": "domain:c", "aNets": []string{"A"}, "bNets": []string{}, "clearanceMm": 8.0}}
+	if got, n, err := dsnInsulationRules(insulationDSN, empty, 5.08); err != nil || n != 0 || got != insulationDSN {
+		t.Fatalf("empty side: %d %v", n, err)
+	}
 	// Rules that are needed but cannot be written fail.
 	broken := strings.Replace(insulationDSN, "(network", "(netwrk", 1)
 	if _, _, err := dsnInsulationRules(broken, iso, 5.08); err == nil {

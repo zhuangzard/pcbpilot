@@ -83,16 +83,14 @@ func dsnInsulationRules(dsn string, iso []map[string]any, marginUm float64) (str
 	}
 	seen := map[string]float64{}
 	var order []string
-	wanted, domainSeen := false, false
 	for _, p := range iso {
 		mm, _ := p["clearanceMm"].(float64)
 		if mm <= 0 {
 			continue
 		}
 		ca, cb := domainClass(fmt.Sprint(p["a"])), domainClass(fmt.Sprint(p["b"]))
-		wanted = true
+		ruled := false
 		for _, x := range names {
-			domainSeen = domainSeen || member(x, ca) || member(x, cb)
 			if member(x, ca) && member(x, cb) {
 				return dsn, 0, fmt.Errorf("DSN class %s is on both sides of insulation pair %v|%v", x, p["a"], p["b"])
 			}
@@ -101,6 +99,7 @@ func dsnInsulationRules(dsn string, iso []map[string]any, marginUm float64) (str
 					continue
 				}
 				key := x + "\x00" + y
+				ruled = true
 				um := mm*1000 + marginUm
 				if own[x] > um {
 					um = own[x]
@@ -116,11 +115,13 @@ func dsnInsulationRules(dsn string, iso []map[string]any, marginUm float64) (str
 				}
 			}
 		}
+		// A pair with nets on both sides must reach the router. Nothing to
+		// protect only when the intent lists no net on one side.
+		if !ruled && !isoSideEmpty(p, "aNets") && !isoSideEmpty(p, "bNets") {
+			return dsn, 0, fmt.Errorf("insulation pair %v|%v has no DSN class on both sides (%d classes read)", p["a"], p["b"], len(names))
+		}
 	}
 	if len(order) == 0 {
-		if wanted && !domainSeen {
-			return dsn, 0, fmt.Errorf("insulation pairs but no DSN class of their domains (%d classes read)", len(names))
-		}
 		return dsn, 0, nil
 	}
 	nets := dsnFindAll(dsn, "network")
@@ -245,6 +246,11 @@ func dsnIsolateNets(dsn string, nets []string) (string, []string, error) {
 	}
 	sort.Strings(classes)
 	return out.String(), classes, nil
+}
+
+func isoSideEmpty(pair map[string]any, key string) bool {
+	nets, ok := pair[key].([]string)
+	return ok && len(nets) == 0
 }
 
 func routerArgGiven(args []string, name string) bool {
