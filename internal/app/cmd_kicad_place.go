@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -28,6 +29,8 @@ type kicadPlaceOpts struct {
 	domainZones              string
 	groups                   []string
 	placeSeeds, candidates   int
+	timeBudgetSet            bool
+	placeSeedsSet            bool
 	seed                     int64
 	timeBudget               time.Duration
 	haloMil, haloICMil       float64
@@ -119,6 +122,7 @@ its parts need vs. what it offers), stderr warns, and the exit code is
 				return fmt.Errorf("--domain-zones must be strips or edge")
 			}
 			o.haloICSet = cmd.Flags().Changed("halo-ic-mil")
+			o.timeBudgetSet, o.placeSeedsSet = cmd.Flags().Changed("time-budget"), cmd.Flags().Changed("place-seeds")
 			rep, err := runKicadPlace(o, kicadPlaceDeps{snapshot: kicad.Snapshot, place: kicad.Place}, stderr)
 			if err != nil {
 				return err
@@ -287,6 +291,15 @@ func runKicadPlace(o kicadPlaceOpts, deps kicadPlaceDeps, stderr io.Writer) (*ki
 	}
 	prog := newPlaceProgress(stderr, placeProgressEvery)
 	popt.Progress = prog.phase
+	// A large board with its nets' currents and classes known takes far longer
+	// to legalise: 8 min left thousands of overlaps on 1443 parts, 30 min none.
+	movable := len(b.Parts) - len(rep.Fixed)
+	if budget, seeds, changed := placeLargeDefaults(movable, o.timeBudget, o.placeSeeds, o.timeBudgetSet, o.placeSeedsSet, runtime.NumCPU()); changed {
+		o.timeBudget, o.placeSeeds = budget, seeds
+		note := fmt.Sprintf("large board (%d movable parts): time budget %s, %d seed(s); --time-budget and --place-seeds override", movable, budget, seeds)
+		rep.Notes = append(rep.Notes, note)
+		fmt.Fprintf(stderr, "placement: %s\n", note)
+	}
 	if o.timeBudget > 0 {
 		// The anneal keeps its own 90 s clock, so a board that placed before
 		// places the same; the budget is only the outer cap. A board above
@@ -809,6 +822,23 @@ func kicadPlaceVerdict(illegal []string, metricIllegal int) (gate.Status, int) {
 		return gate.Fail, n
 	}
 	return gate.Pass, 0
+}
+
+// placeLargeDefaults are the budget and seeds for a board above placeLargeBoard
+// movable parts, each where the caller gave none: 30 min, and no more seeds than
+// the machine can run side by side while it does anything else.
+func placeLargeDefaults(movable int, budget time.Duration, seeds int, budgetSet, seedsSet bool, cpus int) (time.Duration, int, bool) {
+	if movable <= placeLargeBoard {
+		return budget, seeds, false
+	}
+	changed := false
+	if !budgetSet {
+		budget, changed = 30*time.Minute, true
+	}
+	if limit := max(cpus-1, 1); !seedsSet && seeds > limit {
+		seeds, changed = limit, true
+	}
+	return budget, seeds, changed
 }
 
 // placeLargeBoard is the movable-part count above which kicad place lets
