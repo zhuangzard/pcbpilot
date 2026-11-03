@@ -26,6 +26,7 @@ const (
 	stitchMaxRounds = 3  // edits to settle one pass
 	stitchMinGain   = 10 // a pass keeping fewer ends the search: each costs minutes
 	stitchWorseMm   = 0.002
+	stitchCutMil    = 500.0 // how near a stitch must be to answer for a cut plane
 	// stitchReachMil: how far from the pad edge a via may sit. Within the pad
 	// escape zone the intent-widths gate allows for a track narrower than its
 	// class.
@@ -342,6 +343,10 @@ func (r *kicadRun) stitchPours(board string, nets []string) (string, error) {
 			cannot("board copper: " + err.Error())
 			return cur, nil
 		}
+		padAt := map[string][2]float64{}
+		for _, p := range pads {
+			padAt[p.ID] = [2]float64{p.X, p.Y}
+		}
 		var open []boardPad
 		refused := map[string]string{}
 		refOf := map[string]string{}
@@ -384,7 +389,7 @@ func (r *kicadRun) stitchPours(board string, nets []string) (string, error) {
 			cannot("stitch edit: " + err.Error())
 			return cur, nil
 		}
-		good, reasons, err := r.stitchProve(trial, plan, nets, base, openIDs, pass)
+		good, reasons, err := r.stitchProve(trial, plan, nets, base, openIDs, padAt, pass)
 		if err != nil {
 			cannot(err.Error())
 			return cur, nil
@@ -408,7 +413,7 @@ func (r *kicadRun) stitchPours(board string, nets []string) (string, error) {
 				cannot("stitch edit: " + err.Error())
 				return cur, nil
 			}
-			held, again, err := r.stitchProve(next, good, nets, base, openIDs, pass)
+			held, again, err := r.stitchProve(next, good, nets, base, openIDs, padAt, pass)
 			if err != nil {
 				cannot(err.Error())
 				return cur, nil
@@ -459,7 +464,7 @@ func stitchOps(ss []stitch) map[string]any {
 // net's main group with no new DRC error at them. A new error at no stitch at
 // all rejects nothing here but is an error of the pass: the caller keeps the
 // board from before it.
-func (r *kicadRun) stitchProve(board string, plan []stitch, nets []string, base *kicad.DRCReport, before map[string]bool, pass int) ([]stitch, map[string]string, error) {
+func (r *kicadRun) stitchProve(board string, plan []stitch, nets []string, base *kicad.DRCReport, before map[string]bool, at map[string][2]float64, pass int) ([]stitch, map[string]string, error) {
 	rep, err := r.kt.DRC(board, filepath.Join(r.work, fmt.Sprintf("%02d-stitch-drc%d.json", r.step, pass)))
 	if err != nil {
 		return nil, nil, fmt.Errorf("DRC after stitching: %w", err)
@@ -471,11 +476,13 @@ func (r *kicadRun) stitchProve(board string, plan []stitch, nets []string, base 
 	open := openPadsOf(groups)
 	fresh := newViolations(base, rep)
 	reasons := map[string]string{}
-	// A stitch can cut a plane in two at its neck: any pad joined before and
-	// open now fails the pass, whichever stitch did it.
+	// A stitch can cut a plane in two at its neck: a pad joined before and open
+	// now fails the stitches around it. With none near, nothing can be named
+	// and the pass fails.
+	cut := stitchCutters(open, before, plan, at)
 	for id := range open {
-		if !before[id] {
-			reasons["board"] = "pad " + id + " lost its pour"
+		if !before[id] && !cut.named[id] {
+			reasons["board"] = "pad " + id + " lost its pour with no stitch near it"
 			break
 		}
 	}
@@ -485,6 +492,9 @@ func (r *kicadRun) stitchProve(board string, plan []stitch, nets []string, base 
 		bad := ""
 		if open[c.PadID] {
 			bad = "pad still outside its net's main group"
+		}
+		if cut.stitches[c.PadID] {
+			bad = "near a pad that lost its pour"
 		}
 		for i, v := range fresh {
 			if stitchNearViolation(v, c) {
@@ -507,6 +517,33 @@ func (r *kicadRun) stitchProve(board string, plan []stitch, nets []string, base 
 		}
 	}
 	return good, reasons, nil
+}
+
+type stitchCut struct {
+	stitches map[string]bool // by the pad each stitch serves
+	named    map[string]bool // lost pads with a stitch near them
+}
+
+// stitchCutters finds the stitches that may have cut a pad off its pour: those
+// within stitchCutMil of a pad joined before and open now.
+func stitchCutters(open, before map[string]bool, plan []stitch, at map[string][2]float64) stitchCut {
+	cut := stitchCut{stitches: map[string]bool{}, named: map[string]bool{}}
+	for id := range open {
+		if before[id] {
+			continue
+		}
+		q, ok := at[id]
+		if !ok {
+			continue
+		}
+		for _, c := range plan {
+			if math.Hypot(c.Via.X-q[0], c.Via.Y-q[1]) <= stitchCutMil {
+				cut.stitches[c.PadID] = true
+				cut.named[id] = true
+			}
+		}
+	}
+	return cut
 }
 
 // stitchRefusal says why one via may not feed this pad: its current is above one

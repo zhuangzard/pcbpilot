@@ -219,3 +219,20 @@ func TestStitchRefusal(t *testing.T) {
 		t.Error("a net with no intent accepted")
 	}
 }
+
+func TestStitchCutters(t *testing.T) {
+	near := stitch{PadID: "near", Via: specctra.NewVia{X: 100, Y: 0}}
+	far := stitch{PadID: "far", Via: specctra.NewVia{X: 5000, Y: 0}}
+	at := map[string][2]float64{"lost": {0, 0}, "away": {9000, 9000}}
+	open := map[string]bool{"lost": true, "was": true}
+	before := map[string]bool{"was": true}
+	cut := stitchCutters(open, before, []stitch{near, far}, at)
+	if !cut.stitches["near"] || cut.stitches["far"] || !cut.named["lost"] || cut.named["was"] {
+		t.Fatalf("%+v", cut)
+	}
+	// A lost pad with no stitch around stays unnamed: the pass fails on it.
+	cut = stitchCutters(map[string]bool{"away": true}, nil, []stitch{near, far}, at)
+	if cut.named["away"] || len(cut.stitches) != 0 {
+		t.Fatalf("%+v", cut)
+	}
+}
