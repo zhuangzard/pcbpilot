@@ -25,6 +25,7 @@
 #   dsn PCB OUT.dsn                 ExportSpecctraDSN
 #   ses PCB IN.ses OUT.kicad_pcb    ImportSpecctraSES + zone fill + save
 #   fill PCB                        zone fill + save in place
+#   connectivity PCB                unconnected ratsnest edges on the saved fills (read only)
 #   rules PCB RULES.json OUT        design rules + Default netclass (mil)
 #   pours PCB SPEC.json OUT         board-outline copper pours + fill
 #   edit PCB OPS.json OUT           track widths, vias, stubs, silk texts + fill
@@ -1223,6 +1224,14 @@ def fill(pcb):
     return {"ok": True, "out": pcb, "zonesFilled": zones}
 
 
+def connectivity(pcb):
+    # kicad-cli's DRC report caps unconnected_items; this count has no cap.
+    board = pcbnew.LoadBoard(pcb)
+    conn = board.GetConnectivity()
+    conn.RecalculateRatsnest()
+    return {"ok": True, "unconnected": int(conn.GetUnconnectedCount(False))}
+
+
 # ── project rules and pours ──────────────────────────────────────────────────
 
 def nm(v_mil):
@@ -2308,11 +2317,11 @@ def sync_apply(pcb, plan_path, out):
 def main(argv):
     usage = ("usage: bridge.py snapshot PCB | netclasses PCB REQS OUT | ripup PCB OUT | dsn PCB OUT | ses PCB SES OUT | fill PCB"
              " | rules PCB RULES OUT | pours PCB SPEC OUT | edit PCB OPS OUT | sync-read PCB | fp-info SPEC | sync-apply PCB|- PLAN OUT"
-             " | rules-read PCB | rules-probe PCB SPEC OUT")
+             " | rules-read PCB | rules-probe PCB SPEC OUT | connectivity PCB")
     if len(argv) < 2:
         emit({"ok": False, "error": usage}, 2)
     cmd, args = argv[1], argv[2:]
-    want = {"snapshot": 1, "netclasses": 3, "ripup": 2, "dsn": 2, "ses": 3, "fill": 1, "rules": 3, "pours": 3, "edit": 3,
+    want = {"snapshot": 1, "netclasses": 3, "ripup": 2, "dsn": 2, "ses": 3, "fill": 1, "connectivity": 1, "rules": 3, "pours": 3, "edit": 3,
             "sync-read": 1, "fp-info": 1, "sync-apply": 3, "rules-read": 1, "rules-probe": 3}
     if cmd not in want or len(args) != want[cmd]:
         emit({"ok": False, "error": usage}, 2)
@@ -2320,6 +2329,8 @@ def main(argv):
         if cmd == "snapshot":
             board = pcbnew.LoadBoard(args[0])
             res = {"ok": True, "snapshot": snapshot(board), "kicadVersion": pcbnew.Version()}
+        elif cmd == "connectivity":
+            res = connectivity(*args)
         elif cmd == "netclasses":
             res = netclasses(*args)
         elif cmd == "ripup":

@@ -1399,6 +1399,7 @@ func (r *kicadRun) qualityGates(board string) (bool, error) {
 	// One kicad-cli run (all severities): the errors gate and the reported
 	// warnings come from the same report.
 	all, drcRep := r.routedDRCGate(routed)
+	r.recordBoardConnectivity(routed, drcRep)
 	snap, raw, err := r.snapshot(routed)
 	if err != nil {
 		return false, err
@@ -1649,6 +1650,33 @@ func reviewInputSHA(stage string, reqFiles, evFiles []string, limit int) (string
 // reporting any unconnected item fails the gate whatever the router claims —
 // a backend that says "all routed" is not taken at its word.
 //
+// recordBoardConnectivity puts pcbnew's unconnected count next to the DRC's,
+// which kicad-cli caps. Not known is left out rather than guessed.
+func (r *kicadRun) recordBoardConnectivity(board string, drc *kicad.DRCReport) {
+	n, err := r.kt.UnconnectedCount(board)
+	if err != nil {
+		fmt.Fprintf(r.stderr, "board connectivity: not known: %v\n", err)
+		return
+	}
+	bc := boardConnectivityEntry(n, drc)
+	if bc["drcTruncated"] == true {
+		fmt.Fprintf(r.stderr, "board connectivity: %d unconnected; the DRC report lists only %v\n", n, bc["drcUnconnected"])
+	}
+	r.summary["boardConnectivity"] = bc
+}
+
+func boardConnectivityEntry(unconnected int, drc *kicad.DRCReport) map[string]any {
+	bc := map[string]any{"unconnected": unconnected}
+	if drc != nil {
+		reported := drc.Counts["unconnected_items"]
+		bc["drcUnconnected"] = reported
+		if unconnected > reported {
+			bc["drcTruncated"] = true
+		}
+	}
+	return bc
+}
+
 // Pour credit (opt-in, --pour-credit; off = as strict as v0.9.0): a connection the
 // router left unrouted passes only when every precondition holds — the router's counters are self-consistent (the listed
 // connections are exactly the counted ones), it reports no fixable violation
