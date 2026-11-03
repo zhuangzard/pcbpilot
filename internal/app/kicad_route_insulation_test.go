@@ -99,3 +99,52 @@ func TestCheckRouterArgs(t *testing.T) {
 		t.Error(err)
 	}
 }
+
+func TestDSNIsolateNets(t *testing.T) {
+	dsn := `(pcb t (network
+    (class "P8+D" "+3V3" RAW
+      (rule (width 400) (clearance 205)))
+    (class "P16+D" GND
+      (rule (width 800) (clearance 205)))
+    (class "P1+D" SIG
+      (rule (width 200) (clearance 205)))
+  ) (wiring))`
+	out, classes, err := dsnIsolateNets(dsn, []string{"+3V3", "GND", "NOT_THERE"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(classes, ",") != "P16+D,P8+D__POUR" {
+		t.Fatalf("classes %v\n%s", classes, out)
+	}
+	if !strings.Contains(out, `(class "P8+D" RAW`) || !strings.Contains(out, `(class "P8+D__POUR" "+3V3"`) {
+		t.Fatalf("split:\n%s", out)
+	}
+	if strings.Count(out, "(width 400)") != 2 || !strings.Contains(out, `(class "P1+D" SIG`) {
+		t.Fatalf("rule lost or an untouched class changed:\n%s", out)
+	}
+	if got, cl, err := dsnIsolateNets(dsn, nil); got != dsn || len(cl) != 0 || err != nil {
+		t.Fatalf("no nets must not change the DSN: %v %v", cl, err)
+	}
+	// The split class still gets its insulation rule.
+	iso := []map[string]any{{"a": "domain:a", "b": "domain:b", "clearanceMm": 8.0}}
+	in := `(pcb t (network
+    (class "P8+PPD_domain_a" P RAW (rule (clearance 205)))
+    (class "P1+PPD_domain_b" Q (rule (clearance 205)))
+  ) (wiring))`
+	split, _, _ := dsnIsolateNets(in, []string{"P"})
+	if ruled, n, err := dsnInsulationRules(split, iso, 0); err != nil || n != 2 || !strings.Contains(ruled, "P8+PPD_domain_a__POUR") {
+		t.Fatalf("n=%d err=%v\n%s", n, err, ruled)
+	}
+}
+
+func TestUseLargeBoardProfile(t *testing.T) {
+	for _, c := range []struct {
+		mode string
+		n    int
+		want bool
+	}{{"auto", 1999, false}, {"auto", 2000, true}, {"on", 10, true}, {"off", 9999, false}} {
+		if useLargeBoardProfile(c.mode, c.n) != c.want {
+			t.Errorf("%+v", c)
+		}
+	}
+}

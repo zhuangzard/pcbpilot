@@ -7,12 +7,14 @@ package app
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 )
 
 var (
 	reDSNClassName      = regexp.MustCompile(`^\(class\s+("[^"]*"|[^\s()]+)`)
+	reDSNToken          = regexp.MustCompile(`"[^"]*"|[^\s()]+`)
 	reDSNClassClearance = regexp.MustCompile(`\(clearance\s+([0-9.]+)\)`)
 )
 
@@ -62,7 +64,7 @@ func dsnInsulationRules(dsn string, iso []map[string]any, marginUm float64) (str
 		}
 	}
 	member := func(name, class string) bool {
-		for _, p := range strings.Split(name, "+") {
+		for _, p := range strings.Split(strings.TrimSuffix(name, "__POUR"), "+") {
 			if p == class {
 				return true
 			}
@@ -141,4 +143,81 @@ func checkRouterArgs(args []string) error {
 		}
 	}
 	return nil
+}
+
+// dsnIsolateNets gives each named net a DSN class of its own, a copy of its
+// class under the name <class>__POUR, so a router option that leaves classes
+// unrouted can leave out those nets and not the ones that share their class.
+// It returns the DSN and the classes that hold only the named nets, sorted. A
+// named net with no class in the DSN is not routed anyway and is skipped.
+func dsnIsolateNets(dsn string, nets []string) (string, []string, error) {
+	want := map[string]bool{}
+	for _, n := range nets {
+		want[n] = true
+	}
+	var out strings.Builder
+	var classes []string
+	last := 0
+	for _, at := range dsnFindAll(dsn, "class") {
+		end := sexprEnd(dsn, at)
+		if end < 0 {
+			return dsn, nil, fmt.Errorf("unterminated class in the DSN")
+		}
+		text := dsn[at:end]
+		m := reDSNClassName.FindStringSubmatchIndex(text)
+		if m == nil {
+			return dsn, nil, fmt.Errorf("a DSN class without a name")
+		}
+		name := strings.Trim(text[m[2]:m[3]], `"`)
+		// The class's nets run from its name to its first sub-list.
+		listEnd := m[3]
+		for listEnd < len(text) && text[listEnd] != '(' {
+			if text[listEnd] == '"' {
+				q := strings.IndexByte(text[listEnd+1:], '"')
+				if q < 0 {
+					return dsn, nil, fmt.Errorf("unterminated name in DSN class %s", name)
+				}
+				listEnd += q + 1
+			}
+			listEnd++
+		}
+		var keep, move []string
+		for _, tok := range reDSNToken.FindAllString(text[m[3]:listEnd], -1) {
+			if want[strings.Trim(tok, `"`)] {
+				move = append(move, tok)
+			} else {
+				keep = append(keep, tok)
+			}
+		}
+		switch {
+		case len(move) == 0:
+			continue
+		case len(keep) == 0:
+			classes = append(classes, name)
+			continue
+		}
+		copyName := name + "__POUR"
+		classes = append(classes, copyName)
+		out.WriteString(dsn[last:at])
+		fmt.Fprintf(&out, "%s %s\n      %s\n    (class %q %s\n      %s", text[:m[3]], strings.Join(keep, " "), text[listEnd:], copyName, strings.Join(move, " "), text[listEnd:])
+		last = end
+	}
+	out.WriteString(dsn[last:])
+	sort.Strings(classes)
+	return out.String(), classes, nil
+}
+
+// largeBoardConnections: from here on `kicad route` uses the large-board
+// profile. Below it nothing changes.
+const largeBoardConnections = 2000
+
+// useLargeBoardProfile reads --large-board: auto, on or off.
+func useLargeBoardProfile(mode string, connections int) bool {
+	switch mode {
+	case "on":
+		return true
+	case "off":
+		return false
+	}
+	return connections >= largeBoardConnections
 }

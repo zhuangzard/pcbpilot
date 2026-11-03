@@ -44,6 +44,9 @@ type kicadRouteOpts struct {
 	// maxTimeSet / routerTimeoutSet: the flags were given (else the
 	// defaults scale with the board: fastrouteAutoMaxTime).
 	maxTimeSet, routerTimeoutSet bool
+	// largeBoard: auto | on | off (applyLargeBoardProfile).
+	largeBoard                 string
+	multiStartSet, continueSet bool
 	// padNeckFloor (mil, 0 = off): see kicad.PadNeckFloorMil.
 	padNeckFloor float64
 	// rules: explicit flags (0 = not given); ruleFlags = any was given.
@@ -131,6 +134,10 @@ Exits non-zero when any gate fails; --waivers takes signed {gate,match,reason,by
 			if o.maxTimeSet && o.fo.maxTime < 0 {
 				return fmt.Errorf("--max-time must be >= 0 (0 = no fastroute time limit)")
 			}
+			if o.largeBoard != "auto" && o.largeBoard != "on" && o.largeBoard != "off" {
+				return fmt.Errorf("--large-board must be auto, on or off")
+			}
+			o.multiStartSet, o.continueSet = cmd.Flags().Changed("multi-start"), cmd.Flags().Changed("continue")
 			if err := checkRouterArgs(o.fo.extraArgs); err != nil {
 				return err
 			}
@@ -184,6 +191,7 @@ Exits non-zero when any gate fails; --waivers takes signed {gate,match,reason,by
 	f.StringVar(&o.fastrouteBin, "fastroute-bin", "", "fastroute executable (default: $FASTROUTE_BIN, ~/.pcbpilot/fastroute/current, PATH)")
 	f.DurationVar(&o.fo.maxTime, "max-time", 0, "fastroute --max-time per run; default: scaled with the board (10 min + 0.3 s per connection, at most 40 min; summary.routerTime); 0 given explicitly = no limit. At the limit fastroute writes its best board; pcbpilot asks it to stop (Ctrl+Break / SIGINT) a grace later (max-time/10, 1–5 min), kills it 2 min after that and still imports its last checkpoint session — an incomplete result, never a pass")
 	f.IntVar(&o.fo.threads, "threads", 0, "fastroute autorouter/optimizer threads: 0 = min(cores-1, 8); 1 = single-threaded (reproducible across fastroute builds; a crashed multi-threaded run is retried single-threaded). Board-A: 3 runs with 8 threads gave byte-identical sessions")
+	f.StringVar(&o.largeBoard, "large-board", "auto", "large-board router profile: auto (from 2000 connections) | on | off. Poured nets left to their pours, one start, no per-step limits, no --diagnose, 60 min budget; explicit flags win")
 	f.BoolVar(&o.fo.noDiagnose, "no-router-diagnose", false, "leave fastroute's --diagnose out (blocked vs. congested, and placement hints, are then not known)")
 	f.StringArrayVar(&o.fo.extraArgs, "router-arg", nil, "extra fastroute argument, passed as it is (repeatable; for experiments)")
 	f.IntVar(&o.fo.multiStart, "multi-start", 4, "fastroute --multi-start=N: N-1 differently seeded pass-1 orders rerun in parallel by fastroute when connections stay unrouted, best kept (1 = off)")
@@ -905,6 +913,11 @@ func (r *kicadRun) prepareRoute(classed string, reqs map[string]kicad.NetRequire
 	var viaOrder []string
 	var routerVia *dsnVia
 	prepared, viaOrder, routerVia = dsnRouterVia(prepared)
+	if useLargeBoardProfile(o.largeBoard, boardConnections(inSnap)) {
+		if prepared, err = r.applyLargeBoardProfile(prepared, inSnap); err != nil {
+			return "", 0, fmt.Errorf("pre-route gate: large-board profile: %w", err)
+		}
+	}
 	var isoRules int
 	if prepared, isoRules, err = dsnInsulationRules(prepared, r.isoPairs, kicad.ClearanceMarginMil*25.4); err != nil {
 		return "", 0, fmt.Errorf("pre-route gate: insulation rules: %w", err)
@@ -1145,6 +1158,45 @@ func (r *kicadRun) widen(board, what string, plan func([]specctra.Track, []widen
 		}
 	}
 	return ops, out, nil
+}
+
+// applyLargeBoardProfile sets what the router needs on a very large board, any
+// flag given explicitly staying as it is: the poured nets are left out of
+// routing (they stay in every connection count until pcbnew finds them joined),
+// one start, no per-step limits, no --diagnose afterwards, a 60-minute budget.
+func (r *kicadRun) applyLargeBoardProfile(dsn string, inSnap *boardSnapshot) (string, error) {
+	o := &r.o
+	var nets []string
+	seen := map[string]bool{}
+	for _, p := range kicadPourPlan(*o, inSnap) {
+		if !seen[p.Net] {
+			seen[p.Net] = true
+			nets = append(nets, p.Net)
+		}
+	}
+	out, classes, err := dsnIsolateNets(dsn, nets)
+	if err != nil {
+		return dsn, err
+	}
+	if len(classes) > 0 {
+		o.fo.extraArgs = append(o.fo.extraArgs, "--router.autorouter.ignore_net_classes="+strings.Join(classes, ","))
+	}
+	o.fo.extraArgs = append(o.fo.extraArgs, "--no-time-limits")
+	o.fo.noDiagnose = true
+	if !o.multiStartSet {
+		o.fo.multiStart = 1
+	}
+	if !o.continueSet {
+		o.fo.rounds = 0
+	}
+	if !o.maxTimeSet {
+		o.fo.maxTime, o.maxTimeSet = 60*time.Minute, true
+	}
+	r.summary["largeBoard"] = map[string]any{"pouredNetsNotRouted": nets, "ignoredClasses": classes,
+		"multiStart": o.fo.multiStart, "continue": o.fo.rounds, "maxTimeS": o.fo.maxTime.Seconds()}
+	fmt.Fprintf(r.stderr, "large-board profile: %d connections: poured nets %s left to their pours, router budget %s, no --diagnose (--large-board off to opt out)\n",
+		boardConnections(inSnap), strings.Join(nets, ", "), o.fo.maxTime)
+	return out, nil
 }
 
 // widenStepsBackFor: the DRC rules a widened track must step back from. A track
