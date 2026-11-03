@@ -20,7 +20,10 @@ const insulationDSN = `(pcb t
 
 func TestDSNInsulationRules(t *testing.T) {
 	iso := []map[string]any{{"a": "domain:a", "b": "domain:b", "clearanceMm": 8.0}}
-	out, n := dsnInsulationRules(insulationDSN, iso, 5.08)
+	out, n, err := dsnInsulationRules(insulationDSN, iso, 5.08)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if n != 1 || strings.Count(out, "class_class") != 1 {
 		t.Fatalf("n=%d\n%s", n, out)
 	}
@@ -30,10 +33,34 @@ func TestDSNInsulationRules(t *testing.T) {
 	if strings.Index(out, "class_class") > strings.Index(out, "(wiring") {
 		t.Fatalf("outside the network section:\n%s", out)
 	}
-	if got, n := dsnInsulationRules(insulationDSN, nil, 5.08); got != insulationDSN || n != 0 {
-		t.Fatalf("no pairs must not change the DSN: %d", n)
+	if got, n, err := dsnInsulationRules(insulationDSN, nil, 5.08); got != insulationDSN || n != 0 || err != nil {
+		t.Fatalf("no pairs must not change the DSN: %d %v", n, err)
 	}
-	if got, n := dsnInsulationRules("(pcb t)", iso, 5.08); got != "(pcb t)" || n != 0 {
-		t.Fatalf("no network section: %d", n)
+	// A pair below a class's own clearance keeps the larger one.
+	small := []map[string]any{{"a": "domain:a", "b": "domain:b", "clearanceMm": 0.1}}
+	if out, _, _ := dsnInsulationRules(insulationDSN, small, 5.08); !strings.Contains(out, "(rule (clearance 205.08))") || strings.Contains(out, "(clearance 105.08)") {
+		t.Fatalf("class clearance lost:\n%s", out)
+	}
+	// "(network" inside a quoted name is not the section.
+	quoted := strings.Replace(insulationDSN, "(pcb t", `(pcb "x (network y"`, 1)
+	out, n, err = dsnInsulationRules(quoted, iso, 5.08)
+	if err != nil || n != 1 || strings.Index(out, "class_class") < strings.Index(out, "PP5_W10") {
+		t.Fatalf("quoted name: %d %v\n%s", n, err, out)
+	}
+	// Rules that are needed but cannot be written fail.
+	broken := strings.Replace(insulationDSN, "(network", "(netwrk", 1)
+	if _, _, err := dsnInsulationRules(broken, iso, 5.08); err == nil {
+		t.Fatal("no network section must be an error")
+	}
+}
+
+func TestCheckRouterArgs(t *testing.T) {
+	for _, bad := range []string{"--initial-session=x.ses", "-do=x", "--report=x", "--max-time=9", "--diagnose", "x.ses", "--router.autorouter.max_threads=8"} {
+		if err := checkRouterArgs([]string{bad}); err == nil {
+			t.Errorf("%s accepted", bad)
+		}
+	}
+	if err := checkRouterArgs([]string{"--no-time-limits", "--router.autorouter.ignore_net_classes=A,B"}); err != nil {
+		t.Error(err)
 	}
 }

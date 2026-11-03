@@ -131,6 +131,9 @@ Exits non-zero when any gate fails; --waivers takes signed {gate,match,reason,by
 			if o.maxTimeSet && o.fo.maxTime < 0 {
 				return fmt.Errorf("--max-time must be >= 0 (0 = no fastroute time limit)")
 			}
+			if err := checkRouterArgs(o.fo.extraArgs); err != nil {
+				return err
+			}
 			for _, n := range []string{"clearance-mil", "track-mil", "min-track-mil", "via-dia-mil", "via-drill-mil", "edge-mil"} {
 				o.ruleFlags = o.ruleFlags || cmd.Flags().Changed(n)
 			}
@@ -903,7 +906,9 @@ func (r *kicadRun) prepareRoute(classed string, reqs map[string]kicad.NetRequire
 	var routerVia *dsnVia
 	prepared, viaOrder, routerVia = dsnRouterVia(prepared)
 	var isoRules int
-	prepared, isoRules = dsnInsulationRules(prepared, r.isoPairs, kicad.ClearanceMarginMil*25.4)
+	if prepared, isoRules, err = dsnInsulationRules(prepared, r.isoPairs, kicad.ClearanceMarginMil*25.4); err != nil {
+		return "", 0, fmt.Errorf("pre-route gate: insulation rules: %w", err)
+	}
 	r.summary["dsnInsulationRules"] = isoRules
 	r.summary["dsnViaOrder"] = viaOrder
 	if routerVia != nil {
