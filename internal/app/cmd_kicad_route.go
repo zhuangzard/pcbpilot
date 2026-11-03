@@ -45,6 +45,7 @@ type kicadRouteOpts struct {
 	// defaults scale with the board: fastrouteAutoMaxTime).
 	maxTimeSet, routerTimeoutSet bool
 	// largeBoard: auto | on | off (applyLargeBoardProfile).
+	stitchPours                               string
 	largeBoard                                string
 	multiStartSet, continueSet, noDiagnoseSet bool
 	// padNeckFloor (mil, 0 = off): see kicad.PadNeckFloorMil.
@@ -134,6 +135,9 @@ Exits non-zero when any gate fails; --waivers takes signed {gate,match,reason,by
 			if o.maxTimeSet && o.fo.maxTime < 0 {
 				return fmt.Errorf("--max-time must be >= 0 (0 = no fastroute time limit)")
 			}
+			if o.stitchPours != "auto" && o.stitchPours != "on" && o.stitchPours != "off" {
+				return fmt.Errorf("--stitch-pours must be auto, on or off")
+			}
 			if o.largeBoard != "auto" && o.largeBoard != "on" && o.largeBoard != "off" {
 				return fmt.Errorf("--large-board must be auto, on or off")
 			}
@@ -192,6 +196,7 @@ Exits non-zero when any gate fails; --waivers takes signed {gate,match,reason,by
 	f.StringVar(&o.fastrouteBin, "fastroute-bin", "", "fastroute executable (default: $FASTROUTE_BIN, ~/.pcbpilot/fastroute/current, PATH)")
 	f.DurationVar(&o.fo.maxTime, "max-time", 0, "fastroute --max-time per run; default: scaled with the board (10 min + 0.3 s per connection, at most 40 min; summary.routerTime); 0 given explicitly = no limit. At the limit fastroute writes its best board; pcbpilot asks it to stop (Ctrl+Break / SIGINT) a grace later (max-time/10, 1–5 min), kills it 2 min after that and still imports its last checkpoint session — an incomplete result, never a pass")
 	f.IntVar(&o.fo.threads, "threads", 0, "fastroute autorouter/optimizer threads: 0 = min(cores-1, 8); 1 = single-threaded (reproducible across fastroute builds; a crashed multi-threaded run is retried single-threaded). Board-A: 3 runs with 8 threads gave byte-identical sessions")
+	f.StringVar(&o.stitchPours, "stitch-pours", "auto", "join pads of poured nets their pours missed with a via and a short track, each proven by refill and DRC: auto (with the large-board profile) | on | off")
 	f.StringVar(&o.largeBoard, "large-board", "auto", "large-board router profile: auto (from 2000 connections) | on | off. Poured nets left to their pours, one start, no per-step limits, no --diagnose, 60 min budget; explicit flags win")
 	f.BoolVar(&o.fo.noDiagnose, "no-router-diagnose", false, "leave fastroute's --diagnose out (blocked vs. congested, and placement hints, are then not known)")
 	f.StringArrayVar(&o.fo.extraArgs, "router-arg", nil, "extra fastroute argument, passed as it is (repeatable; for experiments)")
@@ -800,6 +805,12 @@ func (r *kicadRun) postRoute(board string, inSnap *boardSnapshot) (string, bool,
 				return board, false, err
 			}
 		}
+	}
+	if nets := r.stitchNets(kicadPourPlan(o, inSnap)); len(nets) > 0 {
+		if board, err = r.stitchPours(board, nets); err != nil {
+			return board, false, err
+		}
+		r.lap("stitch vias")
 	}
 	r.lap("pours + zone fill + thermals")
 	if o.widenNets != "" {

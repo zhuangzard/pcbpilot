@@ -360,6 +360,34 @@ func (t *Tools) ImportSES(pcb, ses, out string) (json.RawMessage, error) {
 // Fill refills every zone of pcb and saves it in place.
 func (t *Tools) Fill(pcb string) (json.RawMessage, error) { return t.RunBridge("fill", pcb) }
 
+// PadGroups returns, for each named net, its pads' uuids grouped by copper
+// connection on the board as saved.
+func (t *Tools) PadGroups(pcb string, nets []string) (map[string][][]string, error) {
+	f, err := os.CreateTemp("", "pcbpilot-pad-groups-*.json")
+	if err != nil {
+		return nil, err
+	}
+	defer os.Remove(f.Name())
+	if err := json.NewEncoder(f).Encode(nets); err != nil {
+		f.Close()
+		return nil, err
+	}
+	if err := f.Close(); err != nil {
+		return nil, err
+	}
+	raw, err := t.RunBridge("pad-groups", pcb, f.Name())
+	if err != nil {
+		return nil, err
+	}
+	var res struct {
+		Groups map[string][][]string `json:"groups"`
+	}
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return nil, err
+	}
+	return res.Groups, nil
+}
+
 // UnconnectedCount is the number of unconnected ratsnest edges pcbnew counts on
 // the board as saved. kicad-cli's DRC report caps its unconnected_items.
 func (t *Tools) UnconnectedCount(pcb string) (int, error) {
