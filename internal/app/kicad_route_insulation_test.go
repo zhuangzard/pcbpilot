@@ -64,6 +64,17 @@ func TestDSNInsulationRules(t *testing.T) {
 	if _, _, err := dsnInsulationRules(insulationDSN, oneSided, 5.08); err == nil {
 		t.Fatal("a pair with one side in no class must be an error")
 	}
+	// A pair's net outside its domain's class gets no rule: an error, even though
+	// other nets of that side do.
+	stray := []map[string]any{{"a": "domain:a", "b": "domain:b", "aNets": []string{"A", "C"}, "bNets": []string{"B"}, "clearanceMm": 8.0}}
+	if _, _, err := dsnInsulationRules(insulationDSN, stray, 5.08); err == nil {
+		t.Fatal("a domain net in a class without the domain must be an error")
+	}
+	// A listed net the DSN does not hold is no problem.
+	absent := []map[string]any{{"a": "domain:a", "b": "domain:b", "aNets": []string{"A", "NOT_THERE"}, "bNets": []string{"B"}, "clearanceMm": 8.0}}
+	if _, n, err := dsnInsulationRules(insulationDSN, absent, 5.08); err != nil || n != 1 {
+		t.Fatalf("absent net: %d %v", n, err)
+	}
 	// A side the intent gives no net has nothing to protect.
 	empty := []map[string]any{{"a": "domain:a", "b": "domain:c", "aNets": []string{"A"}, "bNets": []string{}, "clearanceMm": 8.0}}
 	if got, n, err := dsnInsulationRules(insulationDSN, empty, 5.08); err != nil || n != 0 || got != insulationDSN {

@@ -55,6 +55,7 @@ func dsnFindAll(dsn, word string) []int {
 // that silently lacks them.
 func dsnInsulationRules(dsn string, iso []map[string]any, marginUm float64) (string, int, error) {
 	own := map[string]float64{}
+	classOf := map[string]string{}
 	var names []string
 	for _, at := range dsnFindAll(dsn, "class") {
 		end := sexprEnd(dsn, at)
@@ -67,6 +68,9 @@ func dsnInsulationRules(dsn string, iso []map[string]any, marginUm float64) (str
 		}
 		name := strings.Trim(m[1], `"`)
 		names = append(names, name)
+		for _, n := range dsnClassNets(dsn[at:end]) {
+			classOf[n] = name
+		}
 		for _, c := range reDSNClassClearance.FindAllStringSubmatch(dsn[at:end], -1) {
 			if v, err := strconv.ParseFloat(c[1], 64); err == nil && v > own[name] {
 				own[name] = v
@@ -89,6 +93,14 @@ func dsnInsulationRules(dsn string, iso []map[string]any, marginUm float64) (str
 			continue
 		}
 		ca, cb := domainClass(fmt.Sprint(p["a"])), domainClass(fmt.Sprint(p["b"]))
+		for _, side := range []struct{ key, class string }{{"aNets", ca}, {"bNets", cb}} {
+			nets, _ := p[side.key].([]string)
+			for _, n := range nets {
+				if c, ok := classOf[n]; ok && !member(c, side.class) {
+					return dsn, 0, fmt.Errorf("net %s of insulation pair %v|%v is in DSN class %s, outside its domain", n, p["a"], p["b"], c)
+				}
+			}
+		}
 		ruled := false
 		for _, x := range names {
 			if member(x, ca) && member(x, cb) {
@@ -246,6 +258,31 @@ func dsnIsolateNets(dsn string, nets []string) (string, []string, error) {
 	}
 	sort.Strings(classes)
 	return out.String(), classes, nil
+}
+
+// dsnClassNets lists the nets of one (class ...) expression: the tokens from its
+// name to its first sub-list, parentheses inside quotes not counting.
+func dsnClassNets(class string) []string {
+	m := reDSNClassName.FindStringSubmatchIndex(class)
+	if m == nil {
+		return nil
+	}
+	end := m[3]
+	for end < len(class) && class[end] != '(' {
+		if class[end] == '"' {
+			q := strings.IndexByte(class[end+1:], '"')
+			if q < 0 {
+				return nil
+			}
+			end += q + 1
+		}
+		end++
+	}
+	var nets []string
+	for _, tok := range reDSNToken.FindAllString(class[m[3]:end], -1) {
+		nets = append(nets, strings.Trim(tok, `"`))
+	}
+	return nets
 }
 
 func isoSideEmpty(pair map[string]any, key string) bool {
