@@ -828,6 +828,10 @@ type fastrouteOpts struct {
 	maxTime      time.Duration
 	rounds       int
 	timeout      time.Duration
+	// noDiagnose leaves --diagnose out: after the stop it routes every unrouted
+	// connection alone, which takes very long with thousands of them.
+	noDiagnose bool
+	extraArgs  []string // passed to fastroute as they are, last
 	// aliases: nets renamed for fastroute's files (fastroute_names.go);
 	// the session it returns is written back with the real names.
 	aliases *fastrouteNetAliases
@@ -867,7 +871,10 @@ func fastrouteDeadline(o fastrouteOpts) time.Duration {
 
 // fastrouteArgs builds one fastroute invocation.
 func fastrouteArgs(o fastrouteOpts, dsn, ses, report, initial string) []string {
-	args := []string{"-de", dsn, "-do", ses, "--report=" + report, "--diagnose"}
+	args := []string{"-de", dsn, "-do", ses, "--report=" + report}
+	if !o.noDiagnose {
+		args = append(args, "--diagnose")
+	}
 	ms := o.multiStart
 	if ms == 0 && o.threads == 1 {
 		ms = 1 // fastroute's default multi-start (4) runs its orders in parallel
@@ -903,7 +910,7 @@ func fastrouteArgs(o fastrouteOpts, dsn, ses, report, initial string) []string {
 	if initial != "" {
 		args = append(args, "--initial-session="+initial)
 	}
-	return args
+	return append(args, o.extraArgs...)
 }
 
 type fastrouteRun struct {

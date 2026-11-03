@@ -360,6 +360,25 @@ func (t *Tools) ImportSES(pcb, ses, out string) (json.RawMessage, error) {
 // Fill refills every zone of pcb and saves it in place.
 func (t *Tools) Fill(pcb string) (json.RawMessage, error) { return t.RunBridge("fill", pcb) }
 
+// UnconnectedCount is the number of unconnected ratsnest edges pcbnew counts on
+// the board as saved. kicad-cli's DRC report caps its unconnected_items.
+func (t *Tools) UnconnectedCount(pcb string) (int, error) {
+	raw, err := t.RunBridge("connectivity", pcb)
+	if err != nil {
+		return 0, err
+	}
+	var res struct {
+		Unconnected *int `json:"unconnected"`
+	}
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return 0, err
+	}
+	if res.Unconnected == nil {
+		return 0, fmt.Errorf("kicad bridge: connectivity result without a count")
+	}
+	return *res.Unconnected, nil
+}
+
 // DRC runs `kicad-cli pcb drc` (errors only, JSON) on pcb, writes the raw
 // report to out and returns it parsed. The board's .kicad_pro (and
 // .kicad_dru) must sit next to it for the project rules.

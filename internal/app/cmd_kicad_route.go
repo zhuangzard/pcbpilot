@@ -44,6 +44,9 @@ type kicadRouteOpts struct {
 	// maxTimeSet / routerTimeoutSet: the flags were given (else the
 	// defaults scale with the board: fastrouteAutoMaxTime).
 	maxTimeSet, routerTimeoutSet bool
+	// largeBoard: auto | on | off (applyLargeBoardProfile).
+	largeBoard                                string
+	multiStartSet, continueSet, noDiagnoseSet bool
 	// padNeckFloor (mil, 0 = off): see kicad.PadNeckFloorMil.
 	padNeckFloor float64
 	// rules: explicit flags (0 = not given); ruleFlags = any was given.
@@ -131,6 +134,14 @@ Exits non-zero when any gate fails; --waivers takes signed {gate,match,reason,by
 			if o.maxTimeSet && o.fo.maxTime < 0 {
 				return fmt.Errorf("--max-time must be >= 0 (0 = no fastroute time limit)")
 			}
+			if o.largeBoard != "auto" && o.largeBoard != "on" && o.largeBoard != "off" {
+				return fmt.Errorf("--large-board must be auto, on or off")
+			}
+			o.multiStartSet, o.continueSet = cmd.Flags().Changed("multi-start"), cmd.Flags().Changed("continue")
+			o.noDiagnoseSet = cmd.Flags().Changed("no-router-diagnose")
+			if err := checkRouterArgs(o.fo.extraArgs); err != nil {
+				return err
+			}
 			for _, n := range []string{"clearance-mil", "track-mil", "min-track-mil", "via-dia-mil", "via-drill-mil", "edge-mil"} {
 				o.ruleFlags = o.ruleFlags || cmd.Flags().Changed(n)
 			}
@@ -181,6 +192,9 @@ Exits non-zero when any gate fails; --waivers takes signed {gate,match,reason,by
 	f.StringVar(&o.fastrouteBin, "fastroute-bin", "", "fastroute executable (default: $FASTROUTE_BIN, ~/.pcbpilot/fastroute/current, PATH)")
 	f.DurationVar(&o.fo.maxTime, "max-time", 0, "fastroute --max-time per run; default: scaled with the board (10 min + 0.3 s per connection, at most 40 min; summary.routerTime); 0 given explicitly = no limit. At the limit fastroute writes its best board; pcbpilot asks it to stop (Ctrl+Break / SIGINT) a grace later (max-time/10, 1–5 min), kills it 2 min after that and still imports its last checkpoint session — an incomplete result, never a pass")
 	f.IntVar(&o.fo.threads, "threads", 0, "fastroute autorouter/optimizer threads: 0 = min(cores-1, 8); 1 = single-threaded (reproducible across fastroute builds; a crashed multi-threaded run is retried single-threaded). Board-A: 3 runs with 8 threads gave byte-identical sessions")
+	f.StringVar(&o.largeBoard, "large-board", "auto", "large-board router profile: auto (from 2000 connections) | on | off. Poured nets left to their pours, one start, no per-step limits, no --diagnose, 60 min budget; explicit flags win")
+	f.BoolVar(&o.fo.noDiagnose, "no-router-diagnose", false, "leave fastroute's --diagnose out (blocked vs. congested, and placement hints, are then not known)")
+	f.StringArrayVar(&o.fo.extraArgs, "router-arg", nil, "extra fastroute argument, passed as it is (repeatable; for experiments)")
 	f.IntVar(&o.fo.multiStart, "multi-start", 4, "fastroute --multi-start=N: N-1 differently seeded pass-1 orders rerun in parallel by fastroute when connections stay unrouted, best kept (1 = off)")
 	f.BoolVar(&o.optimizer, "optimizer", false, "run fastroute's optimizer (its budget equals the whole routing stage incl. multi-start, ≥ 60 s; Board-A --multi-start=4: 299 s with it, 134 s without, same 4 unrouted / 30 violations, 0.1 % shorter, 1 via fewer) — off by default")
 	f.Float64Var(&o.fo.optThreshold, "optimizer-threshold", 0, "fastroute --router.optimizer.optimization_improvement_threshold (percent per pass; 0 = fastroute's default)")
@@ -230,6 +244,7 @@ type kicadRun struct {
 	stepGates []gateResult
 	o         kicadRouteOpts
 	kt        *kicad.Tools
+	isoPairs  []map[string]any
 	in        *designIntent
 	waivers   []gateWaiver
 	summary   map[string]any
@@ -566,6 +581,7 @@ func (r *kicadRun) run() error {
 		return fmt.Errorf("pre-route gate: %w", err)
 	}
 	reqs, iso, edges := ri.Reqs, ri.Iso, ri.Edges
+	r.isoPairs = iso
 	r.summary["isolationRules"], r.summary["edgeRules"] = iso, edges
 	classed := r.next("classed")
 	full, err := applyKicadNetclasses(kt, board, ri, nil, classed)
@@ -898,6 +914,16 @@ func (r *kicadRun) prepareRoute(classed string, reqs map[string]kicad.NetRequire
 	var viaOrder []string
 	var routerVia *dsnVia
 	prepared, viaOrder, routerVia = dsnRouterVia(prepared)
+	if useLargeBoardProfile(o.largeBoard, boardConnections(inSnap)) {
+		if prepared, err = r.applyLargeBoardProfile(prepared, inSnap); err != nil {
+			return "", 0, fmt.Errorf("pre-route gate: large-board profile: %w", err)
+		}
+	}
+	var isoRules int
+	if prepared, isoRules, err = dsnInsulationRules(prepared, r.isoPairs, kicad.ClearanceMarginMil*25.4); err != nil {
+		return "", 0, fmt.Errorf("pre-route gate: insulation rules: %w", err)
+	}
+	r.summary["dsnInsulationRules"] = isoRules
 	r.summary["dsnViaOrder"] = viaOrder
 	if routerVia != nil {
 		r.summary["routerViaPadstack"] = map[string]any{"name": routerVia.name, "diameterUm": routerVia.dia, "drillUm": routerVia.drill}
@@ -1104,7 +1130,7 @@ func (r *kicadRun) widen(board, what string, plan func([]specctra.Track, []widen
 		}
 		bad := map[string]bool{}
 		for _, v := range rep.Violations {
-			if v.Rule == "clearance" {
+			if widenStepsBackFor(v.Rule) {
 				for _, id := range v.Objs {
 					bad[id] = true
 				}
@@ -1134,6 +1160,68 @@ func (r *kicadRun) widen(board, what string, plan func([]specctra.Track, []widen
 	}
 	return ops, out, nil
 }
+
+// applyLargeBoardProfile sets what the router needs on a very large board, any
+// flag given explicitly staying as it is: the poured nets are left out of
+// routing (they stay in every connection count until pcbnew finds them joined),
+// one start, no per-step limits, no --diagnose afterwards, a 60-minute budget.
+func (r *kicadRun) applyLargeBoardProfile(dsn string, inSnap *boardSnapshot) (string, error) {
+	o := &r.o
+	// Nets the pairs and tune files name stay routed: those files must not
+	// name a net the router leaves out.
+	constrained := map[string]bool{}
+	for _, n := range intentRouterNets(r.in) {
+		constrained[n] = true
+	}
+	var nets []string
+	seen := map[string]bool{}
+	for _, p := range kicadPourPlan(*o, inSnap) {
+		if !seen[p.Net] && !constrained[p.Net] {
+			seen[p.Net] = true
+			nets = append(nets, p.Net)
+		}
+	}
+	out := dsn
+	var classes []string
+	if !routerArgGiven(o.fo.extraArgs, "--router.autorouter.ignore_net_classes") {
+		var err error
+		if out, classes, err = dsnIsolateNets(dsn, nets); err != nil {
+			return dsn, err
+		}
+	} else {
+		nets = nil
+	}
+	if r.summary["largeBoard"] == nil { // a second preparation must not stack the arguments
+		if len(classes) > 0 {
+			o.fo.extraArgs = append(o.fo.extraArgs, "--router.autorouter.ignore_net_classes="+strings.Join(classes, ","))
+		}
+		if !routerArgGiven(o.fo.extraArgs, "--no-time-limits") && !routerArgGiven(o.fo.extraArgs, "--time-limit-mode") {
+			o.fo.extraArgs = append(o.fo.extraArgs, "--no-time-limits")
+		}
+	}
+	if !o.noDiagnoseSet {
+		o.fo.noDiagnose = true
+	}
+	if !o.multiStartSet {
+		o.fo.multiStart = 1
+	}
+	if !o.continueSet {
+		o.fo.rounds = 0
+	}
+	if !o.maxTimeSet {
+		o.fo.maxTime, o.maxTimeSet = 60*time.Minute, true
+	}
+	r.summary["largeBoard"] = map[string]any{"pouredNetsNotRouted": nets, "ignoredClasses": classes,
+		"multiStart": o.fo.multiStart, "continue": o.fo.rounds, "maxTimeS": o.fo.maxTime.Seconds()}
+	fmt.Fprintf(r.stderr, "large-board profile: %d connections: poured nets %s left to their pours, router budget %s, no --diagnose (--large-board off to opt out)\n",
+		boardConnections(inSnap), strings.Join(nets, ", "), o.fo.maxTime)
+	return out, nil
+}
+
+// widenStepsBackFor: the DRC rules a widened track must step back from. A track
+// widened onto a neighbouring pad is a short, which KiCad does not report as
+// clearance.
+func widenStepsBackFor(rule string) bool { return rule == "clearance" || rule == "shorting_items" }
 
 // silkDecision says whether this board's labels get placed: why not (reason ""
 // = place them, under budget; 0 = unlimited). auto marks --silk=auto holding
@@ -1399,6 +1487,7 @@ func (r *kicadRun) qualityGates(board string) (bool, error) {
 	// One kicad-cli run (all severities): the errors gate and the reported
 	// warnings come from the same report.
 	all, drcRep := r.routedDRCGate(routed)
+	r.recordBoardConnectivity(routed, drcRep)
 	snap, raw, err := r.snapshot(routed)
 	if err != nil {
 		return false, err
@@ -1446,6 +1535,7 @@ func (r *kicadRun) qualityGates(board string) (bool, error) {
 		delete(r.summary, "simKicadMismatch")
 	}
 	rc := kicadRouteCompleteGate(r.route, drcRep, snap, o.pourCredit)
+	r.boardConnectivityGate(&rc)
 	if rc.Pass && len(rc.Info) > 0 {
 		r.summary["pourCredited"] = rc.Info // shown by the design report next to the gate
 	}
@@ -1649,6 +1739,52 @@ func reviewInputSHA(stage string, reqFiles, evFiles []string, limit int) (string
 // reporting any unconnected item fails the gate whatever the router claims —
 // a backend that says "all routed" is not taken at its word.
 //
+// recordBoardConnectivity puts pcbnew's unconnected count next to the DRC's,
+// which kicad-cli caps. Not known is left out rather than guessed.
+func (r *kicadRun) recordBoardConnectivity(board string, drc *kicad.DRCReport) {
+	n, err := r.kt.UnconnectedCount(board)
+	if err != nil {
+		fmt.Fprintf(r.stderr, "board connectivity: not known: %v\n", err)
+		return
+	}
+	bc := boardConnectivityEntry(n, drc)
+	if bc["drcTruncated"] == true {
+		fmt.Fprintf(r.stderr, "board connectivity: %d unconnected; the DRC report lists only %v\n", n, bc["drcUnconnected"])
+	}
+	r.summary["boardConnectivity"] = bc
+}
+
+// boardConnectivityGate holds route-complete to pcbnew's count: pads left open
+// fail it, and on the large-board profile, where poured nets were never routed,
+// a count that could not be taken fails it too.
+func (r *kicadRun) boardConnectivityGate(g *gateResult) {
+	bc, _ := r.summary["boardConnectivity"].(map[string]any)
+	if bc == nil {
+		if r.summary["largeBoard"] != nil && g.Pass {
+			g.Pass, g.CannotCheck = false, true
+			g.Detail += "; pcbnew's connectivity count is not known, and poured nets were left out of routing"
+		}
+		return
+	}
+	if n, _ := bc["unconnected"].(int); n > 0 && g.Pass {
+		g.Pass = false
+		g.Detail += fmt.Sprintf("; pcbnew counts %d unconnected", n)
+		g.Items = append(g.Items, fmt.Sprintf("pcbnew counts %d unconnected", n))
+	}
+}
+
+func boardConnectivityEntry(unconnected int, drc *kicad.DRCReport) map[string]any {
+	bc := map[string]any{"unconnected": unconnected}
+	if drc != nil {
+		reported := drc.Counts["unconnected_items"]
+		bc["drcUnconnected"] = reported
+		if unconnected > reported {
+			bc["drcTruncated"] = true
+		}
+	}
+	return bc
+}
+
 // Pour credit (opt-in, --pour-credit; off = as strict as v0.9.0): a connection the
 // router left unrouted passes only when every precondition holds — the router's counters are self-consistent (the listed
 // connections are exactly the counted ones), it reports no fixable violation

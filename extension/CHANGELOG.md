@@ -1,5 +1,50 @@
 # Changelog
 
+## [0.12.5] — 2026-11-03
+
+**CLI, daemon, Skills and MCP move to 0.12.5. The connector runtime is UNCHANGED (only its version number moves); import the
+0.12.5 `pcbpilot-connector.eext` so the versions match — the daemon pauses design actions until they do.**
+
+Summary: `kicad route` now tells the router about insulation, and very large boards get their own router profile. On the 1443-part
+test board, measured by pcbnew on the final board, connections made went from 42 % to 62 %, DRC errors other than open connections from
+291 to 229, and insulation gate errors from 108 to 7. **That board still does not pass:** over a third of its connections stay open, and
+results vary between runs. Reviewed by Codex and Kimi K3.1 Pro round after round.
+
+**Insulation reaches the router**
+- Insulation pairs were written only to KiCad's rule file, so the router laid copper across them and only the final DRC noticed. Every
+  pair now goes into the DSN as a clearance between the classes on its two sides, keeping the larger of the pair's and the class's own
+  clearance. With these rules the full runs on that board ended with at most one track or via clearance error, and the router runs slower.
+- A pair that has nets on both sides but cannot be expressed fails before routing: no class of its domains, or one of its nets in a
+  class outside its domain or in no class. A board with no insulation pair gets the same DSN as before.
+
+**Large-board profile**
+- From 2000 connections `kicad route` switches profile and says so on stderr. Below that nothing changes. `--large-board on|off` overrides
+  it, and any flag you give explicitly wins.
+- It leaves the nets with a planned pour to their pours, in a DSN class of their own so nets sharing their class stay routed; nets named
+  by a differential pair or a length group stay routed. It also uses one start, no per-step limits, no continuation rounds, no
+  `--diagnose`, and **a 60-minute router budget, so a run on such a board takes about 80 minutes.**
+- Left-out nets stay in every connection count until pcbnew finds them joined. A pour alone does not join every pad yet, and a planned
+  pour clipped away entirely leaves its net open; both fail `route-complete`.
+- A single step of the router can run for over 15 minutes without per-step limits; `--max-time` still stops it.
+
+**Honest counts**
+- kicad-cli's DRC report stops listing unconnected items at 499. `summary.json` gains `boardConnectivity` with pcbnew's own count, and says
+  when the DRC list is cut short. `route-complete` now fails when pcbnew counts anything open.
+
+**Fixes**
+- The widen step stepped back from clearance errors but not from shorts, so a track widened onto a neighbouring pad stayed. Shorts now
+  step it back too.
+
+**Experiment flags**
+- `--no-router-diagnose` leaves fastroute's `--diagnose` out. `--router-arg` passes one argument to fastroute, and refuses those pcbpilot
+  sets itself.
+
+**Known limits**
+- Automatic domain zones are still full-height strips that ignore where a domain's connector sits. Hand-made zones against the connectors
+  reached 68 % on the test board, with `--mech` zones.
+- TraceMaker on the same board reached 55 % in 40 minutes, with 188 insulation gate errors, so fastroute stays the default.
+- The same configuration has not been repeated enough to size the variation between runs.
+
 ## [0.12.4] — 2026-11-02
 
 **CLI, daemon, Skills and MCP move to 0.12.4. The connector runtime is UNCHANGED (only its version number moves); import the

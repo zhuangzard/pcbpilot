@@ -531,6 +531,12 @@ pcbpilot kicad route --pcb board-b-v5a.kicad_pcb --intent intent.json --sim sim.
    「移动器件或加逃线」，`summary.blockedConnections` 列出。`--threads` 缺省 min(核数−1, 8)（Board-A 8 线程连跑 3 次
    SES 逐字节相同：14 未布通 / 3469 mm / 156 孔；单线程 13 / 3646 mm / 164 孔；机器高负载时墙钟 204–330 s 对 184 s，
    空闲时首轮约 50 对 112 s）；`--threads 1` 用于跨 fastroute 版本可复现。多线程崩溃自动单线程重跑。
+
+   **绝缘对进 DSN**：每个绝缘对写成两侧 class 之间的 `class_class` 间距（取绝缘对与 class 自身间距的较大值，加同样的余量）。两侧都有网却写不出规则、网不在本域的 class 里或不在任何 class 里，都在布线前报错；没有绝缘对的板 DSN 不变。规则让路由器变慢。
+
+   **大板配置**（`--large-board auto|on|off`，默认 auto：≥2000 连接启用，stderr 会说）：有计划铺铜的网不布，放进自己的 DSN class（同 class 的其他网照布；差分对、长度组里的网照布），1 次启动，无单步时限（`--no-time-limits`），不续跑，不带 `--diagnose`，路由器预算 60 分钟，全流程约 80 分钟。显式给的参数优先。没布的网仍计入连接数，pcbnew 判连通才算；铺铜不会把每个焊盘都接上，这时 `route-complete` 失败。无单步时限下单步可超过 15 分钟，`--max-time` 仍能打断。
+
+   **真实未连接数**：kicad-cli 的 DRC 报告列到 499 个未连接项为止，看 `summary.boardConnectivity`（pcbnew 的数，`drcTruncated` 表示 DRC 列表被截断）；`route-complete` 只要 pcbnew 数出开路就失败。实验用：`--no-router-diagnose`、`--router-arg`（拒绝 pcbpilot 自己管的参数）。
    门禁与签核只读路由器无关的 `routeResult`（router、version、patchSha、args、session|board、unrouted/blocked 连接、
    violations、fixable；`summary.routeResult`），fastroute 是目前唯一实现。
    `--no-neckdown-classes` 列出线宽高于全局下限的**所有**意图网类（fastroute 的 fanout 微颈缩会把任意拥挤段收到类宽
