@@ -230,6 +230,7 @@ type kicadRun struct {
 	stepGates []gateResult
 	o         kicadRouteOpts
 	kt        *kicad.Tools
+	isoPairs  []map[string]any
 	in        *designIntent
 	waivers   []gateWaiver
 	summary   map[string]any
@@ -566,6 +567,7 @@ func (r *kicadRun) run() error {
 		return fmt.Errorf("pre-route gate: %w", err)
 	}
 	reqs, iso, edges := ri.Reqs, ri.Iso, ri.Edges
+	r.isoPairs = iso
 	r.summary["isolationRules"], r.summary["edgeRules"] = iso, edges
 	classed := r.next("classed")
 	full, err := applyKicadNetclasses(kt, board, ri, nil, classed)
@@ -898,6 +900,9 @@ func (r *kicadRun) prepareRoute(classed string, reqs map[string]kicad.NetRequire
 	var viaOrder []string
 	var routerVia *dsnVia
 	prepared, viaOrder, routerVia = dsnRouterVia(prepared)
+	var isoRules int
+	prepared, isoRules = dsnInsulationRules(prepared, r.isoPairs, kicad.ClearanceMarginMil*25.4)
+	r.summary["dsnInsulationRules"] = isoRules
 	r.summary["dsnViaOrder"] = viaOrder
 	if routerVia != nil {
 		r.summary["routerViaPadstack"] = map[string]any{"name": routerVia.name, "diameterUm": routerVia.dia, "drillUm": routerVia.drill}
