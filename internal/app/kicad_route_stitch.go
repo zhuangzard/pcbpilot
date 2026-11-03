@@ -389,7 +389,7 @@ func (r *kicadRun) stitchPours(board string, nets []string) (string, error) {
 			cannot("stitch edit: " + err.Error())
 			return cur, nil
 		}
-		good, reasons, err := r.stitchProve(trial, plan, nets, base, openIDs, padAt, pass)
+		good, reasons, err := r.stitchProve(trial, plan, nets, base, groups, padAt, pass)
 		if err != nil {
 			cannot(err.Error())
 			return cur, nil
@@ -413,7 +413,7 @@ func (r *kicadRun) stitchPours(board string, nets []string) (string, error) {
 				cannot("stitch edit: " + err.Error())
 				return cur, nil
 			}
-			held, again, err := r.stitchProve(next, good, nets, base, openIDs, padAt, pass)
+			held, again, err := r.stitchProve(next, good, nets, base, groups, padAt, pass)
 			if err != nil {
 				cannot(err.Error())
 				return cur, nil
@@ -464,7 +464,7 @@ func stitchOps(ss []stitch) map[string]any {
 // net's main group with no new DRC error at them. A new error at no stitch at
 // all rejects nothing here but is an error of the pass: the caller keeps the
 // board from before it.
-func (r *kicadRun) stitchProve(board string, plan []stitch, nets []string, base *kicad.DRCReport, before map[string]bool, at map[string][2]float64, pass int) ([]stitch, map[string]string, error) {
+func (r *kicadRun) stitchProve(board string, plan []stitch, nets []string, base *kicad.DRCReport, before map[string][]kicad.PadGroup, at map[string][2]float64, pass int) ([]stitch, map[string]string, error) {
 	rep, err := r.kt.DRC(board, filepath.Join(r.work, fmt.Sprintf("%02d-stitch-drc%d.json", r.step, pass)))
 	if err != nil {
 		return nil, nil, fmt.Errorf("DRC after stitching: %w", err)
@@ -476,13 +476,14 @@ func (r *kicadRun) stitchProve(board string, plan []stitch, nets []string, base 
 	open := openPadsOf(groups)
 	fresh := newViolations(base, rep)
 	reasons := map[string]string{}
-	// A stitch can cut a plane in two at its neck: a pad joined before and open
-	// now fails the stitches around it. With none near, nothing can be named
+	// A stitch can cut a plane in two at its neck: pads together before and apart
+	// now fail the stitches around them. With none near, nothing can be named
 	// and the pass fails.
-	cut := stitchCutters(open, before, plan, at)
-	for id := range open {
-		if !before[id] && !cut.named[id] {
-			reasons["board"] = "pad " + id + " lost its pour with no stitch near it"
+	lost := padsSplit(before, groups)
+	cut := stitchCutters(lost, plan, at)
+	for _, id := range sortedKeysOf(lost) {
+		if !cut.named[id] {
+			reasons["board"] = "pad " + id + " was cut off with no stitch near it"
 			break
 		}
 	}
@@ -519,19 +520,56 @@ func (r *kicadRun) stitchProve(board string, plan []stitch, nets []string, base 
 	return good, reasons, nil
 }
 
+// padsSplit lists the pads of each earlier group that are no longer with the
+// largest part of that group. A growing group splits nothing, and a net's main
+// group changing from one piece of copper to another is not a cut.
+func padsSplit(before, after map[string][]kicad.PadGroup) map[string]bool {
+	lost := map[string]bool{}
+	for net, gs := range before {
+		where := map[string]int{}
+		for i, g := range after[net] {
+			for _, id := range g.Pads {
+				where[id] = i
+			}
+		}
+		for _, g := range gs {
+			parts := map[int][]string{}
+			for _, id := range g.Pads {
+				if w, ok := where[id]; ok {
+					parts[w] = append(parts[w], id)
+				}
+			}
+			if len(parts) < 2 {
+				continue
+			}
+			keep, most := -1, 0
+			for w, ids := range parts {
+				if len(ids) > most || len(ids) == most && w < keep {
+					keep, most = w, len(ids)
+				}
+			}
+			for w, ids := range parts {
+				if w != keep {
+					for _, id := range ids {
+						lost[id] = true
+					}
+				}
+			}
+		}
+	}
+	return lost
+}
+
 type stitchCut struct {
 	stitches map[string]bool // by the pad each stitch serves
 	named    map[string]bool // lost pads with a stitch near them
 }
 
-// stitchCutters finds the stitches that may have cut a pad off its pour: those
-// within stitchCutMil of a pad joined before and open now.
-func stitchCutters(open, before map[string]bool, plan []stitch, at map[string][2]float64) stitchCut {
+// stitchCutters finds the stitches that may have cut a pad off: those within
+// stitchCutMil of it.
+func stitchCutters(lost map[string]bool, plan []stitch, at map[string][2]float64) stitchCut {
 	cut := stitchCut{stitches: map[string]bool{}, named: map[string]bool{}}
-	for id := range open {
-		if before[id] {
-			continue
-		}
+	for id := range lost {
 		q, ok := at[id]
 		if !ok {
 			continue

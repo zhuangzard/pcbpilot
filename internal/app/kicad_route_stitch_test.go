@@ -220,18 +220,35 @@ func TestStitchRefusal(t *testing.T) {
 	}
 }
 
+func TestPadsSplit(t *testing.T) {
+	before := map[string][]kicad.PadGroup{"P": {{Pads: []string{"a", "b", "c"}, Zone: true}, {Pads: []string{"d"}}}}
+	// d joins: nothing is lost.
+	grown := map[string][]kicad.PadGroup{"P": {{Pads: []string{"a", "b", "c", "d"}, Zone: true}}}
+	if got := padsSplit(before, grown); len(got) != 0 {
+		t.Fatalf("growth: %v", got)
+	}
+	// The main group moves to other copper: a lone pad cannot be cut off.
+	moved := map[string][]kicad.PadGroup{"P": {{Pads: []string{"a", "b", "c"}}, {Pads: []string{"d", "e", "f", "g"}, Zone: true}}}
+	if got := padsSplit(before, moved); len(got) != 0 {
+		t.Fatalf("main group moved: %v", got)
+	}
+	// c is cut off from a and b.
+	cut := map[string][]kicad.PadGroup{"P": {{Pads: []string{"a", "b"}, Zone: true}, {Pads: []string{"c"}}, {Pads: []string{"d"}}}}
+	if got := padsSplit(before, cut); len(got) != 1 || !got["c"] {
+		t.Fatalf("cut: %v", got)
+	}
+}
+
 func TestStitchCutters(t *testing.T) {
 	near := stitch{PadID: "near", Via: specctra.NewVia{X: 100, Y: 0}}
 	far := stitch{PadID: "far", Via: specctra.NewVia{X: 5000, Y: 0}}
 	at := map[string][2]float64{"lost": {0, 0}, "away": {9000, 9000}}
-	open := map[string]bool{"lost": true, "was": true}
-	before := map[string]bool{"was": true}
-	cut := stitchCutters(open, before, []stitch{near, far}, at)
-	if !cut.stitches["near"] || cut.stitches["far"] || !cut.named["lost"] || cut.named["was"] {
+	cut := stitchCutters(map[string]bool{"lost": true}, []stitch{near, far}, at)
+	if !cut.stitches["near"] || cut.stitches["far"] || !cut.named["lost"] {
 		t.Fatalf("%+v", cut)
 	}
 	// A lost pad with no stitch around stays unnamed: the pass fails on it.
-	cut = stitchCutters(map[string]bool{"away": true}, nil, []stitch{near, far}, at)
+	cut = stitchCutters(map[string]bool{"away": true}, []stitch{near, far}, at)
 	if cut.named["away"] || len(cut.stitches) != 0 {
 		t.Fatalf("%+v", cut)
 	}
