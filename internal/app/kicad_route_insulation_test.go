@@ -81,6 +81,14 @@ func TestFastrouteArgsExtraAndDiagnose(t *testing.T) {
 	}
 }
 
+func TestWidenStepsBackFromShorts(t *testing.T) {
+	for rule, want := range map[string]bool{"clearance": true, "shorting_items": true, "track_width": false} {
+		if widenStepsBackFor(rule) != want {
+			t.Errorf("%s: want %v", rule, want)
+		}
+	}
+}
+
 func TestCheckRouterArgs(t *testing.T) {
 	for _, bad := range []string{"--initial-session=x.ses", "-do=x", "--report=x", "--max-time=9", "--diagnose", "x.ses", "--router.autorouter.max_threads=8"} {
 		if err := checkRouterArgs([]string{bad}); err == nil {

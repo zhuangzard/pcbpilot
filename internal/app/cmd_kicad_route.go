@@ -1116,7 +1116,7 @@ func (r *kicadRun) widen(board, what string, plan func([]specctra.Track, []widen
 		}
 		bad := map[string]bool{}
 		for _, v := range rep.Violations {
-			if v.Rule == "clearance" {
+			if widenStepsBackFor(v.Rule) {
 				for _, id := range v.Objs {
 					bad[id] = true
 				}
@@ -1146,6 +1146,11 @@ func (r *kicadRun) widen(board, what string, plan func([]specctra.Track, []widen
 	}
 	return ops, out, nil
 }
+
+// widenStepsBackFor: the DRC rules a widened track must step back from. A track
+// widened onto a neighbouring pad is a short, which KiCad does not report as
+// clearance.
+func widenStepsBackFor(rule string) bool { return rule == "clearance" || rule == "shorting_items" }
 
 // silkDecision says whether this board's labels get placed: why not (reason ""
 // = place them, under budget; 0 = unlimited). auto marks --silk=auto holding
