@@ -122,6 +122,18 @@ func TestDSNIsolateNets(t *testing.T) {
 	if strings.Count(out, "(width 400)") != 2 || !strings.Contains(out, `(class "P1+D" SIG`) {
 		t.Fatalf("rule lost or an untouched class changed:\n%s", out)
 	}
+	// A net in the DSN without a class cannot be left out silently.
+	if _, _, err := dsnIsolateNets(`(pcb t (network (net N (pins U1-1)) (class "A" B (rule (clearance 1)))) (wiring))`, []string{"N"}); err == nil {
+		t.Fatal("a net without a class must be an error")
+	}
+	// An existing class of that name is not reused.
+	taken := `(pcb t (network
+    (class "X" P Q (rule (clearance 1)))
+    (class "X__POUR" S (rule (clearance 1)))
+  ) (wiring))`
+	if _, cl, err := dsnIsolateNets(taken, []string{"P"}); err != nil || strings.Join(cl, ",") != "X__POUR2" {
+		t.Fatalf("collision: %v %v", cl, err)
+	}
 	if got, cl, err := dsnIsolateNets(dsn, nil); got != dsn || len(cl) != 0 || err != nil {
 		t.Fatalf("no nets must not change the DSN: %v %v", cl, err)
 	}
@@ -146,5 +158,30 @@ func TestUseLargeBoardProfile(t *testing.T) {
 		if useLargeBoardProfile(c.mode, c.n) != c.want {
 			t.Errorf("%+v", c)
 		}
+	}
+}
+
+func TestRouteCompleteHeldToBoardConnectivity(t *testing.T) {
+	r := &kicadRun{summary: map[string]any{"boardConnectivity": map[string]any{"unconnected": 3}}}
+	g := gateResult{Gate: "route-complete", Pass: true}
+	r.boardConnectivityGate(&g)
+	if g.Pass {
+		t.Fatal("open pads must fail route-complete")
+	}
+	r = &kicadRun{summary: map[string]any{"largeBoard": map[string]any{}}}
+	g = gateResult{Gate: "route-complete", Pass: true}
+	r.boardConnectivityGate(&g)
+	if g.Pass || !g.CannotCheck {
+		t.Fatalf("no count on the large-board profile: %+v", g)
+	}
+	r = &kicadRun{summary: map[string]any{}}
+	g = gateResult{Gate: "route-complete", Pass: true}
+	if r.boardConnectivityGate(&g); !g.Pass {
+		t.Fatal("no count and no profile keeps the gate as it was")
+	}
+	r = &kicadRun{summary: map[string]any{"boardConnectivity": map[string]any{"unconnected": 0}}}
+	g = gateResult{Gate: "route-complete", Pass: true}
+	if r.boardConnectivityGate(&g); !g.Pass {
+		t.Fatal("zero unconnected keeps the pass")
 	}
 }

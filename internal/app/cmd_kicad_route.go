@@ -45,8 +45,8 @@ type kicadRouteOpts struct {
 	// defaults scale with the board: fastrouteAutoMaxTime).
 	maxTimeSet, routerTimeoutSet bool
 	// largeBoard: auto | on | off (applyLargeBoardProfile).
-	largeBoard                 string
-	multiStartSet, continueSet bool
+	largeBoard                                string
+	multiStartSet, continueSet, noDiagnoseSet bool
 	// padNeckFloor (mil, 0 = off): see kicad.PadNeckFloorMil.
 	padNeckFloor float64
 	// rules: explicit flags (0 = not given); ruleFlags = any was given.
@@ -138,6 +138,7 @@ Exits non-zero when any gate fails; --waivers takes signed {gate,match,reason,by
 				return fmt.Errorf("--large-board must be auto, on or off")
 			}
 			o.multiStartSet, o.continueSet = cmd.Flags().Changed("multi-start"), cmd.Flags().Changed("continue")
+			o.noDiagnoseSet = cmd.Flags().Changed("no-router-diagnose")
 			if err := checkRouterArgs(o.fo.extraArgs); err != nil {
 				return err
 			}
@@ -1166,23 +1167,41 @@ func (r *kicadRun) widen(board, what string, plan func([]specctra.Track, []widen
 // one start, no per-step limits, no --diagnose afterwards, a 60-minute budget.
 func (r *kicadRun) applyLargeBoardProfile(dsn string, inSnap *boardSnapshot) (string, error) {
 	o := &r.o
+	// Nets the pairs and tune files name stay routed: those files must not
+	// name a net the router leaves out.
+	constrained := map[string]bool{}
+	for _, n := range intentRouterNets(r.in) {
+		constrained[n] = true
+	}
 	var nets []string
 	seen := map[string]bool{}
 	for _, p := range kicadPourPlan(*o, inSnap) {
-		if !seen[p.Net] {
+		if !seen[p.Net] && !constrained[p.Net] {
 			seen[p.Net] = true
 			nets = append(nets, p.Net)
 		}
 	}
-	out, classes, err := dsnIsolateNets(dsn, nets)
-	if err != nil {
-		return dsn, err
+	out := dsn
+	var classes []string
+	if !routerArgGiven(o.fo.extraArgs, "--router.autorouter.ignore_net_classes") {
+		var err error
+		if out, classes, err = dsnIsolateNets(dsn, nets); err != nil {
+			return dsn, err
+		}
+	} else {
+		nets = nil
 	}
-	if len(classes) > 0 {
-		o.fo.extraArgs = append(o.fo.extraArgs, "--router.autorouter.ignore_net_classes="+strings.Join(classes, ","))
+	if r.summary["largeBoard"] == nil { // a second preparation must not stack the arguments
+		if len(classes) > 0 {
+			o.fo.extraArgs = append(o.fo.extraArgs, "--router.autorouter.ignore_net_classes="+strings.Join(classes, ","))
+		}
+		if !routerArgGiven(o.fo.extraArgs, "--no-time-limits") && !routerArgGiven(o.fo.extraArgs, "--time-limit-mode") {
+			o.fo.extraArgs = append(o.fo.extraArgs, "--no-time-limits")
+		}
 	}
-	o.fo.extraArgs = append(o.fo.extraArgs, "--no-time-limits")
-	o.fo.noDiagnose = true
+	if !o.noDiagnoseSet {
+		o.fo.noDiagnose = true
+	}
 	if !o.multiStartSet {
 		o.fo.multiStart = 1
 	}
@@ -1516,6 +1535,7 @@ func (r *kicadRun) qualityGates(board string) (bool, error) {
 		delete(r.summary, "simKicadMismatch")
 	}
 	rc := kicadRouteCompleteGate(r.route, drcRep, snap, o.pourCredit)
+	r.boardConnectivityGate(&rc)
 	if rc.Pass && len(rc.Info) > 0 {
 		r.summary["pourCredited"] = rc.Info // shown by the design report next to the gate
 	}
@@ -1732,6 +1752,25 @@ func (r *kicadRun) recordBoardConnectivity(board string, drc *kicad.DRCReport) {
 		fmt.Fprintf(r.stderr, "board connectivity: %d unconnected; the DRC report lists only %v\n", n, bc["drcUnconnected"])
 	}
 	r.summary["boardConnectivity"] = bc
+}
+
+// boardConnectivityGate holds route-complete to pcbnew's count: pads left open
+// fail it, and on the large-board profile, where poured nets were never routed,
+// a count that could not be taken fails it too.
+func (r *kicadRun) boardConnectivityGate(g *gateResult) {
+	bc, _ := r.summary["boardConnectivity"].(map[string]any)
+	if bc == nil {
+		if r.summary["largeBoard"] != nil && g.Pass {
+			g.Pass, g.CannotCheck = false, true
+			g.Detail += "; pcbnew's connectivity count is not known, and poured nets were left out of routing"
+		}
+		return
+	}
+	if n, _ := bc["unconnected"].(int); n > 0 && g.Pass {
+		g.Pass = false
+		g.Detail += fmt.Sprintf("; pcbnew counts %d unconnected", n)
+		g.Items = append(g.Items, fmt.Sprintf("pcbnew counts %d unconnected", n))
+	}
 }
 
 func boardConnectivityEntry(unconnected int, drc *kicad.DRCReport) map[string]any {

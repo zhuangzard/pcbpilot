@@ -13,6 +13,8 @@ import (
 )
 
 var (
+	reDSNNetName        = regexp.MustCompile(`^\(net\s+("[^"]*"|[^\s()]+)`)
+	reDSNPourSuffix     = regexp.MustCompile(`__POUR[0-9]*$`)
 	reDSNClassName      = regexp.MustCompile(`^\(class\s+("[^"]*"|[^\s()]+)`)
 	reDSNToken          = regexp.MustCompile(`"[^"]*"|[^\s()]+`)
 	reDSNClassClearance = regexp.MustCompile(`\(clearance\s+([0-9.]+)\)`)
@@ -64,7 +66,7 @@ func dsnInsulationRules(dsn string, iso []map[string]any, marginUm float64) (str
 		}
 	}
 	member := func(name, class string) bool {
-		for _, p := range strings.Split(strings.TrimSuffix(name, "__POUR"), "+") {
+		for _, p := range strings.Split(reDSNPourSuffix.ReplaceAllString(name, ""), "+") {
 			if p == class {
 				return true
 			}
@@ -149,11 +151,21 @@ func checkRouterArgs(args []string) error {
 // class under the name <class>__POUR, so a router option that leaves classes
 // unrouted can leave out those nets and not the ones that share their class.
 // It returns the DSN and the classes that hold only the named nets, sorted. A
-// named net with no class in the DSN is not routed anyway and is skipped.
+// named net absent from the DSN has nothing to route; one in the DSN without a
+// class is an error.
 func dsnIsolateNets(dsn string, nets []string) (string, []string, error) {
 	want := map[string]bool{}
 	for _, n := range nets {
 		want[n] = true
+	}
+	found := map[string]bool{}
+	taken := map[string]bool{}
+	for _, at := range dsnFindAll(dsn, "class") {
+		if end := sexprEnd(dsn, at); end >= 0 {
+			if m := reDSNClassName.FindStringSubmatch(dsn[at:end]); m != nil {
+				taken[strings.Trim(m[1], `"`)] = true
+			}
+		}
 	}
 	var out strings.Builder
 	var classes []string
@@ -184,6 +196,7 @@ func dsnIsolateNets(dsn string, nets []string) (string, []string, error) {
 		var keep, move []string
 		for _, tok := range reDSNToken.FindAllString(text[m[3]:listEnd], -1) {
 			if want[strings.Trim(tok, `"`)] {
+				found[strings.Trim(tok, `"`)] = true
 				move = append(move, tok)
 			} else {
 				keep = append(keep, tok)
@@ -197,14 +210,36 @@ func dsnIsolateNets(dsn string, nets []string) (string, []string, error) {
 			continue
 		}
 		copyName := name + "__POUR"
+		for i := 2; taken[copyName]; i++ {
+			copyName = fmt.Sprintf("%s__POUR%d", name, i)
+		}
+		taken[copyName] = true
 		classes = append(classes, copyName)
 		out.WriteString(dsn[last:at])
 		fmt.Fprintf(&out, "%s %s\n      %s\n    (class %q %s\n      %s", text[:m[3]], strings.Join(keep, " "), text[listEnd:], copyName, strings.Join(move, " "), text[listEnd:])
 		last = end
 	}
 	out.WriteString(dsn[last:])
+	for _, at := range dsnFindAll(dsn, "net") {
+		if end := sexprEnd(dsn, at); end >= 0 {
+			if m := reDSNNetName.FindStringSubmatch(dsn[at:end]); m != nil {
+				if n := strings.Trim(m[1], `"`); want[n] && !found[n] {
+					return dsn, nil, fmt.Errorf("net %s is in no DSN class", n)
+				}
+			}
+		}
+	}
 	sort.Strings(classes)
 	return out.String(), classes, nil
+}
+
+func routerArgGiven(args []string, name string) bool {
+	for _, a := range args {
+		if a == name || strings.HasPrefix(a, name+"=") {
+			return true
+		}
+	}
+	return false
 }
 
 // largeBoardConnections: from here on `kicad route` uses the large-board
