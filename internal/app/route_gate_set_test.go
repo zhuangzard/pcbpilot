@@ -77,7 +77,7 @@ func TestRouteGateSetContract(t *testing.T) {
 
 	// 3. Each route command wires the run gates and ends with gate-set.
 	for file, want := range map[string][]string{
-		"cmd_kicad_route.go":    {`r.review("design"`, `r.review("layout"`, "kicadDRCGate(", "padNetDiffGate(", "kicadIntentRulesGate(", "snapshotIntentGates(", "tailGates(", "r.designReport(", "signoffGate(", "gateSetGate(r.gates)"},
+		"cmd_kicad_route.go":    {`r.review("design"`, `r.review("layout"`, "kicadDRCGate(", "padNetDiffGate(", "kicadIntentRulesGate(", "snapshotIntentGates(", "tailGates(", "r.designReport(", "signoffGate(", "kicadGateSetGate(r.gates)"},
 		"cmd_pcb_auto_route.go": {`designReviewGate("design"`, `designReviewGate("layout"`, "runQualityGates(", "autoRouteDesignReport(", "signoffGate(", "gateSetGate(gates)", `o.routerCmd == "internal"`},
 		"pcb_route_gates.go":    {`Gate: "native-drc"`, `Gate: "pad-net-diff"`, `Gate: "intent-rules"`, "postRouteGates(", "tailGates(", "boardRouteCompleteGate("},
 	} {
@@ -90,5 +90,22 @@ func TestRouteGateSetContract(t *testing.T) {
 				t.Errorf("%s no longer contains %q: a route path dropped a mandatory gate", file, w)
 			}
 		}
+	}
+}
+
+// kicad route also requires via-audit; the other paths cannot run it.
+func TestKicadGateSetRequiresViaAudit(t *testing.T) {
+	all := []gateResult{}
+	for _, m := range mandatoryRouteGates {
+		all = append(all, gateResult{Gate: m.names[0]})
+	}
+	if g := gateSetGate(all); !g.Pass {
+		t.Fatalf("shared set must not need via-audit: %+v", g)
+	}
+	if g := kicadGateSetGate(all); g.Pass || !strings.Contains(g.Detail, "via-audit") {
+		t.Fatalf("kicad route without via-audit: %+v", g)
+	}
+	if g := kicadGateSetGate(append(all, gateResult{Gate: "via-audit"})); !g.Pass {
+		t.Fatalf("kicad route with via-audit: %+v", g)
 	}
 }

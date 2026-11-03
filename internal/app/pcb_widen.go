@@ -25,6 +25,8 @@ type widenVia struct {
 	X        float64 `json:"x"`
 	Y        float64 `json:"y"`
 	Diameter float64 `json:"diameter"`
+	From     int     `json:"fromLayer,omitempty"`
+	To       int     `json:"toLayer,omitempty"`
 }
 
 type widenOp struct {

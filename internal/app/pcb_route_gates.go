@@ -12,6 +12,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -33,6 +34,12 @@ type gateResult struct {
 	// Info lists what passed by a rule worth seeing (silkscreen: hidden
 	// designators covered by a group label).
 	Info []string `json:"info,omitempty"`
+	// CannotCheck: the check could not judge (Pass stays false). kicad route's
+	// registry reports it as cannot-check (exit 5), not as a failure (exit 6).
+	CannotCheck bool `json:"cannotCheck,omitempty"`
+	// Unchecked: which Items could not be judged, the others being failures.
+	// A gate that sets it is waived per item: see applyWaivers.
+	Unchecked []string `json:"unchecked,omitempty"`
 }
 
 // gateWaiver is a human decision to accept one known failure: every failing
@@ -46,12 +53,14 @@ type gateWaiver struct {
 }
 
 // applyWaivers turns a failing gate into a pass only when every one of its
-// items is matched by a waiver for that gate.
+// items is matched by a waiver for that gate. A gate with typed items
+// (Unchecked) also drops the items waived when others are left, and is
+// cannot-check when all that is left could not be judged.
 func applyWaivers(g *gateResult, ws []gateWaiver) {
 	if g.Pass || len(g.Items) == 0 {
 		return
 	}
-	var waived []string
+	var waived, left []string
 	for _, it := range g.Items {
 		hit := ""
 		for _, w := range ws {
@@ -61,11 +70,30 @@ func applyWaivers(g *gateResult, ws []gateWaiver) {
 			}
 		}
 		if hit == "" {
-			return
+			if len(g.Unchecked) == 0 {
+				return
+			}
+			left = append(left, it)
+			continue
 		}
 		waived = append(waived, hit)
 	}
-	g.Pass, g.Waived = true, waived
+	if len(left) == 0 {
+		g.Pass, g.Waived, g.CannotCheck, g.Unchecked = true, append(g.Waived, waived...), false, nil
+		return
+	}
+	if len(waived) == 0 {
+		return
+	}
+	var unchecked []string
+	for _, it := range left {
+		if slices.Contains(g.Unchecked, it) {
+			unchecked = append(unchecked, it)
+		}
+	}
+	g.Items, g.Unchecked, g.CannotCheck = left, unchecked, len(unchecked) == len(left)
+	g.Waived = append(g.Waived, waived...)
+	g.Detail += fmt.Sprintf("; %d item(s) waived, %d left", len(waived), len(left))
 }
 
 // widthViolation is a routed track that does not meet its net's intent.

@@ -23,6 +23,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/zhuangzard/pcbpilot/internal/kfile"
 )
 
 //go:embed bridge.py
@@ -153,19 +155,29 @@ func (t *Tools) RunBridge(args ...string) (json.RawMessage, error) {
 
 // RunBridgeEnv is RunBridge with extra environment variables ("K=V").
 func (t *Tools) RunBridgeEnv(env []string, args ...string) (json.RawMessage, error) {
+	return t.runBridge(context.Background(), env, args...)
+}
+
+// runBridge is RunBridgeEnv under parent as well as BridgeTimeout: when parent
+// ends the bridge is killed and the error wraps parent's.
+func (t *Tools) runBridge(parent context.Context, env []string, args ...string) (json.RawMessage, error) {
 	script, err := bridgeScript()
 	if err != nil {
 		return nil, fmt.Errorf("kicad bridge: %w", err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), BridgeTimeout)
+	ctx, cancel := context.WithTimeout(parent, BridgeTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, t.Python, append([]string{script}, args...)...)
+	cmd.WaitDelay = 5 * time.Second // a killed bridge's output pipes never hold the caller
 	if len(env) > 0 {
 		cmd.Env = append(os.Environ(), env...)
 	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	runErr := cmd.Run()
+	if perr := parent.Err(); perr != nil {
+		return nil, fmt.Errorf("kicad bridge %s: %w", args[0], perr)
+	}
 	raw, perr := parseBridgeOutput(stdout.Bytes())
 	if perr != nil {
 		why := perr.Error()
@@ -238,7 +250,12 @@ func Snapshot(pcbPath string) ([]byte, error) {
 
 // Snapshot is the package-level Snapshot with explicit tools.
 func (t *Tools) Snapshot(pcbPath string) ([]byte, error) {
-	raw, err := t.RunBridge("snapshot", pcbPath)
+	return t.SnapshotContext(context.Background(), pcbPath)
+}
+
+// SnapshotContext is Snapshot, killing the bridge when ctx ends.
+func (t *Tools) SnapshotContext(ctx context.Context, pcbPath string) ([]byte, error) {
+	raw, err := t.runBridge(ctx, nil, "snapshot", pcbPath)
 	if err != nil {
 		return nil, err
 	}
@@ -462,6 +479,13 @@ func (t *Tools) Version() (string, error) {
 
 // Edit applies copper / silk edits to pcb (bridge edit) and saves out.
 func (t *Tools) Edit(pcb string, ops map[string]any, out string) (json.RawMessage, error) {
+	return t.EditContext(context.Background(), pcb, ops, out)
+}
+
+// EditContext is Edit, killing the bridge when ctx ends. The bridge saves to a
+// temporary board beside out, which replaces out only when it succeeded: a
+// bridge killed mid-save leaves out and pcb as they were.
+func (t *Tools) EditContext(ctx context.Context, pcb string, ops map[string]any, out string) (json.RawMessage, error) {
 	path := strings.TrimSuffix(out, filepath.Ext(out)) + fmt.Sprintf("-edit-%d.json", time.Now().UnixNano())
 	b, err := json.MarshalIndent(ops, "", "  ")
 	if err != nil {
@@ -470,7 +494,180 @@ func (t *Tools) Edit(pcb string, ops map[string]any, out string) (json.RawMessag
 	if err := os.WriteFile(path, b, 0o644); err != nil {
 		return nil, err
 	}
-	return t.RunBridge("edit", pcb, path, out)
+	stem := strings.TrimSuffix(out, filepath.Ext(out))
+	tmpStem := fmt.Sprintf("%s.pcbpilot-%d", stem, time.Now().UnixNano())
+	tmp := tmpStem + filepath.Ext(out)
+	defer removeStem(tmpStem)
+	raw, err := t.runBridge(ctx, nil, "edit", pcb, path, tmp)
+	if err != nil {
+		return raw, err
+	}
+	if err := commitBoard(pcb, tmp, out); err != nil {
+		return raw, fmt.Errorf("kicad bridge edit: %w", err)
+	}
+	return resultOut(raw, out), nil
+}
+
+// The file operations of commitBoard (replaced in tests).
+var (
+	commitRename = kfile.Rename
+	commitRemove = os.Remove
+)
+
+// commitBoard moves a board the bridge saved at tmp, and its sidecars, to out.
+// The board goes last: it is what makes out the new result. Sidecars follow the
+// bridge's save_board for a direct save: a new .kicad_pro / .kicad_prl replaces
+// the one at out (or, unless the board is saved over itself, one it did not
+// write removes it), and a .kicad_dru at out stays. Every file it will change is
+// copied beside itself first and put back on any failure; if that fails too the
+// copies stay and the error names them.
+func commitBoard(src, tmp, out string) error {
+	if _, err := os.Stat(tmp); err != nil {
+		return fmt.Errorf("the bridge reported success but saved no board: %w", err)
+	}
+	inPlace := false
+	if a, err := os.Stat(src); err == nil {
+		if b, err := os.Stat(out); err == nil {
+			inPlace = os.SameFile(a, b)
+		}
+	}
+	tmpStem, outStem := strings.TrimSuffix(tmp, filepath.Ext(tmp)), strings.TrimSuffix(out, filepath.Ext(out))
+	type step struct{ from, to string } // from "": delete to
+	var steps []step
+	for _, ext := range []string{".kicad_pro", ".kicad_prl"} {
+		switch _, err := os.Stat(tmpStem + ext); {
+		case err == nil:
+			if err := nameProjectFile(tmpStem+ext, filepath.Base(tmpStem), filepath.Base(outStem)); err != nil {
+				return err
+			}
+			steps = append(steps, step{tmpStem + ext, outStem + ext})
+		case !os.IsNotExist(err):
+			return err
+		case !inPlace:
+			if _, err := os.Stat(outStem + ext); err == nil {
+				steps = append(steps, step{"", outStem + ext})
+			}
+		}
+	}
+	if _, err := os.Stat(tmpStem + ".kicad_dru"); err == nil {
+		if _, err := os.Stat(outStem + ".kicad_dru"); os.IsNotExist(err) {
+			steps = append(steps, step{tmpStem + ".kicad_dru", outStem + ".kicad_dru"})
+		}
+	}
+	steps = append(steps, step{tmp, out})
+
+	backup := func(to string) string { return to + filepath.Base(tmpStem)[len(filepath.Base(outStem)):] + ".bak" }
+	var backups []string
+	dropBackups := func() {
+		for _, b := range backups {
+			_ = os.Remove(b)
+		}
+	}
+	for _, st := range steps {
+		data, err := os.ReadFile(st.to)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			dropBackups()
+			return err
+		}
+		info, err := os.Stat(st.to)
+		if err != nil {
+			dropBackups()
+			return err
+		}
+		if err := os.WriteFile(backup(st.to), data, info.Mode().Perm()); err != nil {
+			dropBackups()
+			return err
+		}
+		backups = append(backups, backup(st.to))
+	}
+	// restore puts one output back to what it was; nothing to do if it still is.
+	restore := func(to string) error {
+		was, err := os.ReadFile(backup(to))
+		switch {
+		case os.IsNotExist(err):
+			if err := commitRemove(to); err != nil && !os.IsNotExist(err) {
+				return err
+			}
+			return nil
+		case err != nil:
+			return err
+		}
+		if now, err := os.ReadFile(to); err == nil && bytes.Equal(now, was) {
+			return nil
+		}
+		return commitRename(backup(to), to)
+	}
+	for i, st := range steps {
+		var err error
+		if st.from == "" {
+			err = commitRemove(st.to)
+		} else {
+			err = commitRename(st.from, st.to)
+		}
+		if err == nil {
+			continue
+		}
+		// A failed step changed nothing, unless it failed after the fact.
+		var failed []error
+		for j := i; j >= 0; j-- {
+			if rerr := restore(steps[j].to); rerr != nil {
+				failed = append(failed, rerr)
+			}
+		}
+		if len(failed) > 0 {
+			return fmt.Errorf("%w; and putting the previous files back failed (%v): they are kept as %s", err, errors.Join(failed...), strings.Join(backups, ", "))
+		}
+		dropBackups()
+		return err
+	}
+	dropBackups()
+	return nil
+}
+
+// nameProjectFile: a project file names itself (meta.filename), and pcbnew wrote
+// the temporary name.
+func nameProjectFile(path, tmpBase, outBase string) error {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	fixed := bytes.ReplaceAll(b, []byte(tmpBase), []byte(outBase))
+	if bytes.Equal(fixed, b) {
+		return nil
+	}
+	return os.WriteFile(path, fixed, 0o644)
+}
+
+// removeStem removes what a save to stem+ext left (nothing after a commit that
+// moved it all); best effort, a killed process may still hold a file a moment.
+func removeStem(stem string) {
+	dir, prefix := filepath.Dir(stem), filepath.Base(stem)+"."
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), prefix) {
+			_ = os.Remove(filepath.Join(dir, e.Name()))
+		}
+	}
+}
+
+// resultOut is a bridge result naming out as its output.
+func resultOut(raw json.RawMessage, out string) json.RawMessage {
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return raw
+	}
+	m["out"] = out
+	b, err := json.Marshal(m)
+	if err != nil {
+		return raw
+	}
+	return b
 }
 
 // NetclassesIso is Netclasses plus insulation pairs: [{a, b, aNets, bNets,

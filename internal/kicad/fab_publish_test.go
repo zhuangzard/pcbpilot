@@ -28,6 +28,7 @@ func TestMain(m *testing.M) {
 	if code, ok := fakePlacePython(); ok {
 		os.Exit(code)
 	}
+	fakeSlowBridge()
 	os.Exit(m.Run())
 }
 

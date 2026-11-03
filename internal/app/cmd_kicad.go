@@ -408,7 +408,7 @@ func kicadPourPlan(o kicadRouteOpts, in *boardSnapshot) []kicad.Pour {
 // kicadDRCCannotCheck is the kicad-drc gate when kicad-cli produced no
 // readable report: failed, with no items (so no waiver can pass it).
 func kicadDRCCannotCheck(err error) gateResult {
-	return gateResult{Gate: "kicad-drc", Detail: "cannot check: " + err.Error()}
+	return gateResult{Gate: "kicad-drc", Detail: "cannot check: " + err.Error(), CannotCheck: true}
 }
 
 // kicadDRCGate: 0 DRC errors, 0 unconnected items, every one listed.

@@ -498,8 +498,17 @@ pcbpilot kicad route --pcb board-b-v5a.kicad_pcb --intent intent.json --sim sim.
    一个过孔（自动布线仍按各类 `use_via`，已实测）：所有类过孔里最大的直径**和**最大的孔径（类 0.8/0.2 与 0.7/0.4 → 0.8/0.4；没有这样的类就按 KiCad 的命名
    `Via[…]_<径>:<孔>_um` 加一个 padstack，SES 导入时 KiCad 从名字读孔径——实测导入为 0.8/0.4），作为列表里唯一的过孔（`summary.routerViaPadstack`、
    `dsnViaOrder`）。导入后每个布线器过孔**缩**到它所在网的有效类过孔（KiCad 回读；bridge edit `setVia`，`summary.routerVias`）：
-   两个尺寸都只缩不放，fastroute 按大过孔留的间距都还在，每个类过孔（含它自己的环宽）都缩得到。缩不到类过孔的（某一维比类小）
-   判 `router-vias` 失败，网没有有效类过孔的判 cannot-check——都不会悄悄跳过。
+   两个尺寸都只缩不放，fastroute 按大过孔留的间距都还在，每个类过孔（含它自己的环宽）都缩得到。
+   **小数 µm 的过孔名**：KiCad 导出 24 mil 类时名字是 `…_609.6:304.8_um`，fastroute 不认这种 `use_via`，该类的过孔会落到 DSN 里最小的类过孔
+   （实板 128 个全是 600:300）。所以 route 先把所有带小数的过孔 padstack（名字、圆、所有引用）**向上取整到整 µm**（609.6:304.8 → 610:305），导入后再缩回类过孔；名字全是整数的 DSN 一字不变。
+   **导入的孔径**：名字等于 Default 类过孔时，KiCad 不读名字里的孔径，改用该网类的孔径——600:300 落在 0.7/0.4 类的网上就是 0.6/0.4，环宽 0.10 mm，违规。
+   **板上已有的过孔**：SES 导入给每个过孔换新 uuid，并按 session 改它们的尺寸（609.6 改名 610:305 后回来就是 610），所以按“同网 + 同跨层 + 同位置”一对一认回（uuid 优先，坐标完全相同优先于容差内），不当布线器过孔缩、来源记 input，尺寸写回原值（`summary.routerVias.inputViasRestored`）；导入后不见了的判 `router-vias` 失败。有多个可能配对、或原位的过孔尺寸不是导入能变出来的（只会向上取整到整 µm 或换成类孔径；否则可能是布线器放在原位的过孔）时不猜：不缩不还原、来源记 unknown、`router-vias` 判 cannot-check。尺寸相同的原位新过孔分不出来，当作 input，也不改变板子。TraceMaker 不走这个尺寸步骤：同样按输入板对账，它新建的过孔来源记 `tracemaker`（不改尺寸，尺寸不符如实判），每个候选各有一份来源记录。
+   **放大只作为修复**：缩不到类过孔的（某一维比类小超过 100 nm，与 `via-audit` 同一容差）每个过孔单独做一次候选，同一事务里先查几何（对其他网的线、过孔、焊盘的外接圆，只看与该过孔跨层有重叠的铜），写板后跑 KiCad DRC 并与写板前的 DRC 比较（按规则 + 对象 uuid 配对；同一违规 `actual` 离限值更远、或限值/单位变了算变差，只是文字变了不算）：只看差异，新增或变差的违规点名候选过孔则该过孔退出并重试一次，只列邻居（线、焊盘）时无法归到某个过孔，整事务丢弃，仍不过也整事务丢弃；原有且没变差的违规不拒绝修复；被拒的过孔保持原样，
+   带证据判 `router-vias` 失败（缺净距规则、DRC 没跑成判 cannot-check），成功的列在 gate Info 和 `summary.routerVias.grownToClass`。不拆线、不循环。网没有有效类过孔的判 cannot-check——都不会悄悄跳过。
+   **`via-audit` 门禁**（只读，所有几何步骤之后）：最终板上每个过孔一行写入 `via-audit.json`：网、解析出的类、跨层、径/孔/环宽、来源（input / router / tracemaker / router-repaired / escape / via-array / unknown）、违反的约束。
+   制造合法性（环宽、孔、径 对板子最小值、自定义规则和合同）与首选尺寸（类过孔）分开判：不合法一律失败，输入板已有的过孔也失败但绝不改；尺寸不符只有 input（列在 Info）和声明的例外放行，
+   route 自己的意图逃逸过孔是内建的 neckdown-escape 例外（列在 Info）。`--via-policy FILE`（JSON：`contract` 合同路径；`exceptions` 每项 `kind` = neckdown-escape / stitching（要 `nets`，只免首选尺寸）或 microvia / blind-buried（要 `minDrillMm`、`minAnnularMm`，非通孔按它判合法性），都要 `reason`）。
+   孔径不小于外径在任何跨层上都是失败（退出 6），未确认跨层的 cannot-check 证据照留；合法性、首选尺寸与尺寸步骤同一容差 100 nm。来源 unknown 不享受任何例外（microvia / blind-buried 声明对它也无效）；跨层未确认为通孔（层 id 缺失或为 0、非通孔）且未声明的、带条件或数值读不出的 via_diameter / hole_size / annular_width 自定义规则判 cannot-check。
    **DRC 时限**：kicad-cli DRC 的时限按板文件大小放大（15 min + 每 MB 2 min，最多 2 h；`PCBPILOT_KICAD_DRC_TIMEOUT` 覆盖），
    超时报 `kicad-cli pcb drc on <板> timed out after <时限>`。铺铜后的 starved-thermal 修复、widen 的 DRC 回退是可选步骤：
    它们的 DRC 没跑成（超时）时记一个 cannot-check 门禁（`starved-thermals` / `widen-drc`），照样写 routed 板、跑其余门禁，
@@ -532,7 +541,7 @@ pcbpilot kicad route --pcb board-b-v5a.kicad_pcb --intent intent.json --sim sim.
    **加宽到意图**（`planWidenToIntent`，KiCad DRC 报间距的加宽线先退一半再退回原宽）→ **铺铜**（GND 于 TOP/IN1/BOTTOM、
    主电源轨于 IN2，`defaultPourLayers`/`mainPowerRail`；`--pours auto` 只给没有铺铜的板铺；SMD 焊盘实连、通孔焊盘花焊盘，
    避免单辐条 starved_thermal）→ `--widen-net` → **丝印摆放**（`planSilkTight` + 组标签，最多 3 轮；降号的位号/组标签
-   写入 `--silk-min-font` 字号与 0.15 mm 线宽）。
+   写入 `--silk-min-font` 字号与 0.15 mm 线宽）。`--silk auto`（默认）在布线未完成（有未布通或 partial 结果）时不摆丝印，`silkscreen` 不算通过：现有位号都合规时判 cannot-check，现有位号有问题的仍是失败；`--silk on` 照摆，受 `--silk-time-budget` 限制（到点杀掉正在跑的 bridge、保留最后完成的板，`summary.silk.budget` 如实记超时与超出秒数）；`--no-silk-place` / `--silk off` 是用户跳过，`silkscreen` 照常判现有位号。
 5. **门禁**（在 `<out-dir>/board-final.json` 上离线计算，`summary.json` 的 `gates[]` 与 `pcb auto route` 同契约）：
 
 | gate | 判据 |
@@ -554,7 +563,7 @@ pcbpilot kicad route --pcb board-b-v5a.kicad_pcb --intent intent.json --sim sim.
    重跑第 5 步，最多 2 轮。仿真报「no copper path」但 KiCad DRC 对该网没有 unconnected 的条目标为 `SIM/KICAD MISMATCH`
    （`summary.simKicadMismatch`；门禁仍失败，因为这些焊盘的压降没有被证明），不再挡住收敛；同网的超预算压降照常列出并加宽。
 7. **设计报告**（门禁 `design-report`）后，8. **发布评审**（review-panel `layout` 阶段，证据加上报告 JSON、`summary.json`、
-   `board-final.json`）。任何门禁失败退出码非零。
+   `board-final.json`）。退出码取最差门禁：0 全过、6 有门禁失败、5 只有 cannot-check（`summary.gates[].status`；via-audit、router-vias、kicad-drc 没跑成都是 cannot-check），工具错误 1。`via-audit`、`router-vias` 的失败项与 cannot-check 项分开（`unchecked`）：签字豁免掉部分条目后按剩下的重算状态，失败项全被豁免、只剩 cannot-check 就是退出 5。
 
 ## DRC 门禁（`kicad drc`）
 

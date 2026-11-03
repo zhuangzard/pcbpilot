@@ -12,6 +12,7 @@ package app
 // reads (snapshot) and writes (edit / pours / netclasses) the board.
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -57,14 +58,20 @@ type kicadRouteOpts struct {
 	optimizer               bool
 	silk                    silkTightOpts
 	noSilkPlace             bool
-	pourCredit              bool
-	noManual                bool
-	projectConfig           string
-	requirements            []string
-	reviewers               string
-	noReview                bool
-	reviewTimeout           time.Duration
-	projectName, customer   string
+	// silkMode: auto | on | off (D4).
+	// auto: defer silk when routing is incomplete; on: always with budget; off: skip.
+	silkMode              string
+	silkBudget            time.Duration
+	pourCredit            bool
+	noManual              bool
+	viaPolicy             string
+	testRunBody           func(*kicadRun) error // replaces the run in tests of the command around it
+	projectConfig         string
+	requirements          []string
+	reviewers             string
+	noReview              bool
+	reviewTimeout         time.Duration
+	projectName, customer string
 }
 
 func newKicadRouteCmd(stdout, stderr io.Writer) *cobra.Command {
@@ -149,6 +156,12 @@ Exits non-zero when any gate fails; --waivers takes signed {gate,match,reason,by
 			if o.padNeckFloor < 0 {
 				return fmt.Errorf("--pad-neck-floor-mil must be >= 0")
 			}
+			if o.silkMode != "auto" && o.silkMode != "on" && o.silkMode != "off" {
+				return fmt.Errorf("--silk must be auto, on or off")
+			}
+			if o.silkBudget < 0 {
+				return fmt.Errorf("--silk-time-budget must be >= 0 (0 = unlimited)")
+			}
 			kicad.PadNeckFloorMil = o.padNeckFloor
 			return runKicadRoute(o, stdout, stderr)
 		},
@@ -178,6 +191,7 @@ Exits non-zero when any gate fails; --waivers takes signed {gate,match,reason,by
 	f.Float64Var(&o.rules.ClearanceMil, "clearance-mil", 0, "board minimum clearance + Default netclass clearance (default for a board without .kicad_pro: intent copper.clearanceMil)")
 	f.Float64Var(&o.rules.TrackMil, "track-mil", 0, "Default netclass track width; refused below the board minimum (--min-track-mil, else the project's)")
 	f.Float64Var(&o.rules.MinTrackMil, "min-track-mil", 0, "board minimum track width (default for a board without .kicad_pro: intent copper.minTrackMil)")
+	f.StringVar(&o.viaPolicy, "via-policy", "", "JSON: declared via exceptions (microvia, blind-buried, neckdown-escape, stitching) and an optional fab contract for the final via-audit gate")
 	f.Float64Var(&o.rules.ViaDiaMil, "via-dia-mil", 0, "Default netclass via diameter (default without .kicad_pro: intent copper.viaDiaMil); refused below the project's min via diameter / annular ring")
 	f.Float64Var(&o.rules.ViaDrillMil, "via-drill-mil", 0, "Default netclass via drill (default without .kicad_pro: intent copper.viaDrillMil); refused below the project's min through-hole")
 	f.Float64Var(&o.rules.EdgeMil, "edge-mil", 0, "copper-to-board-edge clearance (default without .kicad_pro: max(intent edge.outerMil, edge.innerMil))")
@@ -189,6 +203,8 @@ Exits non-zero when any gate fails; --waivers takes signed {gate,match,reason,by
 	f.StringVar(&o.widenNets, "widen-net", "", "nets to widen after routing, comma-separated (see 'pcb widen')")
 	f.Float64Var(&o.widenMax, "widen-max-mil", 40, "maximum width for --widen-net and the IR closure (mil)")
 	f.BoolVar(&o.noSilkPlace, "no-silk-place", false, "do not move designators before the silkscreen gate")
+	f.StringVar(&o.silkMode, "silk", "auto", "silk placement mode: auto (defer when routing incomplete), on (always, with time budget), off (skip)")
+	f.DurationVar(&o.silkBudget, "silk-time-budget", 30*time.Minute, "maximum wall clock for silk placement (--silk=on only; 0 = unlimited)")
 	f.BoolVar(&o.pourCredit, "pour-credit", false, "route-complete may credit a connection the router left unrouted when its net is poured, the router's counters are consistent and KiCad's DRC reports 0 unconnected items (off by default: route-complete is then as strict as v0.9.0; credited connections are listed in the gate and summary.pourCredited)")
 	f.StringArrayVar(&o.requirements, "requirements", nil, "project requirement document for the design review (repeatable; required unless --no-review)")
 	f.StringVar(&o.reviewers, "reviewers", "codex,kimi,claude", "design review reviewer CLIs, comma-separated (all must pass)")
@@ -205,6 +221,10 @@ const noReviewMatch = "--no-review"
 
 // kicadRun is one kicad route execution.
 type kicadRun struct {
+	viaProv *viaProvenance // which via came from where (kicad_route_via_audit.go)
+	// silkAutoDeferred: why --silk=auto did not place this board's labels; its
+	// silkscreen gate is then not satisfied, whatever the labels look like.
+	silkAutoDeferred string
 	// stepGates: cannot-check gates from post-route steps whose own check
 	// did not run (postRoute resets them, qualityGates reports them).
 	stepGates []gateResult
@@ -214,6 +234,7 @@ type kicadRun struct {
 	waivers   []gateWaiver
 	summary   map[string]any
 	gates     []gateResult
+	reg       *gateRegistry // D3: the single gate registry
 	work      string
 	step      int
 	classes   []kicad.NetClass
@@ -233,6 +254,8 @@ type kicadRun struct {
 	// times: wall clock per stage (summary.timings).
 	times []stageTime
 	last  time.Time
+	// dsnPath: the prepared DSN file path for instrumentation (D5).
+	dsnPath string
 }
 
 type stageTime struct {
@@ -254,11 +277,17 @@ func (r *kicadRun) lap(stage string) {
 func (r *kicadRun) add(g gateResult) {
 	applyWaivers(&g, r.waivers)
 	r.gates = append(r.gates, g)
-	mark := "PASS"
-	if !g.Pass {
-		mark = "FAIL"
+	// D3: also register on the gate registry for unified output.
+	// The registry drives stderr output; skip the old stderr write.
+	if r.reg != nil {
+		r.reg.Add(toRecord(g, nil, "", 0))
+	} else {
+		mark := "PASS"
+		if !g.Pass {
+			mark = "FAIL"
+		}
+		fmt.Fprintf(r.stderr, "gate %-16s %s  %s\n", g.Gate, mark, g.Detail)
 	}
-	fmt.Fprintf(r.stderr, "gate %-16s %s  %s\n", g.Gate, mark, g.Detail)
 }
 
 // next is the path of the next work board.
@@ -272,12 +301,20 @@ func (r *kicadRun) snapshot(pcb string) (*boardSnapshot, []byte, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	s, err := decodeKicadSnapshot(raw)
+	if err != nil {
+		return nil, nil, err
+	}
+	return s, raw, nil
+}
+
+func decodeKicadSnapshot(raw []byte) (*boardSnapshot, error) {
 	var s boardSnapshot
 	if err := json.Unmarshal(raw, &s); err != nil {
-		return nil, nil, fmt.Errorf("decode KiCad snapshot: %w", err)
+		return nil, fmt.Errorf("decode KiCad snapshot: %w", err)
 	}
 	s.sanitizeOutline()
-	return &s, raw, nil
+	return &s, nil
 }
 
 func runKicadRoute(o kicadRouteOpts, stdout, stderr io.Writer) error {
@@ -303,15 +340,25 @@ func runKicadRoute(o kicadRouteOpts, stdout, stderr io.Writer) error {
 	}
 	r := &kicadRun{o: o, in: in, waivers: waivers, stderr: stderr, work: filepath.Join(o.outDir, "work"),
 		summary: map[string]any{"pcb": o.pcb, "intent": o.intent, "sim": o.sim, "outDir": o.outDir}}
+	r.reg = newGateRegistry(stderr, waivers)
 	start := time.Now()
 	r.last = start
-	err = r.run()
-	pass := len(r.gates) > 0 && err == nil
-	for _, g := range r.gates {
-		pass = pass && g.Pass
+	if o.testRunBody != nil {
+		err = o.testRunBody(r)
+	} else {
+		err = r.run()
 	}
-	r.summary["gates"], r.summary["pass"] = r.gates, pass
-	r.summary["seconds"] = time.Since(start).Round(time.Second).Seconds()
+	// D3: the registry is the single source of truth for gate status.
+	// Legacy r.gates is still populated for backward compat with callers
+	// that read it (qualityGates, postRoute, etc.), but summary.json
+	// uses the registry records which include status, evidence, timing.
+	pass := r.reg.Passed() && err == nil
+	r.summary["gates"] = r.reg.Records()
+	r.summary["pass"] = pass
+	totalS := time.Since(start).Round(time.Second).Seconds()
+	r.summary["seconds"] = totalS
+	// D4: stage timing rollups.
+	r.summary["timingRollup"] = timingRollup(r.times, totalS)
 	if err != nil {
 		r.summary["error"] = err.Error()
 	}
@@ -321,9 +368,40 @@ func runKicadRoute(o kicadRouteOpts, stdout, stderr io.Writer) error {
 		return err
 	}
 	if !pass {
-		return fmt.Errorf("kicad route: gate(s) failed: %s", failedGates(r.summary))
+		// D3: propagate exit 6 (fail) or 5 (cannot-check) through the
+		// registry's aggregate, not a generic error (exit 1).
+		return exitCodeError{r.reg.ExitCode()}
 	}
 	return nil
+}
+
+// routerStage: the stages the routers ran in, "<backend> (route)" (a rerun
+// too) and "routers (both)". "router <backend> (committed)" is the import of
+// their result, which is post-processing.
+func routerStage(stage string) bool {
+	return strings.HasSuffix(stage, " (route)") || strings.HasPrefix(stage, "routers (")
+}
+
+// timingRollup computes router vs post-processing vs total seconds from stage
+// timing entries: post-processing is everything after the first router stage
+// that is not itself one.
+func timingRollup(times []stageTime, totalS float64) map[string]any {
+	var routerS, postS float64
+	inRouter := false
+	for _, t := range times {
+		switch {
+		case routerStage(t.Stage):
+			routerS += t.Seconds
+			inRouter = true
+		case inRouter:
+			postS += t.Seconds
+		}
+	}
+	return map[string]any{
+		"routerSeconds":         math.Round(routerS*10) / 10,
+		"postProcessingSeconds": math.Round(postS*10) / 10,
+		"totalSeconds":          totalS,
+	}
 }
 
 func hasWaiver(ws []gateWaiver, gate, match string) bool {
@@ -574,12 +652,13 @@ func (r *kicadRun) run() error {
 		if !ok && c.Name == routerTracemaker && !c.retried && gateFailed(r.gates, "intent-widths") {
 			if nets := r.narrowIntentNets(nb); len(nets) > 0 {
 				c.retried, c.noNeck = true, nets
-				first, firstBoard, firstOut, firstPass := c.Res, c.Board, board, ok
+				first, firstBoard, firstOut, firstPass, firstProv := c.Res, c.Board, board, ok, c.prov
 				fmt.Fprintf(r.stderr, "router %s: %d net(s) narrower than intent outside the pad zone; routing again without neck-down on them\n", c.Name, len(nets))
 				if err := r.rerunCandidate(c); err == nil {
 					if b2, err := c.commit(c.Res); err == nil {
 						c.Board = b2
 						r.useCandidate(c, cands)
+						r.lap("router " + c.Name + " (committed)")
 						if nb2, ok2, err := r.postRoute(b2, inSnap); err == nil {
 							board, pass, c.FullPass = nb2, ok2, ok2
 							ok = ok2
@@ -588,7 +667,7 @@ func (r *kicadRun) run() error {
 						// power net that no longer fits leaves more connections unrouted.
 						if !ok {
 							fmt.Fprintf(r.stderr, "router %s: the no-neck-down round did not pass either (%d unrouted vs %d); keeping the first result\n", c.Name, c.Res.UnroutedCount, first.UnroutedCount)
-							c.Res, c.Board = first, firstBoard
+							c.Res, c.Board, c.prov = first, firstBoard, firstProv
 							r.useCandidate(c, cands)
 							if nb3, ok3, err := r.postRoute(firstBoard, inSnap); err == nil {
 								board, pass, c.FullPass, ok = nb3, ok3, ok3, ok3
@@ -624,6 +703,14 @@ func (r *kicadRun) run() error {
 		}
 	}
 	r.summary["routerCandidates"] = candidateSummary(cands)
+	// D5: route instrumentation (report only; no behavioral changes).
+	if r.route != nil {
+		conns := boardConnections(inSnap)
+		ri := buildRouteInstrumentation(r.route, conns, r.dsnPath, r.classes, inSnap)
+		if ri != nil {
+			r.summary["routeInstrumentation"] = ri
+		}
+	}
 	// 7. Design report, 8. release review.
 	r.add(r.designReport(pass))
 	r.lap("design report")
@@ -653,7 +740,7 @@ func (r *kicadRun) run() error {
 		so.report, _ = rep["json"].(string)
 	}
 	r.add(signoffGate(so, r.waivers, r.stderr))
-	r.add(gateSetGate(r.gates))
+	r.add(kicadGateSetGate(r.gates))
 	r.lap("signoff")
 	return nil
 }
@@ -716,10 +803,17 @@ func (r *kicadRun) postRoute(board string, inSnap *boardSnapshot) (string, bool,
 		board = nb
 	}
 	r.lap("widen nets")
-	if !o.noSilkPlace {
-		if board, err = r.silkPlace(board); err != nil {
-			return board, false, err
-		}
+	// D4: silk placement respects --silk mode.
+	silkReason, silkAuto, silkBudget := r.silkDecision()
+	r.silkAutoDeferred = ""
+	if silkAuto {
+		r.silkAutoDeferred = silkReason
+	}
+	if silkReason != "" {
+		r.summary["silk"] = map[string]any{"deferred": true, "reason": silkReason}
+		fmt.Fprintf(r.stderr, "silk: %s\n", silkReason)
+	} else if board, err = r.silkPlace(board, silkBudget); err != nil {
+		return board, false, err
 	}
 
 	r.lap("silkscreen placement")
@@ -1041,15 +1135,124 @@ func (r *kicadRun) widen(board, what string, plan func([]specctra.Track, []widen
 	return ops, out, nil
 }
 
+// silkDecision says whether this board's labels get placed: why not (reason ""
+// = place them, under budget; 0 = unlimited). auto marks --silk=auto holding
+// them back because the routing is not complete, which unlike a user's skip
+// leaves the silkscreen gate unsatisfied.
+func (r *kicadRun) silkDecision() (reason string, auto bool, budget time.Duration) {
+	o := r.o
+	switch {
+	case o.noSilkPlace:
+		return "skipped by --no-silk-place", false, 0
+	case o.silkMode == "off":
+		return "skipped by --silk=off", false, 0
+	case o.silkMode == "auto" && r.route != nil && (r.route.Partial || r.route.UnroutedCount != 0):
+		switch {
+		case r.route.UnroutedCount < 0:
+			reason = "deferred: routing incomplete (unrouted count unknown — partial result)"
+		case r.route.Partial:
+			reason = fmt.Sprintf("deferred: routing incomplete (partial result, %d unrouted at the router's last count)", r.route.UnroutedCount)
+		default:
+			reason = fmt.Sprintf("deferred: routing incomplete (%d unrouted connection(s))", r.route.UnroutedCount)
+		}
+		return reason, true, 0
+	}
+	// D4: --silk=on uses the time budget; auto (routing complete) has no budget.
+	if o.silkMode == "on" {
+		budget = o.silkBudget
+	}
+	return "", false, budget
+}
+
+// silkDeferredGate: the silkscreen gate of a board whose labels --silk=auto did
+// not place is not satisfied, even when the labels as routed are clean: the
+// deferral is one more item that could not be judged, and what the gate found
+// wrong on the board stays a failure.
+func silkDeferredGate(g gateResult, reason string) gateResult {
+	if g.Gate != "silkscreen" {
+		return g
+	}
+	if !g.Pass && len(g.Items) == 0 { // a failure without items is never waivable: keep it so
+		g.Detail = "silk placement " + reason + "; " + g.Detail
+		return g
+	}
+	item := "silk placement " + reason + "; route the rest, or place anyway with --silk=on"
+	if g.Pass {
+		g.Detail = "cannot check: silk placement " + reason + "; labels as routed: " + g.Detail
+		g.CannotCheck = true
+	} else {
+		g.Detail = "silk placement " + reason + "; labels as routed: " + g.Detail
+	}
+	g.Items = append([]string{item}, g.Items...)
+	g.Pass, g.Unchecked = false, []string{item}
+	return g
+}
+
+// addTailGate records one of tailGates' results (they carry their waivers).
+func (r *kicadRun) addTailGate(g gateResult) {
+	if r.silkAutoDeferred != "" {
+		g = silkDeferredGate(g, r.silkAutoDeferred)
+		applyWaivers(&g, r.waivers) // tailGates waived the rest, not this item
+	}
+	r.gates = append(r.gates, g)
+	// D3: register on the registry (which handles stderr).
+	if r.reg != nil {
+		r.reg.Add(toRecord(g, nil, "board", 0))
+	} else {
+		fmt.Fprintf(r.stderr, "gate %-16s %v  %s\n", g.Gate, map[bool]string{true: "PASS", false: "FAIL"}[g.Pass], g.Detail)
+	}
+}
+
+// silkTools are the KiCad calls silk placement makes (*kicad.Tools).
+type silkTools interface {
+	SnapshotContext(ctx context.Context, pcb string) ([]byte, error)
+	EditContext(ctx context.Context, pcb string, ops map[string]any, out string) (json.RawMessage, error)
+}
+
 // silkPlace moves designators next to their parts with the shared planner
 // (planSilkTight + group labels), at most 3 rounds, until the silkscreen
 // gate passes.
-func (r *kicadRun) silkPlace(board string) (string, error) {
+func (r *kicadRun) silkPlace(board string, budget time.Duration) (string, error) {
+	return r.silkPlaceWith(r.kt, board, budget)
+}
+
+// silkPlaceWith is silkPlace on t. A budget (--silk=on only; 0 = unlimited)
+// reaches the bridge calls and the planners; when it ends, the last completed
+// board is kept and what happened is in summary.silk.budget.
+func (r *kicadRun) silkPlaceWith(t silkTools, board string, budget time.Duration) (string, error) {
 	opt := r.o.silk
 	rep := &silkTightReport{}
 	prev := ""
+	silkStart := time.Now()
+	ctx := context.Background()
+	if budget > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithDeadline(ctx, silkStart.Add(budget))
+		defer cancel()
+		opt.deadline = silkStart.Add(budget)
+	}
+	stoppedAt := ""
+	// By the clock as well: the planners stop by it, and the context's timer may
+	// not have fired yet when they return an incomplete plan.
+	expired := func(at string) bool {
+		if ctx.Err() == nil && !opt.expired() {
+			return false
+		}
+		stoppedAt = at
+		return true
+	}
 	for round := 1; round <= 3; round++ {
-		s, _, err := r.snapshot(board)
+		if expired(fmt.Sprintf("before round %d", round)) {
+			break
+		}
+		raw, err := t.SnapshotContext(ctx, board)
+		if err != nil {
+			if expired(fmt.Sprintf("round %d: snapshot", round)) {
+				break
+			}
+			return board, err
+		}
+		s, err := decodeKicadSnapshot(raw)
 		if err != nil {
 			return board, err
 		}
@@ -1061,11 +1264,15 @@ func (r *kicadRun) silkPlace(board string) (string, error) {
 		}
 		placed, notes := planSilkTight(labels, sc, opt)
 		var groups []silkGroup
+		var gnotes []string
 		if !opt.NoGroups {
-			var gnotes []string
 			groups, placed, gnotes = planSilkGroups(labels, sc, placed, opt)
-			rep.GroupNotes = append(rep.GroupNotes, gnotes...)
 		}
+		if expired(fmt.Sprintf("round %d: planning", round)) { // an incomplete plan
+			break
+		}
+		last := *rep
+		rep.GroupNotes = append(rep.GroupNotes, gnotes...)
 		rep.Placed, rep.Notes, rep.Rounds = placed, notes, round
 		byID := map[string]silkLabel{}
 		for _, l := range labels {
@@ -1101,7 +1308,6 @@ func (r *kicadRun) silkPlace(board string) (string, error) {
 			}
 			add = append(add, map[string]any{"text": g.Text, "x": g.Box.cx(), "y": g.Box.cy(), "layer": g.Layer, "rotation": g.Rot, "fontSize": gf, "lineWidth": gw})
 			hide = append(hide, g.IDs...)
-			rep.Groups = append(rep.Groups, g)
 		}
 		fmt.Fprintf(r.stderr, "silk round %d: %d designator(s) moved, %d group label(s)\n", round, len(set), len(groups))
 		if len(set)+len(add) == 0 {
@@ -1115,12 +1321,27 @@ func (r *kicadRun) silkPlace(board string) (string, error) {
 			break
 		}
 		prev = string(key)
-		rep.Moved += len(set)
 		out := r.next("silk")
-		if _, err := r.kt.Edit(board, map[string]any{"setText": set, "addTexts": add, "hideTexts": hide}, out); err != nil {
+		if _, err := t.EditContext(ctx, board, map[string]any{"setText": set, "addTexts": add, "hideTexts": hide}, out); err != nil {
+			if expired(fmt.Sprintf("round %d: edit", round)) {
+				*rep = last // this round's plan never reached a board
+				break
+			}
 			return board, err
 		}
+		rep.Moved += len(set)
+		rep.Groups = append(rep.Groups, groups...)
 		board = out
+	}
+	if budget > 0 {
+		elapsed := time.Since(silkStart)
+		rep.Budget = &silkBudgetReport{BudgetS: budget.Seconds(), ElapsedS: elapsed.Seconds(), Expired: stoppedAt != "" || elapsed > budget, StoppedAt: stoppedAt}
+		if elapsed > budget {
+			rep.Budget.OverrunS = (elapsed - budget).Seconds()
+		}
+		if rep.Budget.Expired {
+			fmt.Fprintf(r.stderr, "silk: time budget %s ended (%s, %.1f s over); the last completed board is kept\n", budget, stoppedAt, rep.Budget.OverrunS)
+		}
 	}
 	r.summary["silk"] = rep
 	return board, nil
@@ -1132,16 +1353,39 @@ func (r *kicadRun) silkPlace(board string) (string, error) {
 func (r *kicadRun) qualityGates(board string) (bool, error) {
 	o := r.o
 	keep := r.gates[:0:0]
+	// D3: reset the registry in lockstep with r.gates so stale gates from a
+	// superseded board candidate don't permanently fail the run.  The Reset
+	// must happen BEFORE registering stepGates and router gates — otherwise
+	// those freshly added records would be immediately dropped.
+	keepIDs := map[string]bool{}
 	for _, g := range r.gates {
 		if g.Gate == "design-review" {
 			keep = append(keep, g)
+			keepIDs[g.Gate] = true
 		}
+	}
+	if r.reg != nil {
+		r.reg.Reset(keepIDs)
 	}
 	// Post-route steps whose own check could not run (a DRC that timed out):
 	// cannot-check gates of this board.
-	keep = append(keep, r.stepGates...)
+	for _, g := range r.stepGates {
+		keep = append(keep, g)
+		// D3: register stepGates as cannot-check on the registry.
+		if r.reg != nil {
+			r.reg.Add(toRecordCC(g, g.Detail, nil, "board"))
+		}
+	}
 	if r.route != nil {
-		keep = append(keep, r.route.Gates...)
+		// D3: register router-produced gates (router-vias) on the registry so
+		// they appear on stderr. Previously these bypassed r.add().
+		for _, g := range r.route.Gates {
+			applyWaivers(&g, r.waivers)
+			keep = append(keep, g)
+			if r.reg != nil {
+				r.reg.Add(toRecord(g, nil, "board", 0))
+			}
+		}
 	}
 	r.gates = keep
 	routed := filepath.Join(o.outDir, "routed.kicad_pcb")
@@ -1167,11 +1411,17 @@ func (r *kicadRun) qualityGates(board string) (bool, error) {
 		return false, err
 	}
 	r.summary["boardFinal"] = boardPath
+	// D3: update the registry's board SHA so every board-scoped gate from
+	// this round carries the hash of the board it actually checked.
+	if r.reg != nil {
+		r.reg.SetBoardSHA(boardFileSHA256(boardPath))
+	}
 	r.lap("gate: board-final snapshot")
 	if r.netlist != nil {
 		r.add(padNetDiffGate(r.netlist.PinNets(), boardPinNets(snap), o.sch, filepath.Join(o.outDir, "net-diff.json")))
 	}
 	r.add(kicadIntentRulesGate(raw, r.classes))
+	r.add(r.viaAuditGate(routed, snap))
 
 	qo := qualityGateOpts{intent: o.intent, sim: o.sim, outDir: o.outDir, waivers: r.waivers, widthBasis: o.widthBasis,
 		source: "kicad route (" + routed + ")", silk: o.silk, noManual: o.noManual, projectConfig: o.projectConfig,
@@ -1202,8 +1452,7 @@ func (r *kicadRun) qualityGates(board string) (bool, error) {
 	qo.routeGate = &rc
 	r.lap("gate: intent / safety snapshot gates")
 	for _, g := range tailGates(snap, boardPath, postOut, qo, o.projectName, "", r.summary, r.stderr) {
-		r.gates = append(r.gates, g) // tailGates applied the waivers
-		fmt.Fprintf(r.stderr, "gate %-16s %v  %s\n", g.Gate, map[bool]string{true: "PASS", false: "FAIL"}[g.Pass], g.Detail)
+		r.addTailGate(g)
 	}
 	r.lap("gate: route-complete, silkscreen, board manual")
 	pass := true
@@ -1833,8 +2082,18 @@ func defaultRouteThreads(cpus int, both bool) int {
 // boardConnections counts the connections routing has to make: per net,
 // its pads minus one.
 func boardConnections(s *boardSnapshot) int {
+	n := 0
+	for _, k := range boardNetConnections(s) {
+		n += k
+	}
+	return n
+}
+
+// boardNetConnections: connections per net with at least one (pads - 1).
+func boardNetConnections(s *boardSnapshot) map[string]int {
+	out := map[string]int{}
 	if s == nil {
-		return 0
+		return out
 	}
 	pads := map[string]int{}
 	for _, c := range s.Components {
@@ -1844,13 +2103,12 @@ func boardConnections(s *boardSnapshot) int {
 			}
 		}
 	}
-	n := 0
-	for _, k := range pads {
+	for net, k := range pads {
 		if k > 1 {
-			n += k - 1
+			out[net] = k - 1
 		}
 	}
-	return n
+	return out
 }
 
 // fastrouteAutoMaxTime is kicad route's default fastroute --max-time:

@@ -18,7 +18,24 @@ package app
 //
 // KiCad's SES import reads a via's drill from the padstack name
 // "Via[…]_<diameter>:<drill>_um" (the names its DSN export writes), so the
-// added padstack carries both numbers in its name.
+// added padstack carries both numbers in its name. Two observed exceptions
+// shape the rest of this file:
+//
+//   - fastroute 0.1.14 does not honour a use_via whose name has a fractional
+//     µm (a 24 mil class exports "…_609.6:304.8_um"): that class's routed vias
+//     take the smallest class via of the DSN. dsnWholeUmVias rounds such
+//     padstacks up to whole µm, so the class via stands and the step after
+//     the import still only shrinks.
+//   - KiCad's import ignores the name's drill when the name equals the
+//     Default class via and takes the net's class drill instead: a 600:300 via
+//     on a 0.7/0.4 net comes in as 0.6/0.4, an illegal annular ring. Such a via
+//     cannot be shrunk to its class; it is repaired only per via, in a
+//     transaction (kicad_route_via_repair.go), or the gate fails.
+//   - KiCad's SES import replaces every via with a new uuid, and sizes the ones
+//     already on the board from the session as well (a 609.6 um via renamed to
+//     610:305 comes back at 610). So an input via is found again by net, span
+//     and position (matchInputVias), never touched as a router via, and put
+//     back at its own size.
 
 import (
 	"encoding/json"
@@ -30,6 +47,7 @@ import (
 	"strings"
 
 	"github.com/zhuangzard/pcbpilot/internal/kicad"
+	"github.com/zhuangzard/pcbpilot/internal/pcb/specctra"
 )
 
 var (
@@ -49,6 +67,7 @@ type dsnVia struct {
 // maxima). It returns the DSN, the list as written and the router via; the
 // text is unchanged when the list or a size cannot be read.
 func dsnRouterVia(dsn string) (string, []string, *dsnVia) {
+	dsn = dsnWholeUmVias(dsn)
 	loc := reDSNViaList.FindStringSubmatchIndex(dsn)
 	if loc == nil {
 		return dsn, nil, nil
@@ -113,6 +132,125 @@ func dsnRouterVia(dsn string) (string, []string, *dsnVia) {
 	return dsn[:loc[0]] + "(via " + top.name + ")" + dsn[loc[1]:], order, &top
 }
 
+var (
+	reDSNViaPadstack = regexp.MustCompile(`\(padstack ("Via\[[^\]]*\]_([0-9.]+):([0-9.]+)_um")`)
+	reDSNCircle      = regexp.MustCompile(`(\(circle\s+(\S+)\s+)([0-9.]+)`)
+)
+
+// wholeUm is the whole-µm size a padstack of v µm is rounded up to.
+func wholeUm(v float64) float64 { return math.Ceil(v - 1e-6) }
+
+// dsnCeilUm is s (µm) rounded up to a whole µm; ok = false for no positive number.
+func dsnCeilUm(s string) (string, bool) {
+	v, err := strconv.ParseFloat(s, 64)
+	if err != nil || v <= 0 {
+		return s, false
+	}
+	return strconv.FormatFloat(wholeUm(v), 'f', -1, 64), true
+}
+
+// dsnCeilCircles rounds each circle of a padstack up on its own, so a
+// layer-specific shape keeps its size relative to the others and never shrinks.
+func dsnCeilCircles(ps string) string {
+	return reDSNCircle.ReplaceAllStringFunc(ps, func(c string) string {
+		m := reDSNCircle.FindStringSubmatch(c)
+		d, _ := dsnCeilUm(m[3])
+		return m[1] + d
+	})
+}
+
+// dsnMergeCircles raises dst's circles to src's on each layer and adds the
+// layers only src has: the padstack that replaces src is at least as large.
+func dsnMergeCircles(dst, src string) string {
+	want := map[string]float64{}
+	var order []string
+	for _, m := range reDSNCircle.FindAllStringSubmatch(src, -1) {
+		v, err := strconv.ParseFloat(m[3], 64)
+		if err != nil {
+			continue
+		}
+		if _, ok := want[m[2]]; !ok {
+			order = append(order, m[2])
+		}
+		want[m[2]] = math.Max(want[m[2]], v)
+	}
+	f := func(v float64) string { return strconv.FormatFloat(v, 'f', -1, 64) }
+	seen := map[string]bool{}
+	dst = reDSNCircle.ReplaceAllStringFunc(dst, func(c string) string {
+		m := reDSNCircle.FindStringSubmatch(c)
+		seen[m[2]] = true
+		if v, err := strconv.ParseFloat(m[3], 64); err == nil && want[m[2]] > v {
+			return m[1] + f(want[m[2]])
+		}
+		return c
+	})
+	at := strings.LastIndex(dst, "(shape")
+	if at < 0 {
+		return dst
+	}
+	end := sexprEnd(dst, at)
+	if end < 0 {
+		return dst
+	}
+	for _, l := range order {
+		if !seen[l] {
+			dst = dst[:end] + fmt.Sprintf(" (shape (circle %s %s))", l, f(want[l])) + dst[end:]
+		}
+	}
+	return dst
+}
+
+// dsnWholeUmVias rounds every via padstack with a fractional µm in its name
+// up to whole µm (name, each circle on its own and every reference), merging
+// padstacks that land on one name into their per-layer maximum. A DSN without
+// such a name comes back unchanged.
+func dsnWholeUmVias(dsn string) string {
+	ms := reDSNViaPadstack.FindAllStringSubmatch(dsn, -1)
+	// holder: whole-µm name → the name its padstack still has in dsn (the
+	// renames are applied together at the end).
+	holder := map[string]string{}
+	for _, m := range ms {
+		holder[m[1]] = m[1]
+	}
+	var rename []string
+	for _, m := range ms {
+		if !strings.Contains(m[2]+m[3], ".") {
+			continue
+		}
+		d, ok1 := dsnCeilUm(m[2])
+		h, ok2 := dsnCeilUm(m[3])
+		if !ok1 || !ok2 {
+			continue
+		}
+		name := m[1][:strings.LastIndex(m[1], "_"+m[2]+":")] + "_" + d + ":" + h + `_um"`
+		at := strings.Index(dsn, "(padstack "+m[1])
+		if at < 0 {
+			continue
+		}
+		end := sexprEnd(dsn, at)
+		if end < 0 {
+			continue
+		}
+		if hold, ok := holder[name]; ok {
+			src := dsnCeilCircles(dsn[at:end])
+			dsn = dsn[:at] + strings.TrimLeft(dsn[end:], " \t\r\n")
+			if to := strings.Index(dsn, "(padstack "+hold); to >= 0 {
+				if toEnd := sexprEnd(dsn, to); toEnd >= 0 {
+					dsn = dsn[:to] + dsnMergeCircles(dsn[to:toEnd], src) + dsn[toEnd:]
+				}
+			}
+		} else {
+			dsn = dsn[:at] + dsnCeilCircles(dsn[at:end]) + dsn[end:]
+			holder[name] = m[1]
+		}
+		rename = append(rename, m[1], name)
+	}
+	if len(rename) == 0 {
+		return dsn
+	}
+	return strings.NewReplacer(rename...).Replace(dsn)
+}
+
 // sexprEnd is the index just past the list that opens at dsn[at] ('(').
 func sexprEnd(dsn string, at int) int {
 	depth, inQ := 0, false
@@ -138,6 +276,10 @@ type routeVia struct {
 	Net   string  `json:"net"`
 	Dia   float64 `json:"diameter"`
 	Drill float64 `json:"holeDiameter"`
+	X     float64 `json:"x"`
+	Y     float64 `json:"y"`
+	From  int     `json:"fromLayer"`
+	To    int     `json:"toLayer"`
 }
 
 // snapshotVias reads a snapshot's vias. A snapshot without its copper
@@ -165,12 +307,21 @@ func snapshotVias(s *boardSnapshot) ([]routeVia, error) {
 	return out, nil
 }
 
+// viaExactTolNM is what counts as the class via, in either direction, for
+// sizing, repair and the audit: it covers the snapshot's mil rounding (4
+// decimals, ±1.3 nm). A via rounded up to whole µm is above it and shrinks.
+const viaExactTolNM = 100
+
+// viaNotReachable: shrinking cannot make this via its class via (nm).
+func viaNotReachable(dia, drill, classDia, classDrill int64) bool {
+	return dia+viaExactTolNM < classDia || drill+viaExactTolNM < classDrill
+}
+
 // classViaPlan sorts the router vias (not in old) into shrink operations
 // to their net's class via (eff: diameter / drill nm per net) and problems:
 // fail (the class via is not reachable by shrinking) and unknown (no class
 // via for the net).
 func classViaPlan(vias []routeVia, old map[string]bool, eff func(net string) (dia, drill int64, ok bool)) (ops []map[string]any, fail, unknown []string, n int) {
-	const tol = 500 // nm: the snapshot's mil rounding
 	for _, v := range vias {
 		if old[v.ID] {
 			continue
@@ -182,11 +333,11 @@ func classViaPlan(vias []routeVia, old map[string]bool, eff func(net string) (di
 			continue
 		}
 		dia, drill := int64(math.Round(v.Dia*nmPerMil)), int64(math.Round(v.Drill*nmPerMil))
-		if dia+tol < cd || drill+tol < ch {
+		if viaNotReachable(dia, drill, cd, ch) {
 			fail = append(fail, fmt.Sprintf("%s via %s: router via %.2f/%.2f mil cannot be shrunk to the class via %.2f/%.2f mil", v.Net, short12(v.ID), v.Dia, v.Drill, float64(cd)/nmPerMil, float64(ch)/nmPerMil))
 			continue
 		}
-		if dia <= cd+tol && drill <= ch+tol {
+		if dia <= cd+viaExactTolNM && drill <= ch+viaExactTolNM {
 			continue // already the class via
 		}
 		ops = append(ops, map[string]any{"id": v.ID, "diameter": float64(cd) / nmPerMil, "drill": float64(ch) / nmPerMil})
@@ -200,6 +351,7 @@ type routerViaTools interface {
 	Snapshot(pcb string) ([]byte, error)
 	RulesRead(pcb string) (*kicad.RulesReadback, error)
 	Edit(pcb string, ops map[string]any, out string) (json.RawMessage, error)
+	DRC(pcb, out string) (*kicad.DRCReport, error)
 }
 
 // sizeRouterVias shrinks the vias the router added on board (those not on
@@ -210,8 +362,17 @@ type routerViaTools interface {
 // wrong (not reachable, the resize not written) — and the board it
 // returns is the one the gates describe.
 func sizeRouterVias(t routerViaTools, classed, board string, next func(string) string, summary map[string]any, stderr io.Writer) (string, []gateResult) {
+	return sizeRouterViasProv(t, classed, board, next, summary, stderr, nil)
+}
+
+// sizeRouterViasProv is sizeRouterVias, also recording which via came from
+// where for the final via audit (prov may be nil).
+func sizeRouterViasProv(t routerViaTools, classed, board string, next func(string) string, summary map[string]any, stderr io.Writer, prov *viaProvenance) (string, []gateResult) {
 	gate := func(pass bool, detail string, items ...string) []gateResult {
 		return []gateResult{{Gate: "router-vias", Pass: pass, Detail: detail, Items: items}}
+	}
+	cannot := func(detail string) []gateResult {
+		return []gateResult{{Gate: "router-vias", Detail: "cannot check: " + detail, CannotCheck: true}}
 	}
 	snap := func(pcb string) (*boardSnapshot, error) {
 		raw, err := t.Snapshot(pcb)
@@ -227,60 +388,272 @@ func sizeRouterVias(t routerViaTools, classed, board string, next func(string) s
 	before, err := snap(classed)
 	if err != nil {
 		summary["routerVias"] = map[string]any{"error": err.Error()}
-		return board, gate(false, "cannot check: the board before the import could not be read, so the router vias are unknown (none resized): "+err.Error())
+		return board, cannot("the board before the import could not be read, so the router vias are unknown (none resized): " + err.Error())
 	}
 	beforeVias, err := snapshotVias(before)
 	if err != nil {
 		summary["routerVias"] = map[string]any{"error": err.Error()}
-		return board, gate(false, "cannot check: the board before the import has no readable vias, so the router vias are unknown (none resized): "+err.Error())
-	}
-	old := map[string]bool{}
-	for _, v := range beforeVias {
-		old[v.ID] = true
+		return board, cannot("the board before the import has no readable vias, so the router vias are unknown (none resized): " + err.Error())
 	}
 	after, err := snap(board)
 	if err != nil {
 		summary["routerVias"] = map[string]any{"error": err.Error()}
-		return board, gate(false, "cannot check: the imported board could not be read, so the router vias were not sized to their class (none resized): "+err.Error())
+		return board, cannot("the imported board could not be read, so the router vias were not sized to their class (none resized): " + err.Error())
 	}
 	rb, err := t.RulesRead(board)
 	if err != nil {
 		summary["routerVias"] = map[string]any{"error": err.Error()}
-		return board, gate(false, "cannot check: KiCad's class readback failed, so the router vias were not sized to their class: "+err.Error())
+		return board, cannot("KiCad's class readback failed, so the router vias were not sized to their class: " + err.Error())
 	}
 	afterVias, err := snapshotVias(after)
 	if err != nil {
 		summary["routerVias"] = map[string]any{"error": err.Error()}
-		return board, gate(false, "cannot check: the imported board has no readable vias, so the router vias were not sized to their class (none resized): "+err.Error())
+		return board, cannot("the imported board has no readable vias, so the router vias were not sized to their class (none resized): " + err.Error())
 	}
-	ops, fail, unknown, n := classViaPlan(afterVias, old, func(net string) (int64, int64, bool) {
+	eff := func(net string) (int64, int64, bool) {
 		e, ok := rb.Nets[net]
 		return e.ViaDiameter, e.ViaDrill, ok
+	}
+	m := matchInputVias(beforeVias, afterVias, func(net string) (int64, bool) {
+		_, ch, ok := eff(net)
+		return ch, ok
 	})
-	summary["routerVias"] = map[string]any{"routerVias": n, "shrunkToClass": len(ops), "notReachable": len(fail), "noClassVia": len(unknown)}
-	var gates []gateResult
-	if len(fail)+len(unknown) > 0 {
-		items := append(append([]string{}, fail...), unknown...)
-		if len(fail) > 0 {
-			gates = gate(false, fmt.Sprintf("%d router via(s) cannot be shrunk to their class via, %d without a class via", len(fail), len(unknown)), items...)
-		} else {
-			gates = gate(false, fmt.Sprintf("cannot check: %d router via(s) on nets without a class via", len(unknown)), items...)
+	restore, gone := m.restore, m.gone
+	old := m.skip()
+	prov.record(m.input, old, afterVias)
+	ops, fail, unknown, n := classViaPlan(afterVias, old, eff)
+	stats := map[string]any{"routerVias": n, "shrunkToClass": len(ops), "notReachable": len(fail), "noClassVia": len(unknown),
+		"inputVias": len(beforeVias), "inputViasRestored": len(restore), "inputViasGone": len(gone), "inputViasUnresolved": len(m.unchecked)}
+	summary["routerVias"] = stats
+	unknown = append(unknown, m.unchecked...)
+	if len(ops)+len(restore) > 0 {
+		out := next("vias-to-class")
+		if _, err := t.Edit(board, map[string]any{"setVia": append(append([]map[string]any{}, ops...), restore...)}, out); err != nil {
+			stats["error"] = err.Error()
+			g := gate(false, fmt.Sprintf("%d router via(s) are larger than their class via, %d input via(s) changed by the import, and the resize could not be written: %v", len(ops), len(restore), err))
+			return board, append(g, problemGates(gate, append(fail, gone...), unknown)...)
+		}
+		fmt.Fprintf(stderr, "vias: %d of %d router via(s) shrunk to their net's class via, %d input via(s) back at their own size\n", len(ops), n, len(restore))
+		board = out
+	}
+	var info []string
+	if len(fail) > 0 {
+		var rep viaRepairResult
+		board, rep = repairRouterVias(t, board, viaGrowCandidates(afterVias, old, eff), rb, next, stats)
+		prov.recordGrown(rep.grown)
+		fail, info = rep.evidence, rep.info
+		unknown = append(unknown, rep.unchecked...)
+		fmt.Fprintf(stderr, "vias: %d via(s) below their class via grown in a checked transaction, %d not\n", len(rep.grown), len(fail)+len(rep.unchecked))
+	}
+	gates := problemGates(gate, append(fail, gone...), unknown)
+	switch {
+	case len(info) == 0:
+	case len(gates) == 0:
+		gates = []gateResult{{Gate: "router-vias", Pass: true, Detail: fmt.Sprintf("%d router via(s) grown to their class via (checked)", len(info)), Info: info}}
+	default:
+		gates[0].Info = info
+	}
+	return board, gates
+}
+
+// inputViaMatch says which vias of a routed board are the input board's own.
+type inputViaMatch struct {
+	input     map[string]bool  // ids on the routed board that are input vias
+	ambiguous map[string]bool  // ids that may or may not be: neither input nor created
+	restore   []map[string]any // setVia ops putting back an input via's size
+	gone      []string         // input vias no longer there
+	unchecked []string         // why a via could not be told
+}
+
+// skip: the vias sizing must leave alone, input or not known to be router vias.
+func (m *inputViaMatch) skip() map[string]bool {
+	out := map[string]bool{}
+	for id := range m.input {
+		out[id] = true
+	}
+	for id := range m.ambiguous {
+		out[id] = true
+	}
+	return out
+}
+
+const viaExactMatchMil = 0.01 // the DSN's coordinate rounding
+
+func viaSpanKey(v routeVia) [2]int { return [2]int{min(v.From, v.To), max(v.From, v.To)} }
+
+// viaSnapshotQuantNM bounds the snapshot's mil rounding (4 decimals, ±1.3 nm):
+// the size a snapshot reports may be just past the whole µm the board has.
+const viaSnapshotQuantNM = 2
+
+// viaSizeFromImport: can the import have made a via of size a out of input via
+// b? Each dimension is either b's own or the whole µm dsnWholeUmVias rounds it
+// up to, and the drill may be the net's class drill. Any other size was not b: a
+// router via at the same place. One of the same size cannot be told from b, and
+// changes nothing if it is taken for b.
+func viaSizeFromImport(b, a routeVia, classDrill func(string) (int64, bool)) bool {
+	nm := func(mil float64) int64 { return int64(math.Round(mil * nmPerMil)) }
+	fits := func(was, now int64) bool {
+		if absNM(now-was) <= viaExactTolNM {
+			return true
+		}
+		return absNM(now-int64(wholeUm(float64(was-viaSnapshotQuantNM)/1000)*1000)) <= viaExactTolNM
+	}
+	if !fits(nm(b.Dia), nm(a.Dia)) {
+		return false
+	}
+	if fits(nm(b.Drill), nm(a.Drill)) {
+		return true
+	}
+	ch, ok := classDrill(b.Net)
+	return ok && absNM(nm(a.Drill)-ch) <= viaExactTolNM
+}
+
+// matchInputVias finds the input vias on a routed board, one to one: by id, then
+// on the same net and span at exactly the same place, then within the match
+// tolerance. A via with more than one possible partner, or at a size the import
+// cannot have made, is reported and classified neither way.
+func matchInputVias(before, after []routeVia, classDrill func(string) (int64, bool)) *inputViaMatch {
+	m := &inputViaMatch{input: map[string]bool{}, ambiguous: map[string]bool{}}
+	nm := func(mil float64) int64 { return int64(math.Round(mil * nmPerMil)) }
+	used := make([]bool, len(after))
+	done := make([]bool, len(before))
+	same := func(b, a routeVia) bool { return a.Net == b.Net && viaSpanKey(a) == viaSpanKey(b) }
+	tag := func(b routeVia) string {
+		return fmt.Sprintf("%s input via %s at (%.1f, %.1f) mil", b.Net, short12(b.ID), b.X, b.Y)
+	}
+	take := func(b routeVia, ai int) {
+		a := after[ai]
+		used[ai] = true
+		m.input[a.ID] = true
+		if absNM(nm(a.Dia)-nm(b.Dia)) > viaExactTolNM || absNM(nm(a.Drill)-nm(b.Drill)) > viaExactTolNM {
+			m.restore = append(m.restore, map[string]any{"id": a.ID, "diameter": b.Dia, "drill": b.Drill})
 		}
 	}
-	if len(ops) == 0 {
-		return board, gates
+	unsure := func(ai int) {
+		used[ai] = true
+		m.ambiguous[after[ai].ID] = true
 	}
-	out := next("vias-to-class")
-	if _, err := t.Edit(board, map[string]any{"setVia": ops}, out); err != nil {
-		summary["routerVias"].(map[string]any)["error"] = err.Error()
-		g := gate(false, fmt.Sprintf("%d router via(s) are larger than their class via and the resize could not be written: %v", len(ops), err))
-		return board, append(g, gates...)
+	for bi, b := range before {
+		for ai, a := range after {
+			if used[ai] || a.ID != b.ID {
+				continue
+			}
+			done[bi] = true
+			if same(b, a) {
+				take(b, ai)
+			} else {
+				unsure(ai)
+				m.unchecked = append(m.unchecked, fmt.Sprintf("%s: its id now has net %s, span %v: cannot tell what it is", tag(b), a.Net, viaSpanKey(a)))
+			}
+			break
+		}
 	}
-	fmt.Fprintf(stderr, "vias: %d of %d router via(s) shrunk to their net's class via\n", len(ops), n)
-	return out, gates
+	for _, tol := range []float64{viaExactMatchMil, specctra.MatchTolMil} {
+		cands := make([][]int, len(before))
+		wanted := make([]int, len(after))
+		for bi, b := range before {
+			if done[bi] {
+				continue
+			}
+			for ai, a := range after {
+				if !used[ai] && same(b, a) && math.Hypot(a.X-b.X, a.Y-b.Y) <= tol {
+					cands[bi] = append(cands[bi], ai)
+					wanted[ai]++
+				}
+			}
+		}
+		for bi, b := range before {
+			switch c := cands[bi]; {
+			case len(c) == 0:
+			case len(c) == 1 && wanted[c[0]] == 1 && viaSizeFromImport(b, after[c[0]], classDrill):
+				done[bi] = true
+				take(b, c[0])
+			case len(c) == 1 && wanted[c[0]] == 1:
+				done[bi] = true
+				a := after[c[0]]
+				unsure(c[0])
+				m.unchecked = append(m.unchecked, fmt.Sprintf("%s: the via there, %s, is %.2f/%.2f mil where the input via was %.2f/%.2f: it may be a router via, cannot tell", tag(b), short12(a.ID), a.Dia, a.Drill, b.Dia, b.Drill))
+			default:
+				done[bi] = true
+				for _, ai := range c {
+					unsure(ai)
+				}
+				m.unchecked = append(m.unchecked, fmt.Sprintf("%s: %d vias there could be it: cannot tell which", tag(b), len(c)))
+			}
+		}
+	}
+	for bi, b := range before {
+		if !done[bi] {
+			m.gone = append(m.gone, tag(b)+" is not on the routed board")
+		}
+	}
+	return m
+}
+
+// reconcileCandidateVias records a candidate's vias for a backend that does not
+// go through sizeRouterVias (TraceMaker): it reads the input board and the
+// routed one, nothing is resized. Whatever cannot be established is a
+// router-vias gate.
+func reconcileCandidateVias(t routerViaTools, classed, board, created string, summary map[string]any) (*viaProvenance, []gateResult) {
+	prov := &viaProvenance{created: created}
+	cannot := func(what string, err error) (*viaProvenance, []gateResult) {
+		detail := "cannot check: " + what + ", so the " + created + " vias are unknown: " + err.Error()
+		summary["routerVias"] = map[string]any{"backend": created, "error": err.Error()}
+		return prov, []gateResult{{Gate: "router-vias", Detail: detail, CannotCheck: true}}
+	}
+	read := func(pcb string) ([]routeVia, error) {
+		raw, err := t.Snapshot(pcb)
+		if err != nil {
+			return nil, err
+		}
+		var s boardSnapshot
+		if err := json.Unmarshal(raw, &s); err != nil {
+			return nil, fmt.Errorf("decode KiCad snapshot: %w", err)
+		}
+		return snapshotVias(&s)
+	}
+	before, err := read(classed)
+	if err != nil {
+		return cannot("the input board's vias could not be read", err)
+	}
+	after, err := read(board)
+	if err != nil {
+		return cannot("the routed board's vias could not be read", err)
+	}
+	m := matchInputVias(before, after, func(string) (int64, bool) { return 0, false })
+	skip := m.skip()
+	prov.record(m.input, skip, after)
+	fail := append([]string{}, m.gone...)
+	for _, op := range m.restore {
+		fail = append(fail, fmt.Sprintf("input via %s: %s changed its size to something else", short12(fmt.Sprint(op["id"])), created))
+	}
+	summary["routerVias"] = map[string]any{"backend": created, "created": len(after) - len(skip), "inputVias": len(before),
+		"inputViasGone": len(m.gone), "inputViasResized": len(m.restore), "inputViasUnresolved": len(m.unchecked)}
+	gate := func(pass bool, detail string, items ...string) []gateResult {
+		return []gateResult{{Gate: "router-vias", Pass: pass, Detail: detail, Items: items}}
+	}
+	return prov, problemGates(gate, fail, m.unchecked)
+}
+
+// problemGates is the router-vias gate for vias that are known wrong (fail)
+// or cannot be judged (unknown); none when both are empty.
+func problemGates(gate func(bool, string, ...string) []gateResult, fail, unknown []string) []gateResult {
+	if len(fail)+len(unknown) == 0 {
+		return nil
+	}
+	items := append(append([]string{}, fail...), unknown...)
+	if len(fail) > 0 {
+		gs := gate(false, fmt.Sprintf("%d via(s) cannot be shrunk to their class via or left the board, %d without a class via", len(fail), len(unknown)), items...)
+		gs[0].Unchecked = append([]string{}, unknown...)
+		return gs
+	}
+	gs := gate(false, fmt.Sprintf("cannot check: %d router via(s) on nets without a class via or with a repair that could not be checked", len(unknown)), items...)
+	gs[0].CannotCheck, gs[0].Unchecked = true, append([]string{}, unknown...)
+	return gs
 }
 
 // routerViasToClass is sizeRouterVias on this run's board files.
 func (r *kicadRun) routerViasToClass(classed, board string) (string, []gateResult) {
-	return sizeRouterVias(r.kt, classed, board, r.next, r.summary, r.stderr)
+	r.viaProv = &viaProvenance{}
+	return sizeRouterViasProv(r.kt, classed, board, r.next, r.summary, r.stderr, r.viaProv)
 }

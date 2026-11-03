@@ -281,6 +281,11 @@ func (e *renamedError) Error() string {
 	return "renamed into " + e.path + " but could not flush it: " + e.err.Error()
 }
 
+// Rename replaces to with from (both in one directory, from is a file this
+// process wrote), with the same Windows handling and retries as a commit. It
+// checks no KiCad lock: for work files outside any open project.
+func Rename(from, to string) error { return renameRetry(from, to, nil) }
+
 // renameRetry renames, retrying sharing violations with backoff (10 ms
 // doubling, 500 ms cap) for retryBudget in total, but at least 3 attempts
 // (the per-attempt checks can be slow on a loaded machine). check, when not nil, runs

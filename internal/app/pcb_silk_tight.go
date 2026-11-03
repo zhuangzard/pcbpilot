@@ -26,6 +26,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/zhuangzard/pcbpilot/pkg/pcbauto"
@@ -51,6 +52,13 @@ type silkTightOpts struct {
 	// GroupMaxDist of the group's box; NoGroups leaves them unresolved.
 	GroupLink, GroupMaxDist float64
 	NoGroups                bool
+	// deadline (zero = none) stops the planners early: what they return after
+	// it is incomplete and the caller discards it.
+	deadline time.Time
+}
+
+func (o silkTightOpts) expired() bool {
+	return !o.deadline.IsZero() && time.Now().After(o.deadline)
 }
 
 func defaultSilkTightOpts() silkTightOpts {
@@ -512,6 +520,9 @@ func planSilkTight(labels []silkLabel, sc silkScene, opt silkTightOpts) ([]silkP
 	// shrank them); they stay there unless a project-size slot is found.
 	keepSmall := map[string]bool{}
 	for i, l := range labels {
+		if opt.expired() {
+			break
+		}
 		others := append(append([]silkPlaced{}, cur[:i]...), cur[i+1:]...)
 		sized := l.Cur.w()+l.Cur.h() >= l.Len+l.Hgt-0.5
 		ok := (l.Rot == 0 || l.Rot == 90) && l.Cur.dist(l.Own) <= opt.MaxDist && sc.legal(l.Cur, l.Ref, l.Layer, l.Own, others, layerOf, opt)
@@ -531,6 +542,9 @@ func planSilkTight(labels []silkLabel, sc silkScene, opt silkTightOpts) ([]silkP
 	free := map[string]int{}
 	small := map[string]bool{} // no static slot at the project size: plan at MinFont from the start
 	for i, l := range todo {
+		if opt.expired() {
+			break
+		}
 		free[l.ID] = len(cache.of(l))
 		if sl, ok := shrunkLabel(l, opt); ok && free[l.ID] == 0 && len(cache.of(sl)) > 0 {
 			todo[i], small[l.ID], free[l.ID] = sl, true, len(cache.of(sl))
@@ -557,6 +571,9 @@ func planSilkTight(labels []silkLabel, sc silkScene, opt silkTightOpts) ([]silkP
 	}
 	var notes []string
 	for _, l := range todo {
+		if opt.expired() {
+			break
+		}
 		if small[l.ID] && keepSmall[l.ID] && sc.freeOfPlaced(byID[l.ID].Cur.grow(opt.LabelClear), l.Ref, l.Layer, placed, layerOf) {
 			// Only the fab-minimum size fits and the label already sits
 			// legally at it: keep it (no churn between rounds).
@@ -589,6 +606,9 @@ func planSilkTight(labels []silkLabel, sc silkScene, opt silkTightOpts) ([]silkP
 	// Clusters: re-place a failed label's whole row / column together.
 	done := map[string]bool{}
 	for _, l := range failed {
+		if opt.expired() {
+			break
+		}
 		if done[l.ID] {
 			continue
 		}
@@ -617,6 +637,9 @@ func planSilkTight(labels []silkLabel, sc silkScene, opt silkTightOpts) ([]silkP
 	}
 	// Fab minimum size: the same slots for the label at MinFont.
 	for _, l := range failed {
+		if opt.expired() {
+			break
+		}
 		sl, can := shrunkLabel(l, opt)
 		if done[l.ID] || !can {
 			continue
@@ -1072,6 +1095,9 @@ func planSilkGroups(labels []silkLabel, sc silkScene, placed []silkPlaced, opt s
 	// is longer than maxGroupChars, is split along its long axis and retried.
 	var try func(ms []silkLabel)
 	try = func(ms []silkLabel) {
+		if opt.expired() {
+			return
+		}
 		if len(ms) < 2 {
 			for _, m := range ms {
 				single(m)
@@ -1375,6 +1401,19 @@ type silkTightReport struct {
 	Groups     []silkGroup `json:"groups,omitempty"`
 	GroupNotes []string    `json:"groupNotes,omitempty"`
 	Gate       gateResult  `json:"gate"`
+	// Budget: set only when placement ran under --silk-time-budget.
+	Budget *silkBudgetReport `json:"budget,omitempty"`
+}
+
+// silkBudgetReport says what the time budget did. OverrunS is the wall clock
+// past the budget: some steps (the snapshot's in-memory analysis, the gate)
+// cannot be interrupted, and a killed bridge takes a moment to go.
+type silkBudgetReport struct {
+	BudgetS   float64 `json:"budgetS"`
+	ElapsedS  float64 `json:"elapsedS"`
+	Expired   bool    `json:"expired"`
+	StoppedAt string  `json:"stoppedAt,omitempty"`
+	OverrunS  float64 `json:"overrunS,omitempty"`
 }
 
 // runSilkTight plans on the live board dump, applies the plan in two steps
