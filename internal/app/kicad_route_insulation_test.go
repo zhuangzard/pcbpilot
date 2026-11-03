@@ -70,6 +70,11 @@ func TestDSNInsulationRules(t *testing.T) {
 	if _, _, err := dsnInsulationRules(insulationDSN, stray, 5.08); err == nil {
 		t.Fatal("a domain net in a class without the domain must be an error")
 	}
+	unclassed := strings.Replace(insulationDSN, "(net A (pins U1-1))", "(net A (pins U1-1))\n    (net D (pins U1-2))", 1)
+	stray2 := []map[string]any{{"a": "domain:a", "b": "domain:b", "aNets": []string{"A", "D"}, "bNets": []string{"B"}, "clearanceMm": 8.0}}
+	if _, _, err := dsnInsulationRules(unclassed, stray2, 5.08); err == nil {
+		t.Fatal("a declared domain net in no class must be an error")
+	}
 	// A listed net the DSN does not hold is no problem.
 	absent := []map[string]any{{"a": "domain:a", "b": "domain:b", "aNets": []string{"A", "NOT_THERE"}, "bNets": []string{"B"}, "clearanceMm": 8.0}}
 	if _, n, err := dsnInsulationRules(insulationDSN, absent, 5.08); err != nil || n != 1 {

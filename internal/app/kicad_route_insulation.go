@@ -77,6 +77,14 @@ func dsnInsulationRules(dsn string, iso []map[string]any, marginUm float64) (str
 			}
 		}
 	}
+	declared := map[string]bool{}
+	for _, at := range dsnFindAll(dsn, "net") {
+		if end := sexprEnd(dsn, at); end >= 0 {
+			if m := reDSNNetName.FindStringSubmatch(dsn[at:end]); m != nil {
+				declared[strings.Trim(m[1], `"`)] = true
+			}
+		}
+	}
 	member := func(name, class string) bool {
 		for _, p := range strings.Split(reDSNPourSuffix.ReplaceAllString(name, ""), "+") {
 			if p == class {
@@ -98,6 +106,9 @@ func dsnInsulationRules(dsn string, iso []map[string]any, marginUm float64) (str
 			for _, n := range nets {
 				if c, ok := classOf[n]; ok && !member(c, side.class) {
 					return dsn, 0, fmt.Errorf("net %s of insulation pair %v|%v is in DSN class %s, outside its domain", n, p["a"], p["b"], c)
+				}
+				if _, ok := classOf[n]; !ok && declared[n] {
+					return dsn, 0, fmt.Errorf("net %s of insulation pair %v|%v is in no DSN class", n, p["a"], p["b"])
 				}
 			}
 		}
