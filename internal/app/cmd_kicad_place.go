@@ -196,7 +196,7 @@ func runKicadPlace(o kicadPlaceOpts, deps kicadPlaceDeps, stderr io.Writer) (*ki
 	}
 	if len(missing) > 0 {
 		note := fmt.Sprintf("%d intent net(s) are not on the board and constrain nothing: %s", len(missing), strings.Join(firstN(missing, 8), ", "))
-		fmt.Fprintf(stderr, "placement: WARNING %s\n", rep0)
+		fmt.Fprintf(stderr, "placement: WARNING %s\n", note)
 		placeNotes = append(placeNotes, note)
 	}
 	rep := &kicadPlaceReport{PCB: o.pcb, Out: o.out, Fixed: fixed, path: o.report}
