@@ -141,6 +141,15 @@ func TestStitchNearViolation(t *testing.T) {
 	}
 }
 
+func TestViolationsAwayFrom(t *testing.T) {
+	s := stitch{Via: specctra.NewVia{X: 100, Y: 0}, Track: specctra.NewTrack{X1: 0, Y1: 0, X2: 100, Y2: 0}}
+	near, far, zero := 20.0, 9000.0, 0.0
+	got := violationsAwayFrom([]kicad.Violation{{Rule: "a", X: &near, Y: &zero}, {Rule: "b", X: &far, Y: &zero}}, []stitch{s})
+	if len(got) != 1 || got[0].Rule != "b" {
+		t.Fatalf("%+v", got)
+	}
+}
+
 func TestStitchNetsFollowTheProfile(t *testing.T) {
 	ps := []kicad.Pour{{Net: "GND"}, {Net: "GND"}, {Net: "+3V3"}}
 	r := &kicadRun{summary: map[string]any{}}

@@ -240,6 +240,7 @@ const noReviewMatch = "--no-review"
 
 // kicadRun is one kicad route execution.
 type kicadRun struct {
+	stitchAway int // new DRC errors near no stitch, in the last stitch check
 	viaProv *viaProvenance // which via came from where (kicad_route_via_audit.go)
 	// silkAutoDeferred: why --silk=auto did not place this board's labels; its
 	// silkscreen gate is then not satisfied, whatever the labels look like.

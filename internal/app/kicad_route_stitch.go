@@ -463,6 +463,7 @@ func (r *kicadRun) stitchPours(board string, nets []string) (string, error) {
 		byNet[c.Net]++
 	}
 	rep["stitched"], rep["passes"], rep["stop"] = byNet, passes, stop
+	rep["newDrcAwayFromStitches"] = r.stitchAway
 	rep["stitches"] = kept
 	fmt.Fprintf(r.stderr, "stitch: %d via(s) kept on %d net(s), stopped: %s\n", len(kept), len(byNet), stop)
 	return cur, nil
@@ -506,7 +507,6 @@ func (r *kicadRun) stitchProve(board string, plan []stitch, nets []string, base 
 		}
 	}
 	var good []stitch
-	claimed := make([]bool, len(fresh))
 	for _, c := range plan {
 		bad := ""
 		if open[c.PadID] {
@@ -515,12 +515,9 @@ func (r *kicadRun) stitchProve(board string, plan []stitch, nets []string, base 
 		if cut.stitches[c.PadID] {
 			bad = "near a pad that lost its pour"
 		}
-		for i, v := range fresh {
-			if stitchNearViolation(v, c) {
-				claimed[i] = true
-				if bad == "" {
-					bad = "new DRC " + v.Rule
-				}
+		for _, v := range fresh {
+			if bad == "" && stitchNearViolation(v, c) {
+				bad = "new DRC " + v.Rule
 			}
 		}
 		if bad != "" {
@@ -529,13 +526,29 @@ func (r *kicadRun) stitchProve(board string, plan []stitch, nets []string, base 
 		}
 		good = append(good, c)
 	}
-	for i, v := range fresh {
-		if !claimed[i] && reasons["board"] == "" {
-			reasons["board"] = "new DRC " + v.Rule + " away from any stitch"
-			break
-		}
+	if away := violationsAwayFrom(fresh, plan); len(away) > 0 {
+		// A stitch only adds copper of its own, so these are not its doing: KiCad
+		// can report an old error against another of the same track's neighbours.
+		// The final DRC still counts them.
+		r.stitchAway = len(away)
+		fmt.Fprintf(r.stderr, "stitch: %d new DRC error(s) away from any stitch, first: %s %s\n", len(away), away[0].Rule, away[0].Message)
 	}
 	return good, reasons, nil
+}
+
+// violationsAwayFrom lists the violations near none of the stitches.
+func violationsAwayFrom(vs []kicad.Violation, plan []stitch) []kicad.Violation {
+	var away []kicad.Violation
+	for _, v := range vs {
+		near := false
+		for _, c := range plan {
+			near = near || stitchNearViolation(v, c)
+		}
+		if !near {
+			away = append(away, v)
+		}
+	}
+	return away
 }
 
 // padsSplit lists the pads of each earlier group that are no longer with the

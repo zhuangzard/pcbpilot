@@ -37,6 +37,11 @@ type PlaceOptions struct {
 	// (longer wiring, decaps and crystals further out) — freezing the cluster
 	// before the global arrangement exists fixes the wrong local geometry.
 	Macro bool `json:"macro,omitempty"`
+	// MedianMoves makes 3 moves in 10 aim at the median of the pads a part
+	// connects to instead of a random offset: late in the anneal the random
+	// radius has shrunk and a part far from its nets cannot get back. Off by
+	// default, kicad place turns it on above placeLargeBoard movable parts.
+	MedianMoves bool `json:"medianMoves,omitempty"`
 	// Only restricts the movable set to these designators (with Refine: a
 	// local adjustment of named parts on an otherwise confirmed layout).
 	Only []string `json:"only,omitempty"`
@@ -2091,6 +2096,13 @@ func (pl *placer) tryMove(p *Part, radius float64, keep bool) float64 {
 		}
 	default:
 		delta := Point{(pl.rng.Float64()*2 - 1) * radius, (pl.rng.Float64()*2 - 1) * radius}
+		if pl.opt.MedianMoves && kind < 3 {
+			if t, ok := pl.medianTarget(p); ok {
+				// Near the target, not on it: the median is usually taken.
+				j := math.Max(4*pl.spacing, radius/4)
+				delta = t.Sub(p.Body().Center()).Add(Point{(pl.rng.Float64()*2 - 1) * j, (pl.rng.Float64()*2 - 1) * j})
+			}
+		}
 		for _, d := range append([]*Part{p}, grp...) {
 			pl.bucketOp(d, false)
 			movePartCentre(d, d.Body().Center().Add(delta), d.Rotation)
@@ -2112,6 +2124,34 @@ func (pl *placer) tryMove(p *Part, radius float64, keep bool) float64 {
 		pl.undo(p)
 	}
 	return after - before
+}
+
+// medianTargetMaxPads leaves rails out of medianTarget: their pads are all
+// over the board and say nothing about where a part belongs.
+const medianTargetMaxPads = 12
+
+// medianTarget is the median of the other pads on p's nets, false when p has
+// no net small enough to say.
+func (pl *placer) medianTarget(p *Part) (Point, bool) {
+	var xs, ys []float64
+	for _, i := range pl.partNet[p] {
+		n := pl.nets[i]
+		if len(n.pads) > medianTargetMaxPads {
+			continue
+		}
+		for _, pd := range n.pads {
+			if pd.Part != p.Ref {
+				xs = append(xs, pd.Box.C.X)
+				ys = append(ys, pd.Box.C.Y)
+			}
+		}
+	}
+	if len(xs) == 0 {
+		return Point{}, false
+	}
+	sort.Float64s(xs)
+	sort.Float64s(ys)
+	return Point{xs[len(xs)/2], ys[len(ys)/2]}, true
 }
 
 func (pl *placer) undo(p *Part) {
