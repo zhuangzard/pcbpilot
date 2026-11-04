@@ -2,8 +2,9 @@ package app
 
 // kicad_route_drc_origin.go — where each DRC error of a routed board comes from.
 // Purely a report: every error stays in the kicad-drc gate. An error between two
-// objects of one footprint is the same on any placement, and no routing setting
-// changes it; the designer settles it per footprint, with the part's evidence.
+// objects of one footprint is the same on any placement; neither it nor a pad too
+// near the edge changes with a routing setting. The designer settles them per
+// footprint, with the part's evidence.
 
 import (
 	"regexp"
