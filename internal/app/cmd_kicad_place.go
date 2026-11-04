@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -17,6 +18,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/zhuangzard/pcbpilot/internal/gate"
 	"github.com/zhuangzard/pcbpilot/internal/kicad"
+	"github.com/zhuangzard/pcbpilot/pkg/netname"
 	"github.com/zhuangzard/pcbpilot/pkg/pcbauto"
 )
 
@@ -24,8 +26,11 @@ import (
 type kicadPlaceOpts struct {
 	pcb, out, report         string
 	mech, power, sim, intent string
+	domainZones              string
 	groups                   []string
 	placeSeeds, candidates   int
+	timeBudgetDefault        bool
+	placeSeedsDefault        bool
 	seed                     int64
 	timeBudget               time.Duration
 	haloMil, haloICMil       float64
@@ -113,7 +118,11 @@ its parts need vs. what it offers), stderr warns, and the exit code is
   pcbpilot kicad place --pcb board.kicad_pcb --out placed/board.kicad_pcb --mech mech.json --intent intent.json --place-seeds 8`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if o.domainZones != "strips" && o.domainZones != "edge" {
+				return fmt.Errorf("--domain-zones must be strips or edge")
+			}
 			o.haloICSet = cmd.Flags().Changed("halo-ic-mil")
+			o.timeBudgetDefault, o.placeSeedsDefault = !cmd.Flags().Changed("time-budget"), !cmd.Flags().Changed("place-seeds")
 			rep, err := runKicadPlace(o, kicadPlaceDeps{snapshot: kicad.Snapshot, place: kicad.Place}, stderr)
 			if err != nil {
 				return err
@@ -135,6 +144,7 @@ its parts need vs. what it offers), stderr warns, and the exit code is
 	c.Flags().StringVar(&o.pcb, "pcb", "", "input .kicad_pcb (required; never modified)")
 	c.Flags().StringVar(&o.out, "out", "", "output .kicad_pcb for the best seed (required)")
 	c.Flags().StringVar(&o.report, "report", "", "report JSON (default: <out>.report.json)")
+	c.Flags().StringVar(&o.domainZones, "domain-zones", "strips", "insulation domain layout: strips (full-height, the default) | edge (each small domain against its connector, the largest domain the largest rectangle left; refused when it does not fit)")
 	c.Flags().StringVar(&o.mech, "mech", "", "mechanical spec JSON (pcb auto --mech; mm from the board's lower-left corner, y up)")
 	c.Flags().StringVar(&o.power, "power", "", "power spec JSON (rails with voltage/currentA, diffPairs)")
 	c.Flags().StringVar(&o.sim, "sim", "", "simulated per-pin currents (pcbpilot sim power JSON)")
@@ -176,7 +186,21 @@ func runKicadPlace(o kicadPlaceOpts, deps kicadPlaceDeps, stderr io.Writer) (*ki
 	if err != nil {
 		return nil, err
 	}
+	var placeNotes []string
+	renamed, missing, err := placeIntentOnBoard(power.Intent, b)
+	if err != nil {
+		return nil, err
+	}
+	if len(renamed) > 0 {
+		fmt.Fprintf(stderr, "placement: %d intent net(s) resolved to the board's net names\n", len(renamed))
+	}
+	if len(missing) > 0 {
+		note := fmt.Sprintf("%d intent net(s) are not on the board and constrain nothing: %s", len(missing), strings.Join(firstN(missing, 8), ", "))
+		fmt.Fprintf(stderr, "placement: WARNING %s\n", note)
+		placeNotes = append(placeNotes, note)
+	}
 	rep := &kicadPlaceReport{PCB: o.pcb, Out: o.out, Fixed: fixed, path: o.report}
+	rep.Notes = append(rep.Notes, placeNotes...)
 	for _, n := range kicadKeptNotes(kept) {
 		rep.Notes = append(rep.Notes, n)
 		fmt.Fprintf(stderr, "placement: %s\n", n)
@@ -249,8 +273,40 @@ func runKicadPlace(o kicadPlaceOpts, deps kicadPlaceDeps, stderr io.Writer) (*ki
 		c, err := understand(bc, a)
 		return a, c, err
 	}
+	if o.domainZones == "edge" {
+		if mc != nil && len(mc.Zones) > 0 {
+			return nil, fmt.Errorf("--domain-zones edge: --mech already gives zones; use one or the other")
+		}
+		_, c, err := prep(b)
+		if err != nil {
+			return nil, err
+		}
+		if mc == nil {
+			mc = &pcbauto.Mechanics{Edge: map[string]pcbauto.MechEdge{}, Fixed: map[string]bool{}}
+			rep.Mechanics = mc
+		}
+		margin := math.Max(mc.MarginMil, 80)
+		plan, err := pcbauto.PlanEdgeZones(b, c, mc, b.Bounds().Expand(-margin), math.Max(12, b.Rules.TrackWidth+2*b.Rules.Clearance))
+		if err != nil {
+			return nil, err
+		}
+		mc.Zones = append(mc.Zones, plan.Zones...)
+		rep.Notes = append(rep.Notes, plan.Notes...)
+		for _, z := range plan.Zones {
+			fmt.Fprintf(stderr, "domain zone %s: %.0f x %.0f mm\n", z.Domain, z.Rect.W()*0.0254, z.Rect.H()*0.0254)
+		}
+	}
 	prog := newPlaceProgress(stderr, placeProgressEvery)
 	popt.Progress = prog.phase
+	// A large board with its nets' currents and classes known takes far longer
+	// to legalise: 8 min left thousands of overlaps on 1443 parts, 30 min none.
+	movable := len(b.Parts) - len(rep.Fixed)
+	if budget, seeds, changed := placeLargeDefaults(movable, o.timeBudget, o.placeSeeds, o.timeBudgetDefault, o.placeSeedsDefault, runtime.NumCPU()); changed {
+		o.timeBudget, o.placeSeeds = budget, seeds
+		note := fmt.Sprintf("large board (%d movable parts): time budget %s, %d seed(s); --time-budget and --place-seeds override", movable, budget, seeds)
+		rep.Notes = append(rep.Notes, note)
+		fmt.Fprintf(stderr, "placement: %s\n", note)
+	}
 	if o.timeBudget > 0 {
 		// The anneal keeps its own 90 s clock, so a board that placed before
 		// places the same; the budget is only the outer cap. A board above
@@ -367,6 +423,76 @@ func mustAbs(p string) string {
 		return p
 	}
 	return a
+}
+
+// placeIntentOnBoard gives the intent the board's net names, as kicad route does:
+// a short name that stays short has no domain and no current on the board.
+func placeIntentOnBoard(in *pcbauto.Intent, b *pcbauto.Board) (map[string]string, []string, error) {
+	if in == nil {
+		return nil, nil, nil
+	}
+	var names []string
+	for _, n := range b.Nets() {
+		names = append(names, n.Name)
+	}
+	r := netname.NewResolver(names)
+	refs := map[string]bool{}
+	for name, n := range in.Nets {
+		refs[name] = true
+		if n != nil && n.DiffPair != "" {
+			refs[n.DiffPair] = true
+		}
+	}
+	for _, d := range in.Domains {
+		for _, n := range d.Nets {
+			refs[n] = true
+		}
+	}
+	for _, nc := range in.NetClasses {
+		for _, n := range nc.Nets {
+			refs[n] = true
+		}
+	}
+	to := map[string]string{}
+	dest := map[string]string{}
+	var problems, missing []string
+	for _, name := range sortedKeysOf(refs) {
+		id, m := r.Resolve(name)
+		switch m {
+		case netname.Ambiguous:
+			problems = append(problems, fmt.Sprintf("%q could be board net %s", name, strings.Join(r.Candidates(name), " or ")))
+		case netname.Unknown:
+			missing = append(missing, name)
+		case netname.Found:
+			if other, dup := dest[id]; dup {
+				problems = append(problems, fmt.Sprintf("intent names %s and %s both name board net %s", other, name, id))
+				continue
+			}
+			dest[id] = name
+			if id != name {
+				to[name] = id
+			}
+		}
+	}
+	if len(problems) > 0 {
+		return nil, nil, fmt.Errorf("intent nets do not resolve to one board net each: %s", strings.Join(problems, "; "))
+	}
+	if len(to) > 0 {
+		in.RenameNets(func(n string) string {
+			if id, ok := to[n]; ok {
+				return id
+			}
+			return n
+		})
+	}
+	return to, missing, nil
+}
+
+func firstN(ss []string, n int) []string {
+	if len(ss) > n {
+		return ss[:n]
+	}
+	return ss
 }
 
 // kicadPlacePower reads --power / --sim / --intent like pcb auto run.
@@ -712,6 +838,23 @@ func kicadPlaceVerdict(illegal []string, metricIllegal int) (gate.Status, int) {
 		return gate.Fail, n
 	}
 	return gate.Pass, 0
+}
+
+// placeLargeDefaults are the budget and seeds for a board above placeLargeBoard
+// movable parts, each where the caller gave none: 30 min, and no more seeds than
+// the machine can run side by side while it does anything else.
+func placeLargeDefaults(movable int, budget time.Duration, seeds int, budgetDefault, seedsDefault bool, cpus int) (time.Duration, int, bool) {
+	if movable <= placeLargeBoard {
+		return budget, seeds, false
+	}
+	changed := false
+	if budgetDefault {
+		budget, changed = 30*time.Minute, true
+	}
+	if limit := max(cpus-1, 1); seedsDefault && seeds > limit {
+		seeds, changed = limit, true
+	}
+	return budget, seeds, changed
 }
 
 // placeLargeBoard is the movable-part count above which kicad place lets

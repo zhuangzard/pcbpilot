@@ -46,11 +46,19 @@ type intentCopper struct {
 	TempRiseC float64 `json:"tempRiseC"`
 }
 
+// intentPin is one pin's simulated worst-case current.
+type intentPin struct {
+	Ref      string   `json:"ref"`
+	Pin      string   `json:"pin"`
+	CurrentA *float64 `json:"currentA"` // nil: the pin has no simulated current
+}
+
 type intentNet struct {
 	Role              string        `json:"role"`
 	Domain            string        `json:"domain"`
 	Voltage           intentVoltage `json:"voltage"`
 	CurrentA          float64       `json:"currentA"`
+	Pins              []intentPin   `json:"pins,omitempty"` // additive producer field
 	WidthMil          intentWidth   `json:"widthMil"`
 	ViasPerTransition int           `json:"viasPerTransition"`
 	Via               *intentVia    `json:"via,omitempty"` // additive producer field

@@ -293,6 +293,37 @@ func hazardousKind(k string) bool {
 	return k == "mains" || k == "hazardous"
 }
 
+// RenameNets rewrites every net name of the intent: to says what a name is on
+// the board. Intent names are often short where a hierarchical schematic gives
+// the board /sheet/NAME, and an unresolved name silently loses its domain.
+func (in *Intent) RenameNets(to func(string) string) {
+	if in == nil {
+		return
+	}
+	list := func(ns []string) {
+		for i, n := range ns {
+			ns[i] = to(n)
+		}
+	}
+	for i := range in.Domains {
+		list(in.Domains[i].Nets)
+	}
+	for i := range in.NetClasses {
+		list(in.NetClasses[i].Nets)
+	}
+	for i := range in.Findings {
+		list(in.Findings[i].Nets)
+	}
+	nets := make(map[string]*IntentNet, len(in.Nets))
+	for name, n := range in.Nets {
+		if n != nil && n.DiffPair != "" {
+			n.DiffPair = to(n.DiffPair)
+		}
+		nets[to(name)] = n
+	}
+	in.Nets = nets
+}
+
 // buildIsoRules resolves an intent against the board's nets.
 func buildIsoRules(b *Board, in *Intent) *IsoRules {
 	s := &IsoRules{Standard: in.Standard, Domains: in.Domains, NetDomain: map[string]string{}, byKey: map[[2]string]*IsoPair{}, kind: map[string]string{}}

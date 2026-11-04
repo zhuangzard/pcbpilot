@@ -441,6 +441,12 @@ isolation-placement 报 R16↔R15 courtyard 0.47 mm < 0.6 mm 与一个未声明�
 via-current 2 条——即只读检查会如实指出已布板与计划的差距。
 一次计划约 30–50 s（主要是 DRC 探针）。固定回归：`PCBPILOT_KICAD_LIVE=1 go test ./internal/app -run TestKicadRulesLiveDemos`。
 
+## 布局：网络名与绝缘分区
+
+- `kicad place` 把意图里的网名解析成板上的名字（和 `kicad route` 同一个解析器）；有歧义则报错，板上没有的网只警告。层次原理图上这决定了器件的绝缘域、电流和网络类。
+- `--domain-zones strips|edge`，默认 strips（贯穿全高的竖条）。edge：每个小绝缘域一个矩形贴着自己的板边连接器，最大的域取剩下最大的矩形；碰到别域的固定件会缩，缩不动、放不下或板子不是矩形就报错，不回退到竖条。要 `--mech` 把连接器放到板边；和 `--mech` 自带的 zones 互斥。1443 件测试板同样流程：strips 67 %，edge 82 %（各跑一次）。
+- 超过 1000 个可移动件时，没给 `--time-budget` 就用 30 分钟，没给 `--place-seeds` 就不超过 CPU 核数减 1：解析网名后合法化慢得多，8 分钟会留下几千处重叠。
+
 ## 布线（`kicad route`）——与 `pcb auto route` + `pcb gate` 同序同算
 
 ```bash
@@ -536,6 +542,7 @@ pcbpilot kicad route --pcb board-b-v5a.kicad_pcb --intent intent.json --sim sim.
 
    **大板配置**（`--large-board auto|on|off`，默认 auto：≥2000 连接启用，stderr 会说）：有计划铺铜的网不布，放进自己的 DSN class（同 class 的其他网照布；差分对、长度组里的网照布），1 次启动，无单步时限（`--no-time-limits`），不续跑，不带 `--diagnose`，路由器预算 60 分钟，全流程约 80 分钟。显式给的参数优先。没布的网仍计入连接数，pcbnew 判连通才算；铺铜不会把每个焊盘都接上，这时 `route-complete` 失败。无单步时限下单步可超过 15 分钟，`--max-time` 仍能打断。
 
+   **铺铜网补过孔**（`--stitch-pours auto|on|off`，默认 auto：跟大板配置走）：铺铜后，铺铜网上没接到主铜皮（有铺铜的最大焊盘组）的焊盘，加一个过孔和一段短线。先按几何找位置（不放进焊盘），填充后由 pcbnew 和 DRC 证明：焊盘接上了、没有新错误、原来在一起的焊盘没被分开，否则撤掉。连通组电流超过单过孔限值或没有仿真电流的拒绝。结果在 `summary.stitchPours`。一块铺铜被切成两半但焊盘仍有走线相连时看不出来，靠后仿真。大板上约多 15～20 分钟。
    **真实未连接数**：kicad-cli 的 DRC 报告列到 499 个未连接项为止，看 `summary.boardConnectivity`（pcbnew 的数，`drcTruncated` 表示 DRC 列表被截断）；`route-complete` 只要 pcbnew 数出开路就失败。实验用：`--no-router-diagnose`、`--router-arg`（拒绝 pcbpilot 自己管的参数）。
    门禁与签核只读路由器无关的 `routeResult`（router、version、patchSha、args、session|board、unrouted/blocked 连接、
    violations、fixable；`summary.routeResult`），fastroute 是目前唯一实现。
