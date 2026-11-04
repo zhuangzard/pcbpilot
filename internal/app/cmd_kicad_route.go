@@ -1902,6 +1902,11 @@ func (r *kicadRun) routedDRCGate(routed string) (all, errs *kicad.DRCReport) {
 	rep, warn, nWarn := all.SplitErrors()
 	_ = writeJSONFile(drcPath, rep)
 	g := kicadDRCGate(rep, drcPath)
+	origin := drcOrigins(rep.Violations)
+	r.summary["drcOrigin"] = origin
+	if origin.FootprintInternal+origin.EdgePad > 0 {
+		g.Info = append(g.Info, fmt.Sprintf("%d error(s) inside one footprint and %d of a footprint's pads against the board edge, on %d footprint(s), listed in summary.drcOrigin: the same on any placement, no routing setting changes them; %d other", origin.FootprintInternal, origin.EdgePad, len(origin.Footprints), origin.Other))
+	}
 	// What the project tells DRC not to report is part of the gate: an
 	// excluded or ignored short / clearance / unconnected / parity check
 	// fails it unless a signed waiver matches.
