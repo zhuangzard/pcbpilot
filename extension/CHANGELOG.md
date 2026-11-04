@@ -40,7 +40,8 @@ stay open at 82 %, and results vary between runs. Reviewed by Codex and Kimi K3.
 
 **Known limits**
 - About 75 of the 641 open connections are on one power rail whose pads have no legal stitch site; most of the rest are spread over about 400
-  signal nets, and the router's second pass made no progress on them.
+  signal nets. The router's first pass took 51 of its 60 minutes and the budget ran out about 3 minutes into its second pass, so those were not
+  retried.
 - `--domain-zones edge` was run on the full board before the last review fixes, none of which change placement geometry. It stays opt-in.
 
 ## [0.12.5] — 2026-11-03
