@@ -10,7 +10,6 @@ package app
 
 import (
 	"fmt"
-	"math"
 )
 
 // edgeMountedParts are the designators whose footprint box reaches the
@@ -35,8 +34,20 @@ func edgeMountedParts(snap *boardSnapshot) map[string]bool {
 	return out
 }
 
+// boxInBand reports whether a pad box reaches into the band: a corner nearer
+// the outline than band, or outside it (distToEdge is negative there). A pad
+// clear of the band needs no window, and a window lets tracks reach the edge.
+func boxInBand(o *boardOutline, b silkBox, band float64) bool {
+	for _, q := range [][2]float64{{b.MinX, b.MinY}, {b.MaxX, b.MinY}, {b.MaxX, b.MaxY}, {b.MinX, b.MaxY}} {
+		if o.distToEdge(q[0], q[1]) < band {
+			return true
+		}
+	}
+	return false
+}
+
 // edgeExemptBoxes returns the box of every pad of an edge-mounted part that
-// lies within band of the outline, grown by grow (the escape margin: the
+// reaches into band of the outline, grown by grow (the escape margin: the
 // clearance a track leaving the pad keeps to the band), in the snapshot's
 // frame (mil) — and "REF.PAD" names for the summary.
 func edgeExemptBoxes(snap *boardSnapshot, band, grow float64) ([][4]float64, []string) {
@@ -49,7 +60,7 @@ func edgeExemptBoxes(snap *boardSnapshot, band, grow float64) ([][4]float64, []s
 		}
 		for _, p := range c.Pads {
 			b := padBox(p)
-			if snap.Outline.distToEdge(p.X, p.Y) > band+math.Hypot(b.w(), b.h())/2 {
+			if !boxInBand(snap.Outline, b, band) {
 				continue
 			}
 			b = b.grow(grow)
