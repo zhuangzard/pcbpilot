@@ -1,5 +1,48 @@
 # Changelog
 
+## [0.12.6] — 2026-11-03
+
+**CLI, daemon, Skills and MCP move to 0.12.6. The connector runtime is UNCHANGED (only its version number moves); import the
+0.12.6 `pcbpilot-connector.eext` so the versions match — the daemon pauses design actions until they do.**
+
+Summary: `kicad route` now joins pads that a pour missed, and `kicad place` can give each small insulation domain a zone at its own
+board-edge connector. On the 1443-part test board, measured by pcbnew on the final board with one run each, connections made went from 62 %
+to 67 % with stitching, and to 82 % with stitching plus `--domain-zones edge`. **That board still does not pass:** 641 of its 3493 connections
+stay open at 82 %, and results vary between runs. Reviewed by Codex and Kimi K3.1 Pro round after round.
+
+| Test board, one run each | Connections made | Open | Other DRC errors | Insulation gate errors |
+| --- | --- | --- | --- | --- |
+| v0.12.5 | 62 % | 1343 | 229 | 7 |
+| 0.12.6, default strips | 67 % | 1156 | 104 | 6 |
+| 0.12.6, `--domain-zones edge` | 82 % | 641 | 115 | 11 |
+
+**Stitching pours (`kicad route --stitch-pours auto|on|off`)**
+- After the pours are filled, a pad on a pour net that did not reach the net's main copper gets one via and a short track. `auto`, the
+  default, follows the large-board profile, so boards below 2000 connections are unchanged.
+- Each stitch has to prove itself after a refill: pcbnew must show the pad joined, DRC must show no new violation, and pads that were
+  together must stay together. A stitch that fails comes out.
+- A connected group whose simulated current is above the single-via limit, or that has no simulated current, is refused and stays open.
+- The result is in `summary.stitchPours`. A run on a large board takes about 15 to 20 minutes longer.
+- Not detected: a pour cut in two whose pads are still joined by a track. Post-layout simulation is what shows that.
+
+**Zones at the board edge (`kicad place --domain-zones strips|edge`)**
+- `strips`, full-height vertical strips, stays the default. `edge` gives each small domain a rectangle against its own edge connector, and the
+  largest domain the largest rectangle left.
+- A zone shrinks around another domain's fixed parts. If it cannot shrink enough, there is no room, or the board is not a rectangle, `edge` is
+  an error and does not fall back to strips.
+- It needs `--mech` to put the connectors on the edge, and cannot be combined with zones supplied by `--mech`.
+
+**Other changes**
+- `kicad place` resolves the intent's net names against the board. An ambiguous name is an error; an intent net not on the board is a warning.
+- Above 1000 movable parts, `kicad place` defaults to a 30-minute budget and at most one seed per core minus one, unless you set those flags.
+  A shorter budget ended in an illegal placement on the test board.
+- `kicad route` compares DRC violations that have no UUID by rule, description and position.
+
+**Known limits**
+- About 75 of the 641 open connections are on one power rail whose pads have no legal stitch site; most of the rest are spread over about 400
+  signal nets, and the router's second pass made no progress on them.
+- `--domain-zones edge` was run on the full board before the last review fixes, none of which change placement geometry. It stays opt-in.
+
 ## [0.12.5] — 2026-11-03
 
 **CLI, daemon, Skills and MCP move to 0.12.5. The connector runtime is UNCHANGED (only its version number moves); import the
