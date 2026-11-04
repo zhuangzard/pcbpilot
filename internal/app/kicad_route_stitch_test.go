@@ -56,11 +56,11 @@ func TestPlanStitchesNoSite(t *testing.T) {
 	open := []boardPad{stitchPad("a", "P", 1000, 1000)}
 	// Other-net copper over the whole neighbourhood.
 	var tracks []specctra.Track
-	for y := 880.0; y <= 1120; y += 20 {
+	for y := 780.0; y <= 1220; y += 20 {
 		if y > 985 && y < 1015 {
 			continue
 		}
-		tracks = append(tracks, specctra.Track{Net: "S", Layer: 2, X1: 800, Y1: y, X2: 1200, Y2: y, Width: 10})
+		tracks = append(tracks, specctra.Track{Net: "S", Layer: 2, X1: 700, Y1: y, X2: 1300, Y2: y, Width: 10})
 	}
 	size := map[string]stitchSize{"P": {Dia: 24, Drill: 12, Track: 10}}
 	got, none := planStitches(open, open, tracks, nil, size, 8, stitchTestBounds, map[string]bool{})
@@ -70,7 +70,7 @@ func TestPlanStitchesNoSite(t *testing.T) {
 			t.Fatalf("via outside the free lane: %+v", got[0].Via)
 		}
 		tried := map[string]bool{got[0].Site: true}
-		for i := 0; i < 400; i++ {
+		for i := 0; i < 600; i++ {
 			next, _ := planStitches(open, open, tracks, nil, size, 8, stitchTestBounds, tried)
 			if len(next) == 0 {
 				return
@@ -307,5 +307,28 @@ func TestKicadPourPlanExtraPowerLayers(t *testing.T) {
 		if p.Net == "VCC" {
 			t.Fatalf("no power pour asked for, got one on %d", p.Layer)
 		}
+	}
+}
+
+// A via beyond the pad's escape zone must not hang on a track narrower than the
+// net's: a narrow pad stays within the short reach, a wide one may go further.
+func TestPlanStitchesFarReachNeedsFullWidth(t *testing.T) {
+	var tracks []specctra.Track
+	for y := 700.0; y <= 1300; y += 20 {
+		if y < 1120 {
+			tracks = append(tracks, specctra.Track{Net: "S", Layer: 2, X1: 700, Y1: y, X2: 1300, Y2: y, Width: 10})
+		}
+	}
+	plan := func(w, h float64) []stitch {
+		p := stitchPad("a", "P", 1000, 1000)
+		p.W, p.H = w, h
+		got, _ := planStitches([]boardPad{p}, []boardPad{p}, tracks, nil, map[string]stitchSize{"P": {Dia: 24, Drill: 12, Track: 30}}, 8, stitchTestBounds, map[string]bool{})
+		return got
+	}
+	if got := plan(10, 10); len(got) != 0 {
+		t.Fatalf("narrow pad reached %+v", got[0].Via)
+	}
+	if got := plan(40, 40); len(got) != 1 || got[0].Track.Width != 30 {
+		t.Fatalf("wide pad got %+v", got)
 	}
 }

@@ -161,3 +161,69 @@ func TestClipPoursToIsoWithoutOutline(t *testing.T) {
 		}
 	}
 }
+
+// A partner domain's track off its own territory keeps the pour away: the
+// territories only know the pads, so the pour used to run right over it.
+func TestClipPoursToIsoKeepsOffPartnerTracks(t *testing.T) {
+	in := loadIntent(t, "iso-mains-selv.intent.json")
+	raw, err := os.ReadFile("testdata/iso-violation.dump.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := FromSnapshot(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	an := Analyze(b, PowerSpec{Intent: in}, nil)
+	var foreign string
+	var own Point
+	for _, p := range b.Parts {
+		for _, pd := range p.Pads {
+			d := an.Iso.NetDomain[pd.Net]
+			if d != "" && d != an.Iso.NetDomain["GND"] {
+				foreign = pd.Net
+			}
+			if pd.Net == "GND" {
+				own = pd.Box.C
+			}
+		}
+	}
+	if foreign == "" {
+		t.Fatal("setup: no net of another domain")
+	}
+	before, _, _, err := ClipPoursToIso(raw, in, []PlaneRegion{{Net: "GND", Layer: LayerInner1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var snap map[string]any
+	if err := json.Unmarshal(raw, &snap); err != nil {
+		t.Fatal(err)
+	}
+	// A track of the other domain right at one of GND's pads, on the pour's layer.
+	snap["copper"] = map[string]any{"lines": []map[string]any{{"net": foreign, "layer": LayerInner1, "lineWidth": 10.0,
+		"startX": own.X, "startY": own.Y, "endX": own.X + 100, "endY": own.Y}}}
+	withTrack, err := json.Marshal(snap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, _, _, err := ClipPoursToIso(withTrack, in, []PlaneRegion{{Net: "GND", Layer: LayerInner1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inPour := func(out []PlaneRegion) bool {
+		for _, pr := range out {
+			for _, poly := range pr.Polys {
+				if PolyContains(poly, Point{own.X + 50, own.Y}) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	if !inPour(before) {
+		t.Fatal("setup: the spot is not in the pour without the track")
+	}
+	if inPour(after) {
+		t.Fatal("the pour still covers the partner domain's track")
+	}
+}

@@ -31,7 +31,9 @@ const (
 	// escape zone the intent-widths gate allows for a track narrower than its
 	// class.
 	stitchReachMil = 45.0
-	stitchNearMil  = 30.0 // a new DRC error this close to a stitch is its own
+	// stitchFarReachMil: further still, with a track of the full stitch width only.
+	stitchFarReachMil = 150.0
+	stitchNearMil     = 30.0 // a new DRC error this close to a stitch is its own
 	// One barrel's current limit: 25 um plating, 10 C rise.
 	stitchPlatingMil = 1.0
 	stitchTempRiseC  = 10.0
@@ -143,8 +145,12 @@ func planStitches(open, pads []boardPad, tracks []specctra.Track, vias []widenVi
 		// Rings outward from the pad edge, 16 directions on each.
 		base := sz.Dia/2 + clr
 		var placed *stitch
+		maxReach := stitchReachMil
+		if half*2 >= sz.Track {
+			maxReach = stitchFarReachMil
+		}
 	search:
-		for reach := 0.0; reach <= stitchReachMil; reach += 5 {
+		for reach := 0.0; reach <= maxReach; reach += 5 {
 			for k := 0; k < 16; k++ {
 				th := float64(k) * math.Pi / 8
 				dx, dy := math.Cos(th), math.Sin(th)
