@@ -401,6 +401,9 @@ func kicadPourPlan(o kicadRouteOpts, in *boardSnapshot) []kicad.Pour {
 	}
 	if power > 0 && net != "" && has[net] {
 		ps = append(ps, kicad.Pour{Net: net, Layer: power, ClearanceMil: clr})
+		for _, l := range o.powerExtraLayers {
+			ps = append(ps, kicad.Pour{Net: net, Layer: l, ClearanceMil: clr})
+		}
 	}
 	return ps
 }

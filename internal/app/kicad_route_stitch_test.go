@@ -287,3 +287,25 @@ func TestStitchCutters(t *testing.T) {
 		t.Fatalf("%+v", cut)
 	}
 }
+
+// --power-extra-layers adds to --power-layer, on the same net, and nothing
+// without the power pour it extends.
+func TestKicadPourPlanExtraPowerLayers(t *testing.T) {
+	in := &boardSnapshot{CopperLayers: 6, Components: []boardComp{{Pads: []boardPad{{Net: "GND"}, {Net: "VCC"}}}}}
+	o := kicadRouteOpts{pours: "on", gndNet: "GND", powerNet: "VCC", powerLayer: -1, powerExtraLayers: []int{17}}
+	var vcc []int
+	for _, p := range kicadPourPlan(o, in) {
+		if p.Net == "VCC" {
+			vcc = append(vcc, p.Layer)
+		}
+	}
+	if len(vcc) != 2 || vcc[0] != 16 || vcc[1] != 17 {
+		t.Fatalf("VCC pours on %v, want [16 17]", vcc)
+	}
+	o.powerLayer = 0
+	for _, p := range kicadPourPlan(o, in) {
+		if p.Net == "VCC" {
+			t.Fatalf("no power pour asked for, got one on %d", p.Layer)
+		}
+	}
+}

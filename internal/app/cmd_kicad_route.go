@@ -57,6 +57,7 @@ type kicadRouteOpts struct {
 	pours, gndNet, powerNet string
 	gndLayers               []int
 	powerLayer              int
+	powerExtraLayers        []int
 	widenNets               string
 	widenMax                float64
 	optimizer               bool
@@ -219,6 +220,7 @@ Exits non-zero when any gate fails; --waivers takes signed {gate,match,reason,by
 	f.IntSliceVar(&o.gndLayers, "gnd-layers", nil, "ground pour layers, pcbpilot ids (default: 1,15,2 on 4+ layers, 1,2 on 2 layers)")
 	f.StringVar(&o.powerNet, "power-net", "", "power pour net (default: the non-ground power net with the most pads)")
 	f.IntVar(&o.powerLayer, "power-layer", -1, "power pour layer id (default 16 = In2 on 4+ layers; 0 = none)")
+	f.IntSliceVar(&o.powerExtraLayers, "power-extra-layers", nil, "more layers for the power pour, pcbpilot ids, on top of --power-layer (e.g. 17 = In3 on 6 layers)")
 	f.StringVar(&o.widenNets, "widen-net", "", "nets to widen after routing, comma-separated (see 'pcb widen')")
 	f.Float64Var(&o.widenMax, "widen-max-mil", 40, "maximum width for --widen-net and the IR closure (mil)")
 	f.BoolVar(&o.noSilkPlace, "no-silk-place", false, "do not move designators before the silkscreen gate")

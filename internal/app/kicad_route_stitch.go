@@ -526,11 +526,12 @@ func (r *kicadRun) stitchProve(board string, plan []stitch, nets []string, base 
 		}
 		good = append(good, c)
 	}
-	if away := violationsAwayFrom(fresh, plan); len(away) > 0 {
+	away := violationsAwayFrom(fresh, plan)
+	r.stitchAway = len(away)
+	if len(away) > 0 {
 		// A stitch only adds copper of its own, so these are not its doing: KiCad
 		// can report an old error against another of the same track's neighbours.
 		// The final DRC still counts them.
-		r.stitchAway = len(away)
 		fmt.Fprintf(r.stderr, "stitch: %d new DRC error(s) away from any stitch, first: %s %s\n", len(away), away[0].Rule, away[0].Message)
 	}
 	return good, reasons, nil
