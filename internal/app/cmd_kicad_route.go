@@ -58,6 +58,7 @@ type kicadRouteOpts struct {
 	gndLayers               []int
 	powerLayer              int
 	powerExtraLayers        []int
+	stitchPathMil           float64
 	widenNets               string
 	widenMax                float64
 	optimizer               bool
@@ -226,6 +227,7 @@ Exits non-zero when any gate fails; --waivers takes signed {gate,match,reason,by
 	f.BoolVar(&o.noSilkPlace, "no-silk-place", false, "do not move designators before the silkscreen gate")
 	f.StringVar(&o.silkMode, "silk", "auto", "silk placement mode: auto (defer when routing incomplete), on (always, with time budget), off (skip)")
 	f.DurationVar(&o.silkBudget, "silk-time-budget", 30*time.Minute, "maximum wall clock for silk placement (--silk=on only; 0 = unlimited)")
+	f.Float64Var(&o.stitchPathMil, "stitch-path-mil", 0, "stitch vias: search a path of up to this length (mil, on the pad's layer, full stitch width) for a poured pad no straight track can serve; 0 = off. Lengths are in summary.stitchPours: a long path can connect a decoupling capacitor without making it effective")
 	f.BoolVar(&o.pourCredit, "pour-credit", false, "route-complete may credit a connection the router left unrouted when its net is poured, the router's counters are consistent and KiCad's DRC reports 0 unconnected items (off by default: route-complete is then as strict as v0.9.0; credited connections are listed in the gate and summary.pourCredited)")
 	f.StringArrayVar(&o.requirements, "requirements", nil, "project requirement document for the design review (repeatable; required unless --no-review)")
 	f.StringVar(&o.reviewers, "reviewers", "codex,kimi,claude", "design review reviewer CLIs, comma-separated (all must pass)")

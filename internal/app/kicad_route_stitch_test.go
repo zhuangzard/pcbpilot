@@ -274,15 +274,15 @@ func TestPadsSplit(t *testing.T) {
 }
 
 func TestStitchCutters(t *testing.T) {
-	near := stitch{PadID: "near", Via: specctra.NewVia{X: 100, Y: 0}}
-	far := stitch{PadID: "far", Via: specctra.NewVia{X: 5000, Y: 0}}
+	near := stitch{PadID: "near", Via: specctra.NewVia{X: 100, Y: 0}, Track: specctra.NewTrack{X1: 100, X2: 100}}
+	far := stitch{PadID: "far", Via: specctra.NewVia{X: 5000, Y: 0}, Track: specctra.NewTrack{X1: 5000, X2: 5000}}
 	at := map[string][2]float64{"lost": {0, 0}, "away": {9000, 9000}}
-	cut := stitchCutters(map[string]bool{"lost": true}, []stitch{near, far}, at)
+	cut := stitchCutters(map[string]bool{"lost": true}, []stitch{near, far}, at, false)
 	if !cut.stitches["near"] || cut.stitches["far"] || !cut.named["lost"] {
 		t.Fatalf("%+v", cut)
 	}
 	// A lost pad with no stitch around stays unnamed: the pass fails on it.
-	cut = stitchCutters(map[string]bool{"away": true}, []stitch{near, far}, at)
+	cut = stitchCutters(map[string]bool{"away": true}, []stitch{near, far}, at, false)
 	if cut.named["away"] || len(cut.stitches) != 0 {
 		t.Fatalf("%+v", cut)
 	}
@@ -330,5 +330,78 @@ func TestPlanStitchesFarReachNeedsFullWidth(t *testing.T) {
 	}
 	if got := plan(40, 40); len(got) != 1 || got[0].Track.Width != 30 {
 		t.Fatalf("wide pad got %+v", got)
+	}
+}
+
+// A pad walled in on its layer but for one gap reaches a via site by a bent
+// path, and only when the search is on.
+func TestPlanStitchPathAroundWall(t *testing.T) {
+	p := boardPad{ID: "p", Net: "P", Layer: 1, X: 1000, Y: 1000, W: 30, H: 30}
+	open := []boardPad{p}
+	var tracks []specctra.Track
+	wall := func(x1, y1, x2, y2 float64) {
+		tracks = append(tracks, specctra.Track{Net: "S", Layer: 1, X1: x1, Y1: y1, X2: x2, Y2: y2, Width: 10})
+	}
+	// A corridor on the pad's layer, closed on the left. Inner-layer tracks
+	// leave no via site before its far end.
+	wall(960, 960, 1200, 960)
+	wall(960, 1040, 1200, 1040)
+	wall(960, 960, 960, 1040)
+	for y := 930.0; y <= 1070; y += 20 {
+		tracks = append(tracks, specctra.Track{Net: "S", Layer: 15, X1: 900, Y1: y, X2: 1190, Y2: y, Width: 10})
+	}
+	size := map[string]stitchSize{"P": {Dia: 24, Drill: 12, Track: 8}}
+	if got, none := planStitches(open, open, tracks, nil, size, 6, stitchTestBounds, map[string]bool{}); len(got) != 0 || len(none) != 1 {
+		t.Fatalf("straight search found %+v", got)
+	}
+	if got, _ := planStitchPaths(open, open, tracks, nil, size, 6, stitchTestBounds, map[string]bool{}, 50); len(got) != 0 {
+		t.Fatalf("a 50 mil search found %+v", got)
+	}
+	got, none := planStitchPaths(open, open, tracks, nil, size, 6, stitchTestBounds, map[string]bool{}, 400)
+	if len(got) != 1 || len(none) != 0 {
+		t.Fatalf("path search: %+v, none %v", got, none)
+	}
+	s := got[0]
+	if s.Via.X < 1190 || s.PathMil < 190 || s.PathMil > 400 {
+		t.Errorf("via %+v length %v", s.Via, s.PathMil)
+	}
+	all := append([]specctra.NewTrack{s.Track}, s.More...)
+	last := all[len(all)-1]
+	if s.Track.X1 != 1000 || s.Track.Y1 != 1000 || last.X2 != s.Via.X || last.Y2 != s.Via.Y || last.Width != 8 {
+		t.Errorf("track ends %+v %+v via %+v", s.Track, last, s.Via)
+	}
+	for _, n := range all {
+		for _, w := range tracks {
+			if w.Layer != 1 {
+				continue
+			}
+			if d := segSegDist(n.X1, n.Y1, n.X2, n.Y2, w.X1, w.Y1, w.X2, w.Y2) - n.Width/2 - w.Width/2; d < 6 {
+				t.Errorf("segment %+v is %.2f from %+v", n, d, w)
+			}
+		}
+	}
+	if at := stitchOps(got)["addTracks"].([]map[string]any); len(at) != len(all) {
+		t.Errorf("edit has %d tracks, the path %d", len(at), len(all))
+	}
+}
+
+// On a trial a cut plane fails only the stitch nearest the lost pad, measured to
+// its track as well as its via.
+func TestStitchCuttersNearestOnly(t *testing.T) {
+	at := map[string][2]float64{"lost": {1000, 1000}}
+	viaNear := stitch{PadID: "a", Via: specctra.NewVia{X: 1100, Y: 1000}}
+	trackNear := stitch{PadID: "b", Via: specctra.NewVia{X: 1300, Y: 1000},
+		Track: specctra.NewTrack{X1: 1000, Y1: 1020, X2: 1300, Y2: 1020}}
+	plan := []stitch{viaNear, trackNear}
+	viaNear.Track = specctra.NewTrack{X1: 1100, Y1: 1000, X2: 1100, Y2: 1000}
+	plan[0] = viaNear
+	lost := map[string]bool{"lost": true}
+	cut := stitchCutters(lost, plan, at, true)
+	if !cut.stitches["b"] || cut.stitches["a"] || !cut.named["lost"] {
+		t.Errorf("nearest only: %+v", cut)
+	}
+	cut = stitchCutters(lost, plan, at, false)
+	if !cut.stitches["a"] || !cut.stitches["b"] {
+		t.Errorf("all near: %+v", cut)
 	}
 }
