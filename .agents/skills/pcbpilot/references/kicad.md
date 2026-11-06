@@ -542,7 +542,9 @@ pcbpilot kicad route --pcb board-b-v5a.kicad_pcb --intent intent.json --sim sim.
 
    **大板配置**（`--large-board auto|on|off`，默认 auto：≥2000 连接启用，stderr 会说）：有计划铺铜的网不布，放进自己的 DSN class（同 class 的其他网照布；差分对、长度组里的网照布），1 次启动，无单步时限（`--no-time-limits`），不续跑，不带 `--diagnose`，路由器预算 60 分钟，全流程约 80 分钟。显式给的参数优先。没布的网仍计入连接数，pcbnew 判连通才算；铺铜不会把每个焊盘都接上，这时 `route-complete` 失败。无单步时限下单步可超过 15 分钟，`--max-time` 仍能打断。
 
-   **铺铜网补过孔**（`--stitch-pours auto|on|off`，默认 auto：跟大板配置走）：铺铜后，铺铜网上没接到主铜皮（有铺铜的最大焊盘组）的焊盘，加一个过孔和一段短线。先按几何找位置（不放进焊盘），填充后由 pcbnew 和 DRC 证明：焊盘接上了、没有新错误、原来在一起的焊盘没被分开，否则撤掉。连通组电流超过单过孔限值或没有仿真电流的拒绝。结果在 `summary.stitchPours`。一块铺铜被切成两半但焊盘仍有走线相连时看不出来，靠后仿真。大板上约多 15～20 分钟。
+   **铺铜网补过孔**（`--stitch-pours auto|on|off`，默认 auto：跟大板配置走）：铺铜后，铺铜网上没接到主铜皮（有铺铜的最大焊盘组）的焊盘，加一个过孔和一段短线。先按几何找位置（不放进焊盘），填充后由 pcbnew 和 DRC 证明：焊盘接上了、没有新错误、原来在一起的焊盘没被分开，否则撤掉。连通组电流超过单过孔限值或没有仿真电流的拒绝。结果在 `summary.stitchPours`。一块铺铜被切成两半但焊盘仍有走线相连时看不出来，靠后仿真。大板上约多 15～20 分钟。`--stitch-path-mil N`（默认 0 = 关，上限 2000）：直线找不到位置的焊盘，在焊盘所在层用满宽走线绕一条不超过 N mil 的路到过孔位；长度记在 `summary.stitchPours`（`pathStitches`、`longestPathMil`）。路径长的去耦电容可能接上了但效果差，要看长度。
+   **补布信号线**（`--finish-signals`，默认关）：铺铜后、补过孔前，布线器没连通的信号网（铜皮分成几组）由 pcbpilot 自己的多层网格搜索（5 mil、通孔）一组一组接起来，只加线和过孔，不动布线器的铜。差分对、阻抗线、等长组、过孔数受限和接口网不碰。`--finish-pour-layers escape|on|off`（默认 escape：铺铜层只在所连焊盘 150 mil 内可用；on：任何地方，代价加倍）。每次都填充后证明：两组在 pcbnew 里合并了、它附近没有新的 DRC 或绝缘错误、没有焊盘离开原来的组，否则撤掉；离所有补线都远、又不是纯几何规则（间距、钻孔、板边、阻焊桥）的新错误让整轮作废。结果在 `summary.finishSignals`（每条的长度、过孔、层，失败原因计数）。KiCad 报 0 个未连接时，`route-complete` 才把补布连上的网上路由器的未布通连接算作已布（`FINISH-CREDITED`）。
+   **布线前绝缘检查**：开始布线前对输入板跑一次绝缘检查（`summary.preRouteIsolation`），报出已摆放器件之间的问题（含固定器件），布线改不了的问题一开始就说；不因此失败，最后仍由绝缘门禁判定。
    **真实未连接数**：kicad-cli 的 DRC 报告列到 499 个未连接项为止，看 `summary.boardConnectivity`（pcbnew 的数，`drcTruncated` 表示 DRC 列表被截断）；`route-complete` 只要 pcbnew 数出开路就失败。实验用：`--no-router-diagnose`、`--router-arg`（拒绝 pcbpilot 自己管的参数）。
    门禁与签核只读路由器无关的 `routeResult`（router、version、patchSha、args、session|board、unrouted/blocked 连接、
    violations、fixable；`summary.routeResult`），fastroute 是目前唯一实现。
