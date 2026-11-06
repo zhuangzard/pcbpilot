@@ -324,8 +324,10 @@ func (f *finisher) layerOK(l int, q [2]float64, ends []boardPad) bool {
 	case "off":
 		return false
 	}
+	// Half a sample short of the limit: segAllowed samples every grid step and
+	// the distance to a pad changes by at most the distance moved.
 	for _, p := range ends {
-		if rectPtDist(p.X-p.W/2, p.Y-p.H/2, p.X+p.W/2, p.Y+p.H/2, q[0], q[1]) <= finishEscapeMil {
+		if rectPtDist(p.X-p.W/2, p.Y-p.H/2, p.X+p.W/2, p.Y+p.H/2, q[0], q[1]) <= finishEscapeMil-finishStepMil/2 {
 			return true
 		}
 	}
@@ -875,7 +877,15 @@ func (f *finisher) plan(nets []string, groups map[string][]kicad.PadGroup, padBy
 			fails[key] = why
 			continue
 		}
-		j, ok := f.joinOf(c.net, sz, path, ends)
+		// The escape allowance belongs to the two groups joined: the path is
+		// rebuilt and checked against their pads alone.
+		joined := append([]boardPad(nil), srcPads...)
+		for k := range st.comps {
+			if find(k) == find(tag) {
+				joined = append(joined, st.comps[k].pads...)
+			}
+		}
+		j, ok := f.joinOf(c.net, sz, path, joined)
 		if !ok {
 			fails[key] = "path failed the exact clearance check"
 			continue
@@ -971,6 +981,21 @@ func (r *kicadRun) finishSignals(board string, pours []kicad.Pour) (string, erro
 	for _, p := range pours {
 		poured[p.Net] = true
 		pourLayer[p.Layer] = true
+	}
+	s0, _, err := r.snapshot(board)
+	if err != nil || s0.Copper == nil {
+		cannot(fmt.Sprintf("board snapshot: %v", err))
+		return board, nil
+	}
+	for _, z := range s0.Copper.Pours { // zones already on the board count too
+		if m, ok := z.(map[string]any); ok {
+			if n, _ := m["net"].(string); n != "" {
+				poured[n] = true
+				if l, ok := m["layer"].(float64); ok {
+					pourLayer[int(l)] = true
+				}
+			}
+		}
 	}
 	const nmPerMil = 25400.0
 	size := map[string]finishSize{}
@@ -1184,9 +1209,16 @@ type finishErr struct {
 	what string
 	at   [][2]float64
 	nets []string
+	// copperOnly: every item is a track, via or pad (no zone): with none of
+	// them a join's net, none is the join's copper, and their geometry did
+	// not change.
+	copperOnly bool
 }
 
-var reItemNet = regexp.MustCompile(`\[([^\]]+)\]`)
+var (
+	reItemNet    = regexp.MustCompile(`\[([^\]]+)\]`)
+	reCopperItem = regexp.MustCompile(`^(Track|Via|Arc|(PTH |SMD |NPTH )?[Pp]ad) `)
+)
 
 // finishProve checks a filled board (finishJudge decides).
 func (r *kicadRun) finishProve(board string, plan []finishJoin, nets []string, base *kicad.DRCReport, before map[string][]kicad.PadGroup, isoBase []pcbauto.IsoFinding, isoOf func([]byte) ([]pcbauto.IsoFinding, error), pass int) ([]finishJoin, map[string]string, []string, error) {
@@ -1208,12 +1240,15 @@ func (r *kicadRun) finishProve(board string, plan []finishJoin, nets []string, b
 	}
 	var errs []finishErr
 	for _, v := range newViolations(base, rep) {
-		e := finishErr{what: "new DRC " + v.Rule}
+		e := finishErr{what: "new DRC " + v.Rule, copperOnly: len(v.Items) > 0}
 		if v.Net != "" {
 			e.nets = append(e.nets, v.Net)
 		}
 		for _, it := range v.Items {
 			e.at = append(e.at, [2]float64{it.X, it.Y})
+			if !reCopperItem.MatchString(it.Description) {
+				e.copperOnly = false
+			}
 			for _, m := range reItemNet.FindAllStringSubmatch(it.Description, -1) {
 				e.nets = append(e.nets, m[1])
 			}
@@ -1240,7 +1275,7 @@ func (r *kicadRun) finishProve(board string, plan []finishJoin, nets []string, b
 // multiset of exact fingerprints (kind, items, nets, layer, position).
 func newIsoFindings(base, cur []pcbauto.IsoFinding) []pcbauto.IsoFinding {
 	key := func(f pcbauto.IsoFinding) string {
-		return fmt.Sprintf("%s|%s|%s|%s|%s|%d|%.1f|%.1f", f.Kind, f.ItemA, f.ItemB, f.NetA, f.NetB, f.Layer, f.At.X, f.At.Y)
+		return fmt.Sprintf("%s|%s|%s|%s|%s|%d|%g|%g|%g|%g|%g", f.Kind, f.ItemA, f.ItemB, f.NetA, f.NetB, f.Layer, f.At.X, f.At.Y, f.GapMil, f.PathMil, f.RequiredMil)
 	}
 	seen := map[string]int{}
 	for _, f := range base {
@@ -1260,9 +1295,11 @@ func newIsoFindings(base, cur []pcbauto.IsoFinding) []pcbauto.IsoFinding {
 // finishJudge decides which joins hold: each must have merged its own two
 // groups. A new error belongs to the join within finishNearMil of it, else to
 // the nearest join of a net its items name, else to a join within
-// finishFarMil; an error none of these reach is returned as away (refill can
-// move an old error onto another item). A pad cut off its group fails the
-// nearest join within stitchCutMil; with none, the pass fails ("board").
+// finishFarMil. One none of these reach is returned as away; it fails the
+// pass ("board") unless it lies between other nets' tracks, vias and pads
+// alone, which no added copper changes (KiCad reports an old error again). A
+// pad cut off its group fails the nearest join within stitchCutMil; with none,
+// the pass fails.
 func finishJudge(plan []finishJoin, before, after map[string][]kicad.PadGroup, errs []finishErr, padAt map[string][2]float64) ([]finishJoin, map[string]string, []string) {
 	reasons := map[string]string{}
 	bad := map[int]string{}
@@ -1317,6 +1354,9 @@ func finishJudge(plan []finishJoin, before, after map[string][]kicad.PadGroup, e
 			}
 		}
 		if k < 0 {
+			if !e.copperOnly {
+				reasons["board"] = e.what + " near no join"
+			}
 			away = append(away, e.what)
 			continue
 		}

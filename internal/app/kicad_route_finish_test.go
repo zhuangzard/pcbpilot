@@ -207,3 +207,42 @@ func TestNewIsoFindings(t *testing.T) {
 		t.Errorf("duplicate %v", n)
 	}
 }
+
+// An error near no join fails the pass unless it lies between other nets'
+// tracks, vias and pads alone.
+func TestFinishJudgeAway(t *testing.T) {
+	j := finishJoin{Net: "A", Pads: []string{"a1"}, To: []string{"a2"}, Tracks: []specctra.NewTrack{{Net: "A", Layer: 18, X1: 0, Y1: 0, X2: 1000, Y2: 0}}}
+	after := map[string][]kicad.PadGroup{"A": {{Pads: []string{"a1", "a2"}}}}
+	far := [][2]float64{{20000, 20000}}
+	good, reasons, away := finishJudge([]finishJoin{j}, after, after, []finishErr{{what: "new DRC clearance", at: far, nets: []string{"X", "Y"}, copperOnly: true}}, nil)
+	if len(good) != 1 || len(reasons) != 0 || len(away) != 1 {
+		t.Errorf("copper only: good %v reasons %v away %v", good, reasons, away)
+	}
+	_, reasons, _ = finishJudge([]finishJoin{j}, after, after, []finishErr{{what: "new DRC clearance", at: far, nets: []string{"GND"}}}, nil)
+	if reasons["board"] == "" {
+		t.Errorf("zone error: %v", reasons)
+	}
+	_, reasons, _ = finishJudge([]finishJoin{j}, after, after, []finishErr{{what: "new iso-clearance", at: far, nets: []string{"GND", "CHASSIS"}}}, nil)
+	if reasons["board"] == "" {
+		t.Errorf("insulation: %v", reasons)
+	}
+}
+
+// Findings a fraction of a mil apart are still two findings.
+func TestNewIsoFindingsExact(t *testing.T) {
+	f := pcbauto.IsoFinding{Kind: "iso-clearance", ItemA: "J1.3", ItemB: "H1.1", At: pcbauto.Point{X: 1, Y: 2}, GapMil: 300}
+	g := f
+	g.At.X = 1.04
+	if n := newIsoFindings([]pcbauto.IsoFinding{f}, []pcbauto.IsoFinding{f, g}); len(n) != 1 {
+		t.Errorf("new %v", n)
+	}
+}
+
+// A copper-only item list is told from one with a zone.
+func TestCopperItem(t *testing.T) {
+	for d, want := range map[string]bool{"Track [A] on In2.Cu, length 1 mm": true, "Via [A] on F.Cu - B.Cu": true, "SMD pad 1 [A] of C1": true, "PTH pad 2 [A] of J1": true, "Zone [GND] on F.Cu": false, "Footprint C1": false} {
+		if reCopperItem.MatchString(d) != want {
+			t.Errorf("%q", d)
+		}
+	}
+}

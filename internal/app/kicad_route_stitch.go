@@ -127,6 +127,7 @@ func planStitchPaths(open, pads []boardPad, tracks []specctra.Track, vias []wide
 	}
 	// A searched path keeps the full stitch width, and sees only the copper
 	// within its reach: the search asks thousands of times per pad.
+	pathLeft := stitchPathPassNodes
 	pathStitch := func(p boardPad, layer int, from [2]float64, sz stitchSize) *stitch {
 		allCu, allPads := cu, pads
 		defer func() { cu, pads = allCu, allPads }()
@@ -144,12 +145,12 @@ func planStitchPaths(open, pads []boardPad, tracks []specctra.Track, vias []wide
 		}
 		half := sz.Track / 2
 		var site string
-		pts := stitchPathSearch(from, pathMil, func(a, b [2]float64) bool {
+		pts := stitchPathSearchBudget(from, pathMil, func(a, b [2]float64) bool {
 			return trackFits(p, layer, a, b, half)
 		}, func(q [2]float64) bool {
 			site = fmt.Sprintf("%s@%.2f,%.2f", p.ID, q[0], q[1])
 			return !tried[site] && viaFits(p.Net, q, sz.Dia)
-		})
+		}, &pathLeft)
 		if len(pts) < 2 {
 			return nil
 		}

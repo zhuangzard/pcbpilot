@@ -15,6 +15,8 @@ const (
 	// stitchPathNodes caps one search: a 400 mil reach is about 20000 grid
 	// points, so this only stops a search a far larger --stitch-path-mil set.
 	stitchPathNodes = 200000
+	// stitchPathPassNodes caps all the searches of one planning pass.
+	stitchPathPassNodes = 5000000
 	// stitchPathMaxMil is the largest --stitch-path-mil accepted.
 	stitchPathMaxMil = 2000.0
 )
@@ -41,6 +43,12 @@ func (q *stitchQueue) Pop() any {
 // point goal accepts, no longer than maxLen, nil if there is none. segOK judges
 // one straight piece of track.
 func stitchPathSearch(from [2]float64, maxLen float64, segOK func(a, b [2]float64) bool, goal func([2]float64) bool) [][2]float64 {
+	left := stitchPathNodes
+	return stitchPathSearchBudget(from, maxLen, segOK, goal, &left)
+}
+
+// stitchPathSearchBudget is stitchPathSearch drawing its expansions from left.
+func stitchPathSearchBudget(from [2]float64, maxLen float64, segOK func(a, b [2]float64) bool, goal func([2]float64) bool, left *int) [][2]float64 {
 	type key struct{ x, y int }
 	at := func(k key) [2]float64 {
 		return [2]float64{math.Round((from[0]+float64(k.x)*stitchPathStepMil)*100) / 100, math.Round((from[1]+float64(k.y)*stitchPathStepMil)*100) / 100}
@@ -48,7 +56,8 @@ func stitchPathSearch(from [2]float64, maxLen float64, segOK func(a, b [2]float6
 	best := map[key]float64{{}: 0}
 	came := map[key]key{}
 	q := &stitchQueue{{}}
-	for expanded := 0; q.Len() > 0 && expanded < stitchPathNodes; expanded++ {
+	for expanded := 0; q.Len() > 0 && expanded < stitchPathNodes && *left > 0; expanded++ {
+		*left--
 		n := heap.Pop(q).(stitchNode)
 		k := key{n.x, n.y}
 		if n.cost > best[k] {
