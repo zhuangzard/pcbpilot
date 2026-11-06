@@ -254,8 +254,10 @@ const noReviewMatch = "--no-review"
 
 // kicadRun is one kicad route execution.
 type kicadRun struct {
-	stitchAway int            // new DRC errors near no stitch, in the last stitch check
-	viaProv    *viaProvenance // which via came from where (kicad_route_via_audit.go)
+	stitchAway int // new DRC errors near no stitch, in the last stitch check
+	// finishedNets: nets --finish-signals joined (route-complete may credit them).
+	finishedNets map[string]bool
+	viaProv      *viaProvenance // which via came from where (kicad_route_via_audit.go)
 	// silkAutoDeferred: why --silk=auto did not place this board's labels; its
 	// silkscreen gate is then not satisfied, whatever the labels look like.
 	silkAutoDeferred string
@@ -1602,7 +1604,7 @@ func (r *kicadRun) qualityGates(board string) (bool, error) {
 	} else {
 		delete(r.summary, "simKicadMismatch")
 	}
-	rc := kicadRouteCompleteGate(r.route, drcRep, snap, o.pourCredit)
+	rc := kicadRouteCompleteGateJoined(r.route, drcRep, snap, o.pourCredit, r.finishedNets)
 	r.boardConnectivityGate(&rc)
 	if rc.Pass && len(rc.Info) > 0 {
 		r.summary["pourCredited"] = rc.Info // shown by the design report next to the gate
@@ -1861,6 +1863,13 @@ func boardConnectivityEntry(unconnected int, drc *kicad.DRCReport) map[string]an
 // (Board-B V5 A: GND C2.2–U8.115, a fine-pitch ground pin, joined by the TOP GND
 // pour). Every credited connection is listed in the gate's Info.
 func kicadRouteCompleteGate(run *routeResult, drc *kicad.DRCReport, snap *boardSnapshot, pourCredit bool) gateResult {
+	return kicadRouteCompleteGateJoined(run, drc, snap, pourCredit, nil)
+}
+
+// kicadRouteCompleteGateJoined is kicadRouteCompleteGate that may also credit
+// a connection on a net --finish-signals joined, on the same terms: KiCad
+// reports 0 unconnected items and the router's counters are consistent.
+func kicadRouteCompleteGateJoined(run *routeResult, drc *kicad.DRCReport, snap *boardSnapshot, pourCredit bool, joined map[string]bool) gateResult {
 	g := routeCompleteGate(run)
 	if run != nil && drc != nil && drc.Counts["unconnected_items"] > 0 && g.Pass {
 		g.Pass = false
@@ -1868,7 +1877,7 @@ func kicadRouteCompleteGate(run *routeResult, drc *kicad.DRCReport, snap *boardS
 		g.Items = append(g.Items, fmt.Sprintf("KiCad connectivity disagrees with the router: %d unconnected item(s)", drc.Counts["unconnected_items"]))
 		return g
 	}
-	if !pourCredit || g.Pass || run == nil || run.Fixable != 0 || run.BelowMinWidthNets != 0 || run.UnroutedCount <= 0 || len(run.Unrouted) != run.UnroutedCount ||
+	if !pourCredit && len(joined) == 0 || g.Pass || run == nil || run.Fixable != 0 || run.BelowMinWidthNets != 0 || run.UnroutedCount <= 0 || len(run.Unrouted) != run.UnroutedCount ||
 		drc == nil || drc.Counts["unconnected_items"] != 0 || snap == nil || snap.Copper == nil {
 		return g
 	}
@@ -1879,15 +1888,26 @@ func kicadRouteCompleteGate(run *routeResult, drc *kicad.DRCReport, snap *boardS
 		}
 	}
 	var items []string
+	finished := 0
 	for _, u := range run.Unrouted {
-		if !poured[strings.ToUpper(u.Net)] {
+		switch {
+		case pourCredit && poured[strings.ToUpper(u.Net)]:
+			items = append(items, fmt.Sprintf("POUR-CREDITED %s: unrouted by %s, joined by the %s pour (KiCad DRC: 0 unconnected items)", u, run.Router, u.Net))
+		case joined[u.Net]:
+			finished++
+			items = append(items, fmt.Sprintf("FINISH-CREDITED %s: unrouted by %s, joined by --finish-signals, each join proven (KiCad DRC: 0 unconnected items)", u, run.Router))
+		default:
 			return g
 		}
-		items = append(items, fmt.Sprintf("POUR-CREDITED %s: unrouted by %s, joined by the %s pour (KiCad DRC: 0 unconnected items)", u, run.Router, u.Net))
 	}
 	g.Pass, g.Items = true, nil
 	g.Info = items
-	g.Detail += fmt.Sprintf("; %d unrouted connection(s) credited to a pour: every one is on a poured net and KiCad reports 0 unconnected items", len(items))
+	if finished < len(items) {
+		g.Detail += fmt.Sprintf("; %d unrouted connection(s) credited to a pour: every one is on a poured net and KiCad reports 0 unconnected items", len(items)-finished)
+	}
+	if finished > 0 {
+		g.Detail += fmt.Sprintf("; %d unrouted connection(s) credited to --finish-signals joins: KiCad reports 0 unconnected items", finished)
+	}
 	return g
 }
 

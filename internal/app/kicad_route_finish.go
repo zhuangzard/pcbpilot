@@ -1189,7 +1189,9 @@ func (r *kicadRun) finishSignals(board string, pours []kicad.Pour) (string, erro
 	var length float64
 	vias := 0
 	byLayer := map[int]float64{}
+	r.finishedNets = map[string]bool{}
 	for _, j := range kept {
+		r.finishedNets[j.Net] = true
 		length += j.LengthMil
 		vias += len(j.Vias)
 		for _, t := range j.Tracks {
@@ -1214,6 +1216,10 @@ type finishErr struct {
 	// not change.
 	copperOnly bool
 }
+
+// finishGeomRules are the DRC rules whose result between two tracks, vias or
+// pads depends on their geometry alone.
+var finishGeomRules = map[string]bool{"clearance": true, "hole_clearance": true, "hole_to_hole": true, "copper_edge_clearance": true, "solder_mask_bridge": true}
 
 var (
 	reItemNet    = regexp.MustCompile(`\[([^\]]+)\]`)
@@ -1240,7 +1246,8 @@ func (r *kicadRun) finishProve(board string, plan []finishJoin, nets []string, b
 	}
 	var errs []finishErr
 	for _, v := range newViolations(base, rep) {
-		e := finishErr{what: "new DRC " + v.Rule, copperOnly: len(v.Items) > 0}
+		// Only rules of fixed geometry: a refill can change what is connected.
+		e := finishErr{what: "new DRC " + v.Rule, copperOnly: len(v.Items) > 0 && finishGeomRules[v.Rule]}
 		if v.Net != "" {
 			e.nets = append(e.nets, v.Net)
 		}

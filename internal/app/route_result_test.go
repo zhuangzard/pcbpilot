@@ -132,3 +132,20 @@ func TestTracemakerReportConsistency(t *testing.T) {
 		t.Fatalf("result %+v", res)
 	}
 }
+
+// A connection the router left unrouted on a net --finish-signals joined is
+// credited only when KiCad reports nothing unconnected.
+func TestKicadRouteCompleteFinishCredit(t *testing.T) {
+	run := &routeResult{Router: "fastroute", UnroutedCount: 1, Unrouted: []routeConn{{Net: "SIG", From: "U1.1", To: "U2.1"}}}
+	clean := &kicad.DRCReport{Counts: map[string]int{}}
+	snap := &boardSnapshot{Copper: &boardCopperSnapshot{}}
+	if g := kicadRouteCompleteGateJoined(run, clean, snap, false, map[string]bool{"SIG": true}); !g.Pass || !strings.Contains(g.Info[0], "FINISH-CREDITED") {
+		t.Errorf("joined: %+v", g)
+	}
+	if g := kicadRouteCompleteGateJoined(run, clean, snap, false, map[string]bool{"OTHER": true}); g.Pass {
+		t.Error("another net credited")
+	}
+	if g := kicadRouteCompleteGateJoined(run, &kicad.DRCReport{Counts: map[string]int{"unconnected_items": 1}}, snap, false, map[string]bool{"SIG": true}); g.Pass {
+		t.Error("credited with KiCad reporting an open")
+	}
+}
