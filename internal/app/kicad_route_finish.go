@@ -34,8 +34,8 @@ const (
 	// length if both ends clear by half the longest step more (distance is
 	// 1-Lipschitz).
 	finishSlack      = finishStepMil * math.Sqrt2 / 2
-	finishJoinNodes  = 600000   // expansions one join may use
-	finishTotalNodes = 40000000 // and all joins together
+	finishJoinNodes  = 2000000   // expansions one join may use
+	finishTotalNodes = 150000000 // and all joins together (about 4 min per 40 M)
 	finishMaxPasses  = 2
 	finishNearMil    = 30.0  // a new DRC or insulation error this close is the join's
 	finishFarMil     = 200.0 // and this close when its items name no join's net
