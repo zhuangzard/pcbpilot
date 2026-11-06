@@ -59,6 +59,8 @@ type kicadRouteOpts struct {
 	powerLayer              int
 	powerExtraLayers        []int
 	stitchPathMil           float64
+	finishSignals           bool
+	finishPourLayers        string
 	widenNets               string
 	widenMax                float64
 	optimizer               bool
@@ -136,6 +138,9 @@ Exits non-zero when any gate fails; --waivers takes signed {gate,match,reason,by
 			o.maxTimeSet, o.routerTimeoutSet = cmd.Flags().Changed("max-time"), cmd.Flags().Changed("router-timeout")
 			if o.maxTimeSet && o.fo.maxTime < 0 {
 				return fmt.Errorf("--max-time must be >= 0 (0 = no fastroute time limit)")
+			}
+			if o.finishPourLayers != "escape" && o.finishPourLayers != "on" && o.finishPourLayers != "off" {
+				return fmt.Errorf("--finish-pour-layers must be escape, on or off")
 			}
 			if o.stitchPours != "auto" && o.stitchPours != "on" && o.stitchPours != "off" {
 				return fmt.Errorf("--stitch-pours must be auto, on or off")
@@ -228,6 +233,8 @@ Exits non-zero when any gate fails; --waivers takes signed {gate,match,reason,by
 	f.StringVar(&o.silkMode, "silk", "auto", "silk placement mode: auto (defer when routing incomplete), on (always, with time budget), off (skip)")
 	f.DurationVar(&o.silkBudget, "silk-time-budget", 30*time.Minute, "maximum wall clock for silk placement (--silk=on only; 0 = unlimited)")
 	f.Float64Var(&o.stitchPathMil, "stitch-path-mil", 0, "stitch vias: search a path of up to this length (mil, on the pad's layer, full stitch width) for a poured pad no straight track can serve; 0 = off. Lengths are in summary.stitchPours: a long path can connect a decoupling capacitor without making it effective")
+	f.BoolVar(&o.finishSignals, "finish-signals", false, "after the pours, join the signal nets the router left in pieces with pcbpilot's own grid search (tracks and through vias added, router copper untouched; differential pairs, impedance, length-matched and interface nets excluded); every join is proven by refill, KiCad DRC, connectivity and the insulation check, and the rest is reported in summary.finishSignals")
+	f.StringVar(&o.finishPourLayers, "finish-pour-layers", "escape", "where --finish-signals may use a poured layer: escape (within 150 mil of a pad it joins) | on (anywhere, at twice the cost) | off")
 	f.BoolVar(&o.pourCredit, "pour-credit", false, "route-complete may credit a connection the router left unrouted when its net is poured, the router's counters are consistent and KiCad's DRC reports 0 unconnected items (off by default: route-complete is then as strict as v0.9.0; credited connections are listed in the gate and summary.pourCredited)")
 	f.StringArrayVar(&o.requirements, "requirements", nil, "project requirement document for the design review (repeatable; required unless --no-review)")
 	f.StringVar(&o.reviewers, "reviewers", "codex,kimi,claude", "design review reviewer CLIs, comma-separated (all must pass)")
@@ -581,6 +588,7 @@ func (r *kicadRun) run() error {
 		r.summary["inputDrc"] = map[string]any{"error": err.Error()}
 		fmt.Fprintf(r.stderr, "input board DRC (before routing) could not be checked: %v\n", err)
 	}
+	r.preRouteIsolation()
 
 	r.lap("input DRC")
 	// 2. Pre-route gate: intent + insulation → netclasses (+ .kicad_dru).
@@ -811,6 +819,12 @@ func (r *kicadRun) postRoute(board string, inSnap *boardSnapshot) (string, bool,
 			}
 		}
 	}
+	if o.finishSignals {
+		if board, err = r.finishSignals(board, kicadPourPlan(o, inSnap)); err != nil {
+			return board, false, err
+		}
+		r.lap("finish signals")
+	}
 	if nets := r.stitchNets(kicadPourPlan(o, inSnap)); len(nets) > 0 {
 		if board, err = r.stitchPours(board, nets); err != nil {
 			return board, false, err
@@ -1036,6 +1050,41 @@ func copperOf(s *boardSnapshot) ([]specctra.Track, []widenVia, []boardPad, error
 		pads = append(pads, c.Pads...)
 	}
 	return tracks, vias, pads, nil
+}
+
+// preRouteIsolation runs the insulation check on the input board, before any
+// routing: what it finds lies between parts as placed (fixed ones included),
+// which no routing fixes, so it is said at the start instead of hours later.
+// The isolation gate still judges the routed board; nothing fails here.
+func (r *kicadRun) preRouteIsolation() {
+	if len(r.in.Pairs) == 0 || r.inRaw == nil {
+		return
+	}
+	raw, err := os.ReadFile(r.o.intent)
+	var in *pcbauto.Intent
+	if err == nil {
+		in, err = pcbauto.ParseIntent(raw)
+	}
+	var chk *pcbauto.IsolationCheck
+	if err == nil {
+		chk, err = pcbauto.CheckIsolationSnapshot(r.inRaw, in)
+	}
+	if err != nil {
+		r.summary["preRouteIsolation"] = map[string]any{"error": err.Error()}
+		fmt.Fprintf(r.stderr, "pre-route insulation check could not run: %v\n", err)
+		return
+	}
+	var msgs []string
+	for _, f := range chk.Findings {
+		msgs = append(msgs, f.Message)
+	}
+	for _, f := range chk.Infeasible {
+		msgs = append(msgs, "INFEASIBLE: "+f.Reason)
+	}
+	r.summary["preRouteIsolation"] = map[string]any{"errors": len(msgs), "findings": msgs}
+	if len(msgs) > 0 {
+		fmt.Fprintf(r.stderr, "pre-route insulation: %d error(s) on the input board, before routing: routing cannot fix them, move a part or mill a slot. First: %s\n", len(msgs), msgs[0])
+	}
 }
 
 func clearanceOf(s *boardSnapshot) float64 {
