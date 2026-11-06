@@ -236,8 +236,8 @@ Exits non-zero when any gate fails; --waivers takes signed {gate,match,reason,by
 	f.StringVar(&o.silkMode, "silk", "auto", "silk placement mode: auto (defer when routing incomplete), on (always, with time budget), off (skip)")
 	f.DurationVar(&o.silkBudget, "silk-time-budget", 30*time.Minute, "maximum wall clock for silk placement (--silk=on only; 0 = unlimited)")
 	f.Float64Var(&o.stitchPathMil, "stitch-path-mil", 0, "stitch vias: search a path of up to this length (mil, on the pad's layer, full stitch width) for a poured pad no straight track can serve; 0 = off. Lengths are in summary.stitchPours: a long path can connect a decoupling capacitor without making it effective")
-	f.BoolVar(&o.finishSignals, "finish-signals", false, "after the pours, join the signal nets the router left in pieces with pcbpilot's own grid search (tracks and through vias added, router copper untouched; differential pairs, impedance, length-matched and interface nets excluded); every join is proven by refill, KiCad DRC, connectivity and the insulation check, and the rest is reported in summary.finishSignals")
-	f.StringVar(&o.finishPourLayers, "finish-pour-layers", "escape", "where --finish-signals may use a poured layer: escape (within 150 mil of a pad it joins) | on (anywhere, at twice the cost) | off")
+	f.BoolVar(&o.finishSignals, "finish-signals", false, "after the pours and stitch vias, join the signal nets the router left in pieces with pcbpilot's own grid search (tracks and through vias added, router copper untouched; differential pairs, impedance, length-matched and interface nets excluded); every join is proven by refill, KiCad DRC, connectivity and the insulation check, and the rest is reported in summary.finishSignals")
+	f.StringVar(&o.finishPourLayers, "finish-pour-layers", "on", "where --finish-signals may use a poured layer: escape (within 150 mil of a pad it joins) | on (anywhere, at twice the cost) | off")
 	f.BoolVar(&o.pourCredit, "pour-credit", false, "route-complete may credit a connection the router left unrouted when its net is poured, the router's counters are consistent and KiCad's DRC reports 0 unconnected items (off by default: route-complete is then as strict as v0.9.0; credited connections are listed in the gate and summary.pourCredited)")
 	f.StringArrayVar(&o.requirements, "requirements", nil, "project requirement document for the design review (repeatable; required unless --no-review)")
 	f.StringVar(&o.reviewers, "reviewers", "codex,kimi,claude", "design review reviewer CLIs, comma-separated (all must pass)")
@@ -824,17 +824,19 @@ func (r *kicadRun) postRoute(board string, inSnap *boardSnapshot) (string, bool,
 			}
 		}
 	}
-	if o.finishSignals {
-		if board, err = r.finishSignals(board, kicadPourPlan(o, inSnap)); err != nil {
-			return board, false, err
-		}
-		r.lap("finish signals")
-	}
 	if nets := r.stitchNets(kicadPourPlan(o, inSnap)); len(nets) > 0 {
 		if board, err = r.stitchPours(board, nets); err != nil {
 			return board, false, err
 		}
 		r.lap("stitch vias")
+	}
+	// Signals are finished after the stitch: its vias are on the board first,
+	// and the finisher's proof keeps every pad they joined to its pour.
+	if o.finishSignals {
+		if board, err = r.finishSignals(board, kicadPourPlan(o, inSnap)); err != nil {
+			return board, false, err
+		}
+		r.lap("finish signals")
 	}
 	r.lap("pours + zone fill + thermals")
 	if o.widenNets != "" {
