@@ -37,8 +37,11 @@ const (
 	finishJoinNodes  = 2000000   // expansions one join may use
 	finishTotalNodes = 150000000 // and all joins together (about 4 min per 40 M)
 	finishMaxPasses  = 2
-	finishNearMil    = 30.0  // a new DRC or insulation error this close is the join's
-	finishFarMil     = 200.0 // and this close when its items name no join's net
+	// finishMaxRounds: edits to settle one pass. Dropping a join can expose
+	// another's error, and a large pass sheds a few per round.
+	finishMaxRounds = 6
+	finishNearMil   = 30.0  // a new DRC or insulation error this close is the join's
+	finishFarMil    = 200.0 // and this close when its items name no join's net
 )
 
 // finishSize is the track, via and clearance a net's joins use (mil).
@@ -1156,7 +1159,7 @@ func (r *kicadRun) finishSignals(board string, pours []kicad.Pour) (string, erro
 		good := plan
 		next := ""
 		settled := false
-		for round := 0; round < stitchMaxRounds && len(good) > 0; round++ {
+		for round := 0; round < finishMaxRounds && len(good) > 0; round++ {
 			next = r.next("finish")
 			if _, err := r.kt.Edit(cur, finishOps(good), next); err != nil {
 				cannot("finish edit: " + err.Error())
