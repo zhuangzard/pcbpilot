@@ -354,10 +354,10 @@ func TestPlanStitchPathAroundWall(t *testing.T) {
 	if got, none := planStitches(open, open, tracks, nil, size, 6, stitchTestBounds, map[string]bool{}); len(got) != 0 || len(none) != 1 {
 		t.Fatalf("straight search found %+v", got)
 	}
-	if got, _ := planStitchPaths(open, open, tracks, nil, size, 6, stitchTestBounds, map[string]bool{}, 50); len(got) != 0 {
+	if got, _ := planStitchPaths(open, open, tracks, nil, size, 6, stitchTestBounds, map[string]bool{}, 50, nil); len(got) != 0 {
 		t.Fatalf("a 50 mil search found %+v", got)
 	}
-	got, none := planStitchPaths(open, open, tracks, nil, size, 6, stitchTestBounds, map[string]bool{}, 400)
+	got, none := planStitchPaths(open, open, tracks, nil, size, 6, stitchTestBounds, map[string]bool{}, 400, nil)
 	if len(got) != 1 || len(none) != 0 {
 		t.Fatalf("path search: %+v, none %v", got, none)
 	}
@@ -403,5 +403,25 @@ func TestStitchCuttersNearestOnly(t *testing.T) {
 	cut = stitchCutters(lost, plan, at, false)
 	if !cut.stitches["a"] || !cut.stitches["b"] {
 		t.Errorf("all near: %+v", cut)
+	}
+}
+
+// With fills known, a site must lie wholly inside one of its net's: here the
+// only fill sits far from the pad, so the near site is refused.
+func TestPlanStitchInPour(t *testing.T) {
+	p := boardPad{ID: "p", Net: "P", Layer: 1, X: 1000, Y: 1000, W: 30, H: 30}
+	size := map[string]stitchSize{"P": {Dia: 24, Drill: 12, Track: 8}}
+	fill := pcbCopperArea{Net: "P", Layer: 16, Contours: [][][2]float64{{{2000, 2000}, {3000, 2000}, {3000, 3000}, {2000, 3000}}}}
+	inPour := func(net string, q [2]float64, dia float64) bool {
+		return net == fill.Net && compoundWinding(fill.Contours, q) != 0 && stitchFillMargin(fill, q) >= dia/2
+	}
+	if got, none := planStitchPaths([]boardPad{p}, []boardPad{p}, nil, nil, size, 6, stitchTestBounds, map[string]bool{}, 0, nil); len(got) != 1 || len(none) != 0 {
+		t.Fatalf("no fill check: %+v", got)
+	}
+	if got, none := planStitchPaths([]boardPad{p}, []boardPad{p}, nil, nil, size, 6, stitchTestBounds, map[string]bool{}, 0, inPour); len(got) != 0 || len(none) != 1 {
+		t.Fatalf("fill check: %+v", got)
+	}
+	if !inPour("P", [2]float64{2500, 2500}, 24) || inPour("P", [2]float64{2005, 2500}, 24) {
+		t.Error("margin")
 	}
 }

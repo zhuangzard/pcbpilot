@@ -62,12 +62,13 @@ type stitch struct {
 // planned stitch clear of the ones before it. A pad with no site comes back in
 // the second list. tried holds sites an earlier pass already failed with.
 func planStitches(open, pads []boardPad, tracks []specctra.Track, vias []widenVia, size map[string]stitchSize, clr float64, bounds layoutBBox, tried map[string]bool) ([]stitch, []string) {
-	return planStitchPaths(open, pads, tracks, vias, size, clr, bounds, tried, 0)
+	return planStitchPaths(open, pads, tracks, vias, size, clr, bounds, tried, 0, nil)
 }
 
 // planStitchPaths is planStitches with a path search of up to pathMil for a pad
-// no straight track can serve (0 = none).
-func planStitchPaths(open, pads []boardPad, tracks []specctra.Track, vias []widenVia, size map[string]stitchSize, clr float64, bounds layoutBBox, tried map[string]bool, pathMil float64) ([]stitch, []string) {
+// no straight track can serve (0 = none). inPour, when given, must accept a
+// via site: a via outside its net's fill joins nothing.
+func planStitchPaths(open, pads []boardPad, tracks []specctra.Track, vias []widenVia, size map[string]stitchSize, clr float64, bounds layoutBBox, tried map[string]bool, pathMil float64, inPour func(net string, q [2]float64, dia float64) bool) ([]stitch, []string) {
 	type seg struct {
 		net       string
 		layer     int // 0 = every layer
@@ -87,6 +88,9 @@ func planStitchPaths(open, pads []boardPad, tracks []specctra.Track, vias []wide
 	}
 	viaFits := func(net string, q [2]float64, dia float64) bool {
 		if q[0]-dia/2 < bounds.MinX || q[0]+dia/2 > bounds.MaxX || q[1]-dia/2 < bounds.MinY || q[1]+dia/2 > bounds.MaxY {
+			return false
+		}
+		if inPour != nil && !inPour(net, q, dia) {
 			return false
 		}
 		for _, c := range cu {
@@ -463,7 +467,30 @@ func (r *kicadRun) stitchPours(board string, nets []string) (string, error) {
 		}
 		b := s.Outline.BBox
 		bounds := layoutBBox{MinX: b.MinX + edge, MinY: b.MinY + edge, MaxX: b.MaxX - edge, MaxY: b.MaxY - edge}
-		plan, noSite := planStitchPaths(open, pads, tracks, vias, size, clearanceOf(s)+kicad.ClearanceMarginMil, bounds, tried, r.o.stitchPathMil)
+		// A site must lie wholly inside a fill of its net on some layer, as
+		// filled now: a via the fill misses joins nothing (most stitches the
+		// proof dropped on the test board sat outside every fill).
+		fills := map[string][]pcbCopperArea{}
+		if areas, err := parseCopperAreaObstacles(nil, s.Copper.Poured); err == nil {
+			for _, a := range areas {
+				fills[a.Net] = append(fills[a.Net], a)
+			}
+		} else {
+			fmt.Fprintf(r.stderr, "stitch: pour fills unreadable (%v); sites are not checked against them\n", err)
+			fills = nil
+		}
+		inPour := func(net string, q [2]float64, dia float64) bool {
+			if fills == nil {
+				return true
+			}
+			for _, a := range fills[net] {
+				if compoundWinding(a.Contours, q) != 0 && stitchFillMargin(a, q) >= dia/2 {
+					return true
+				}
+			}
+			return false
+		}
+		plan, noSite := planStitchPaths(open, pads, tracks, vias, size, clearanceOf(s)+kicad.ClearanceMarginMil, bounds, tried, r.o.stitchPathMil, inPour)
 		info["planned"], info["noSite"] = len(plan), len(noSite)
 		if len(plan) == 0 {
 			stop = "no site for the pads left"
@@ -540,6 +567,18 @@ func (r *kicadRun) stitchPours(board string, nets []string) (string, error) {
 	rep["stitches"] = kept
 	fmt.Fprintf(r.stderr, "stitch: %d via(s) kept on %d net(s), stopped: %s\n", len(kept), len(byNet), stop)
 	return cur, nil
+}
+
+// stitchFillMargin is the distance from q to the nearest edge of a fill.
+func stitchFillMargin(a pcbCopperArea, q [2]float64) float64 {
+	best := math.Inf(1)
+	for _, c := range a.Contours {
+		for i, p := range c {
+			n := c[(i+1)%len(c)]
+			best = math.Min(best, segPtDist(q[0], q[1], p[0], p[1], n[0], n[1]))
+		}
+	}
+	return best
 }
 
 // stitchOps is the bridge edit of a set of stitches.
