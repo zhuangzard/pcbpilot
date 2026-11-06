@@ -6,6 +6,7 @@ import (
 
 	"github.com/zhuangzard/pcbpilot/internal/kicad"
 	"github.com/zhuangzard/pcbpilot/internal/pcb/specctra"
+	"github.com/zhuangzard/pcbpilot/pkg/pcbauto"
 )
 
 func finishTestRig(tracks []specctra.Track, pads []boardPad, layers []int, pour map[int]bool, mode string) *finisher {
@@ -109,5 +110,100 @@ func TestFinishExcluded(t *testing.T) {
 	in := &designIntent{Nets: map[string]*intentNet{"D+": {DiffPair: "USB"}, "CLK": {LengthGroup: "g"}, "IO": {}}}
 	if finishExcluded(in, "D+") == "" || finishExcluded(in, "CLK") == "" || finishExcluded(in, "IO") != "" || finishExcluded(in, "X") != "" {
 		t.Error("exclusions")
+	}
+}
+
+// A track may end only inside a pad's real shape: not in the corner of a round
+// pad's box, and along the long axis of an oval turned 90 degrees.
+func TestFinishPadInside(t *testing.T) {
+	round := padObj(boardPad{X: 0, Y: 0, W: 40, H: 40, Shape: []any{"ELLIPSE", 40.0, 40.0}})
+	if !round.inside([2]float64{0, 0}) || round.inside([2]float64{18, 18}) {
+		t.Error("round pad")
+	}
+	oval := padObj(boardPad{X: 0, Y: 0, W: 20, H: 60, Rotation: 90, Shape: []any{"OVAL", 60.0, 20.0}})
+	if !oval.inside([2]float64{0, 25}) || oval.inside([2]float64{9, 29}) {
+		t.Error("turned oval")
+	}
+	skew := padObj(boardPad{X: 0, Y: 0, W: 50, H: 50, Rotation: 45, Shape: []any{"RECT", 40.0, 20.0}})
+	if !skew.inside([2]float64{0, 9}) || skew.inside([2]float64{0, 12}) {
+		t.Error("skewed pad: inscribed circle only")
+	}
+	if poly := padObj(boardPad{X: 0, Y: 0, W: 50, H: 50, Shape: []any{"POLYGON", 50.0, 50.0}}); poly.inside([2]float64{0, 0}) {
+		t.Error("custom pad")
+	}
+}
+
+// Copper touching two KiCad groups (here through the corner of a round pad's
+// box) never merges them.
+func TestFinishComponentsKeepKiCadGroups(t *testing.T) {
+	a := boardPad{ID: "a", Net: "S", Layer: 1, X: 0, Y: 0, W: 40, H: 40, Shape: []any{"ELLIPSE", 40.0, 40.0}}
+	b := boardPad{ID: "b", Net: "S", Layer: 1, X: 100, Y: 0, W: 40, H: 40}
+	tr := []specctra.Track{{Net: "S", Layer: 1, X1: 19, Y1: 19, X2: 100, Y2: 0, Width: 2}}
+	cs := finishComponents([]kicad.PadGroup{{Pads: []string{"a"}}, {Pads: []string{"b"}}}, map[string]boardPad{"a": a, "b": b}, tr, nil)
+	if len(cs) != 2 {
+		t.Fatalf("%d components", len(cs))
+	}
+}
+
+// In escape mode a straight track on a poured layer must stay near a joined
+// pad all along, not just at its ends.
+func TestFinishSegAllowed(t *testing.T) {
+	f := &finisher{pour: map[int]bool{15: true}, pourMode: "escape"}
+	ends := []boardPad{{X: 0, Y: 0, W: 20, H: 20}, {X: 1000, Y: 0, W: 20, H: 20}}
+	if !f.segAllowed(15, [2]float64{50, 0}, [2]float64{120, 0}, ends) || f.segAllowed(15, [2]float64{100, 0}, [2]float64{900, 0}, ends) {
+		t.Error("escape along a segment")
+	}
+	if !f.segAllowed(18, [2]float64{100, 0}, [2]float64{900, 0}, ends) {
+		t.Error("free layer")
+	}
+}
+
+func TestFinishJudge(t *testing.T) {
+	j1 := finishJoin{Net: "A", Pads: []string{"a1"}, To: []string{"a2"}, Tracks: []specctra.NewTrack{{Net: "A", Layer: 18, X1: 0, Y1: 0, X2: 1000, Y2: 0}}}
+	j2 := finishJoin{Net: "B", Pads: []string{"b1"}, To: []string{"b2"}, Tracks: []specctra.NewTrack{{Net: "B", Layer: 18, X1: 0, Y1: 3000, X2: 1000, Y2: 3000}}}
+	j3 := finishJoin{Net: "C", Pads: []string{"c1"}, To: []string{"c2"}, Tracks: []specctra.NewTrack{{Net: "C", Layer: 18, X1: 0, Y1: 6000, X2: 1000, Y2: 6000}}}
+	plan := []finishJoin{j1, j2, j3}
+	after := map[string][]kicad.PadGroup{
+		"A": {{Pads: []string{"a1", "a2"}}},
+		"B": {{Pads: []string{"b1", "b2"}}},
+		"C": {{Pads: []string{"c1"}}, {Pads: []string{"c2"}}},
+	}
+	// Near j1; far from everything but naming net B; nowhere near any join.
+	errs := []finishErr{
+		{what: "new DRC clearance", at: [][2]float64{{500, 20}}},
+		{what: "new DRC clearance", at: [][2]float64{{9000, 9000}}, nets: []string{"X", "B"}},
+		{what: "new DRC zone", at: [][2]float64{{20000, 20000}}, nets: []string{"GND"}},
+	}
+	good, reasons, away := finishJudge(plan, after, after, errs, nil)
+	if len(good) != 0 || reasons[j1.key()] == "" || reasons[j2.key()] == "" || reasons[j3.key()] != "groups still apart" {
+		t.Errorf("good %v reasons %v", good, reasons)
+	}
+	if len(away) != 1 {
+		t.Errorf("away %v", away)
+	}
+	// A pad cut off its group with no join near fails the pass.
+	before := map[string][]kicad.PadGroup{"G": {{Pads: []string{"g1", "g2"}, Zone: true}}}
+	cut := map[string][]kicad.PadGroup{"G": {{Pads: []string{"g1"}, Zone: true}, {Pads: []string{"g2"}}}, "A": after["A"]}
+	_, reasons, _ = finishJudge(plan[:1], before, cut, nil, map[string][2]float64{"g2": {50000, 50000}})
+	if reasons["board"] == "" {
+		t.Errorf("cut pad: %v", reasons)
+	}
+	_, reasons, _ = finishJudge(plan[:1], before, cut, nil, map[string][2]float64{"g2": {500, 100}})
+	if reasons[j1.key()] != "near a pad cut off its group" {
+		t.Errorf("cut pad near j1: %v", reasons)
+	}
+}
+
+// Insulation findings compare as a multiset: a second finding between the same
+// items at another place is new.
+func TestNewIsoFindings(t *testing.T) {
+	f := pcbauto.IsoFinding{Kind: "iso-clearance", ItemA: "J1.3", ItemB: "H1.1", At: pcbauto.Point{X: 1, Y: 2}}
+	g := f
+	g.At = pcbauto.Point{X: 50, Y: 2}
+	if n := newIsoFindings([]pcbauto.IsoFinding{f}, []pcbauto.IsoFinding{f, g}); len(n) != 1 || n[0].At.X != 50 {
+		t.Errorf("new %v", n)
+	}
+	if n := newIsoFindings([]pcbauto.IsoFinding{f}, []pcbauto.IsoFinding{f, f}); len(n) != 1 {
+		t.Errorf("duplicate %v", n)
 	}
 }

@@ -10,7 +10,14 @@ import (
 	"math"
 )
 
-const stitchPathStepMil = 5.0
+const (
+	stitchPathStepMil = 5.0
+	// stitchPathNodes caps one search: a 400 mil reach is about 20000 grid
+	// points, so this only stops a search a far larger --stitch-path-mil set.
+	stitchPathNodes = 200000
+	// stitchPathMaxMil is the largest --stitch-path-mil accepted.
+	stitchPathMaxMil = 2000.0
+)
 
 type stitchNode struct {
 	x, y int
@@ -41,7 +48,7 @@ func stitchPathSearch(from [2]float64, maxLen float64, segOK func(a, b [2]float6
 	best := map[key]float64{{}: 0}
 	came := map[key]key{}
 	q := &stitchQueue{{}}
-	for q.Len() > 0 {
+	for expanded := 0; q.Len() > 0 && expanded < stitchPathNodes; expanded++ {
 		n := heap.Pop(q).(stitchNode)
 		k := key{n.x, n.y}
 		if n.cost > best[k] {

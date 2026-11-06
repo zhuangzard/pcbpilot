@@ -139,6 +139,9 @@ Exits non-zero when any gate fails; --waivers takes signed {gate,match,reason,by
 			if o.maxTimeSet && o.fo.maxTime < 0 {
 				return fmt.Errorf("--max-time must be >= 0 (0 = no fastroute time limit)")
 			}
+			if math.IsNaN(o.stitchPathMil) || o.stitchPathMil < 0 || o.stitchPathMil > stitchPathMaxMil {
+				return fmt.Errorf("--stitch-path-mil must be between 0 and %.0f", stitchPathMaxMil)
+			}
 			if o.finishPourLayers != "escape" && o.finishPourLayers != "on" && o.finishPourLayers != "off" {
 				return fmt.Errorf("--finish-pour-layers must be escape, on or off")
 			}

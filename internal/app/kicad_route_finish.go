@@ -15,6 +15,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -36,7 +37,8 @@ const (
 	finishJoinNodes  = 600000   // expansions one join may use
 	finishTotalNodes = 40000000 // and all joins together
 	finishMaxPasses  = 2
-	finishNearMil    = 30.0 // a new DRC or insulation error this close is the join's
+	finishNearMil    = 30.0  // a new DRC or insulation error this close is the join's
+	finishFarMil     = 200.0 // and this close when its items name no join's net
 )
 
 // finishSize is the track, via and clearance a net's joins use (mil).
@@ -53,6 +55,11 @@ type finishObj struct {
 	a, b  [2]float64
 	half  float64
 	tag   int // the group it belongs to, in a search
+	// A pad's box is its bounding box, so it is a safe obstacle but not a safe
+	// place to end a track: core and r (r < 0 = none) are the stadium inside the
+	// real shape (rectangle, oval, circle or rounded rectangle) a track may end in.
+	core [2][2]float64
+	r    float64
 }
 
 func (o *finishObj) on(layer int) bool { return o.layer == layer || o.layer == pcbLayerMulti }
@@ -78,7 +85,7 @@ func (o *finishObj) segGap(a, b [2]float64) float64 {
 // inside: a track ending at q would overlap this copper.
 func (o *finishObj) inside(q [2]float64) bool {
 	if o.pad {
-		return q[0] > o.a[0]+0.5 && q[0] < o.b[0]-0.5 && q[1] > o.a[1]+0.5 && q[1] < o.b[1]-0.5
+		return o.r > 0 && segDist(q, o.core[0], o.core[1]) <= o.r
 	}
 	return o.dist(q) <= -0.5
 }
@@ -92,7 +99,39 @@ func (o *finishObj) box() ([2]float64, [2]float64) {
 }
 
 func padObj(p boardPad) finishObj {
-	return finishObj{net: p.Net, layer: p.Layer, pad: true, a: [2]float64{p.X - p.W/2, p.Y - p.H/2}, b: [2]float64{p.X + p.W/2, p.Y + p.H/2}}
+	o := finishObj{net: p.Net, layer: p.Layer, pad: true, a: [2]float64{p.X - p.W/2, p.Y - p.H/2}, b: [2]float64{p.X + p.W/2, p.Y + p.H/2}, r: -1}
+	c := [2]float64{p.X, p.Y}
+	o.core = [2][2]float64{c, c}
+	kind, w, h := "", 0.0, 0.0
+	if s, ok := p.Shape.([]any); ok && len(s) == 3 {
+		kind, _ = s[0].(string)
+		w, _ = s[1].(float64)
+		h, _ = s[2].(float64)
+	}
+	rot := math.Mod(p.Rotation, 360)
+	if kind == "" { // no shape read back: the box is taken as the pad
+		kind, w, h, rot = "RECT", p.W, p.H, 0
+	}
+	if kind == "POLYGON" || w <= 0 || h <= 0 {
+		return o // a custom shape need not hold its own centre
+	}
+	if rot < 0 {
+		rot += 360
+	}
+	if math.Mod(rot, 90) > 1e-6 && 90-math.Mod(rot, 90) > 1e-6 {
+		o.r = math.Min(w, h)/2 - 0.5 // turned off the axes: the inscribed circle only
+		return o
+	}
+	if math.Abs(rot-90) < 1e-6 || math.Abs(rot-270) < 1e-6 {
+		w, h = h, w
+	}
+	if w >= h {
+		o.core = [2][2]float64{{p.X - (w-h)/2, p.Y}, {p.X + (w-h)/2, p.Y}}
+	} else {
+		o.core = [2][2]float64{{p.X, p.Y - (h-w)/2}, {p.X, p.Y + (h-w)/2}}
+	}
+	o.r = math.Min(w, h)/2 - 0.5
+	return o
 }
 
 // finishIndex buckets copper by area.
@@ -273,6 +312,41 @@ func (f *finisher) inBounds(q [2]float64, r float64) bool {
 	return q[0]-r >= f.bounds.MinX && q[0]+r <= f.bounds.MaxX && q[1]-r >= f.bounds.MinY && q[1]+r <= f.bounds.MaxY
 }
 
+// layerOK applies the poured-layer policy at q: escape allows a poured layer
+// only within finishEscapeMil of one of the pads being joined.
+func (f *finisher) layerOK(l int, q [2]float64, ends []boardPad) bool {
+	if !f.pour[l] {
+		return true
+	}
+	switch f.pourMode {
+	case "on":
+		return true
+	case "off":
+		return false
+	}
+	for _, p := range ends {
+		if rectPtDist(p.X-p.W/2, p.Y-p.H/2, p.X+p.W/2, p.Y+p.H/2, q[0], q[1]) <= finishEscapeMil {
+			return true
+		}
+	}
+	return false
+}
+
+// segAllowed is layerOK along a straight track, every grid step.
+func (f *finisher) segAllowed(l int, a, b [2]float64, ends []boardPad) bool {
+	if !f.pour[l] || f.pourMode == "on" {
+		return true
+	}
+	n := int(math.Hypot(b[0]-a[0], b[1]-a[1])/finishStepMil) + 1
+	for k := 0; k <= n; k++ {
+		t := float64(k) / float64(n)
+		if !f.layerOK(l, [2]float64{a[0] + (b[0]-a[0])*t, a[1] + (b[1]-a[1])*t}, ends) {
+			return false
+		}
+	}
+	return true
+}
+
 // clearAt: a track end of half width half at q on layer keeps every other
 // net's clearance, with extra to spare.
 func (f *finisher) clearAt(net string, layer int, q [2]float64, half, extra float64) bool {
@@ -363,10 +437,9 @@ func (f *finisher) search(net string, sz finishSize, src, dst []finishObj, ends 
 	lo = [2]float64{lo[0] - finishMarginMil, lo[1] - finishMarginMil}
 	hi = [2]float64{hi[0] + finishMarginMil, hi[1] + finishMarginMil}
 	// The grid sits on the first source object, so a pad's centre line is on it.
-	a0, b0 := src[0].box()
-	origin := [2]float64{(a0[0] + b0[0]) / 2, (a0[1] + b0[1]) / 2}
-	if !src[0].pad {
-		origin = src[0].a
+	origin := src[0].a
+	if src[0].pad {
+		origin = [2]float64{(src[0].core[0][0] + src[0].core[1][0]) / 2, (src[0].core[0][1] + src[0].core[1][1]) / 2}
 	}
 	at := func(n finishNode) [2]float64 {
 		return [2]float64{math.Round((origin[0]+float64(n.x)*finishStepMil)*100) / 100, math.Round((origin[1]+float64(n.y)*finishStepMil)*100) / 100}
@@ -384,22 +457,7 @@ func (f *finisher) search(net string, sz finishSize, src, dst []finishObj, ends 
 			return v
 		}
 		q, l := at(n), f.layers[n.l]
-		ok := inWin(q)
-		if ok && f.pour[l] {
-			switch f.pourMode {
-			case "off":
-				ok = false
-			case "escape":
-				ok = false
-				for _, p := range ends {
-					if math.Hypot(math.Max(math.Abs(q[0]-p.X)-p.W/2, 0), math.Max(math.Abs(q[1]-p.Y)-p.H/2, 0)) <= finishEscapeMil {
-						ok = true
-						break
-					}
-				}
-			}
-		}
-		ok = ok && f.clearAt(net, l, q, half, finishSlack)
+		ok := inWin(q) && f.layerOK(l, q, ends) && f.clearAt(net, l, q, half, finishSlack)
 		open[n] = ok
 		return ok
 	}
@@ -437,20 +495,35 @@ func (f *finisher) search(net string, sz finishSize, src, dst []finishObj, ends 
 		best[n] = 0
 		heap.Push(q, finishItem{n, 0, h(n)})
 	}
-	for _, o := range src {
-		a, b := o.box()
-		for x := int(math.Floor((a[0] - origin[0]) / finishStepMil)); float64(x)*finishStepMil+origin[0] <= b[0]; x++ {
-			for y := int(math.Floor((a[1] - origin[1]) / finishStepMil)); float64(y)*finishStepMil+origin[1] <= b[1]; y++ {
+	// Seeds: the grid points inside the source copper, found along each piece
+	// (a track's line, not its box), and paid for from the budget.
+	expanded := 0
+	seed := func(o *finishObj, p [2]float64) {
+		gx, gy := int(math.Floor((p[0]-origin[0])/finishStepMil)), int(math.Floor((p[1]-origin[1])/finishStepMil))
+		for x := gx - 1; x <= gx+2; x++ {
+			for y := gy - 1; y <= gy+2; y++ {
 				for li, l := range f.layers {
-					n := finishNode{li, x, y}
-					if o.on(l) && o.inside(at(n)) {
+					if n := (finishNode{li, x, y}); o.on(l) && o.inside(at(n)) {
+						expanded++
 						start(n)
 					}
 				}
 			}
 		}
 	}
-	expanded := 0
+	for i := range src {
+		o := &src[i]
+		a, b := o.a, o.b
+		if o.pad {
+			a, b = o.core[0], o.core[1]
+		}
+		steps := int(math.Hypot(b[0]-a[0], b[1]-a[1])/finishStepMil) + 1
+		for k := 0; k <= steps && expanded < budget; k++ {
+			t := float64(k) / float64(steps)
+			seed(o, [2]float64{a[0] + (b[0]-a[0])*t, a[1] + (b[1]-a[1])*t})
+		}
+	}
+	f.nodes += expanded
 	for q.Len() > 0 {
 		it := heap.Pop(q).(finishItem)
 		if it.g > best[it.n] {
@@ -506,7 +579,7 @@ func (f *finisher) search(net string, sz finishSize, src, dst []finishObj, ends 
 
 // joinOf turns a searched path into tracks and through vias, every straight
 // piece as long as the exact check allows.
-func (f *finisher) joinOf(net string, sz finishSize, path []finishPoint) (finishJoin, bool) {
+func (f *finisher) joinOf(net string, sz finishSize, path []finishPoint, ends []boardPad) (finishJoin, bool) {
 	j := finishJoin{Net: net, Drill: sz.Drill}
 	half := sz.Track / 2
 	layers := map[int]bool{}
@@ -522,9 +595,9 @@ func (f *finisher) joinOf(net string, sz finishSize, path []finishPoint) (finish
 		}
 		if len(pts) > 1 {
 			// Every grid step is clear (finishSlack), so a straight run is too.
-			pts = stitchPathShorten(finishCorners(pts), func(a, b [2]float64) bool { return f.segFits(net, l, a, b, half) })
+			pts = stitchPathShorten(finishCorners(pts), func(a, b [2]float64) bool { return f.segFits(net, l, a, b, half) && f.segAllowed(l, a, b, ends) })
 			for m := 0; m+1 < len(pts); m++ {
-				if !f.segFits(net, l, pts[m], pts[m+1], half) {
+				if !f.segFits(net, l, pts[m], pts[m+1], half) || !f.segAllowed(l, pts[m], pts[m+1], ends) {
 					return j, false
 				}
 				j.Tracks = append(j.Tracks, specctra.NewTrack{Net: net, Layer: l, X1: pts[m][0], Y1: pts[m][1], X2: pts[m+1][0], Y2: pts[m+1][1], Width: sz.Track})
@@ -601,7 +674,19 @@ func finishComponents(groups []kicad.PadGroup, padByID map[string]boardPad, trac
 		}
 		return i
 	}
-	union := func(a, b int) { parent[find(a)] = find(b) }
+	// KiCad's groups are the truth: geometry may hang copper on a group but
+	// never merge two (a pad box is larger than a round pad).
+	grp := append([]int(nil), owner...)
+	union := func(a, b int) {
+		ra, rb := find(a), find(b)
+		if ra == rb || grp[ra] >= 0 && grp[rb] >= 0 && grp[ra] != grp[rb] {
+			return
+		}
+		parent[ra] = rb
+		if grp[rb] < 0 {
+			grp[rb] = grp[ra]
+		}
+	}
 	first := map[int]int{}
 	for i, g := range owner {
 		if g < 0 {
@@ -790,7 +875,7 @@ func (f *finisher) plan(nets []string, groups map[string][]kicad.PadGroup, padBy
 			fails[key] = why
 			continue
 		}
-		j, ok := f.joinOf(c.net, sz, path)
+		j, ok := f.joinOf(c.net, sz, path, ends)
 		if !ok {
 			fails[key] = "path failed the exact clearance check"
 			continue
@@ -922,10 +1007,14 @@ func (r *kicadRun) finishSignals(board string, pours []kicad.Pour) (string, erro
 			padCount[p.Net]++
 		}
 	}
-	var nets []string
+	var nets, all []string
 	excluded := map[string]string{}
 	for n, c := range padCount {
-		if n == "" || c < 2 || poured[n] || strings.HasPrefix(n, "unconnected") {
+		if n == "" || c < 2 || strings.HasPrefix(n, "unconnected") {
+			continue
+		}
+		all = append(all, n)
+		if poured[n] {
 			continue
 		}
 		if why := finishExcluded(r.in, n); why != "" {
@@ -935,6 +1024,7 @@ func (r *kicadRun) finishSignals(board string, pours []kicad.Pour) (string, erro
 		nets = append(nets, n)
 	}
 	sort.Strings(nets)
+	sort.Strings(all)
 	rep["excluded"] = excluded
 	var isoIntent *pcbauto.Intent
 	if len(r.in.Pairs) > 0 {
@@ -947,19 +1037,15 @@ func (r *kicadRun) finishSignals(board string, pours []kicad.Pour) (string, erro
 			return board, nil
 		}
 	}
-	isoOf := func(raw []byte) (map[string]pcbauto.IsoFinding, error) {
-		out := map[string]pcbauto.IsoFinding{}
+	isoOf := func(raw []byte) ([]pcbauto.IsoFinding, error) {
 		if isoIntent == nil {
-			return out, nil
+			return nil, nil
 		}
 		chk, err := pcbauto.CheckIsolationSnapshot(raw, isoIntent)
 		if err != nil {
 			return nil, err
 		}
-		for _, f := range chk.Findings {
-			out[f.Kind+"|"+f.ItemA+"|"+f.ItemB] = f
-		}
-		return out, nil
+		return chk.Findings, nil
 	}
 	isoBase, err := isoOf(raw)
 	if err != nil {
@@ -971,11 +1057,6 @@ func (r *kicadRun) finishSignals(board string, pours []kicad.Pour) (string, erro
 		cannot("DRC before finishing: " + err.Error())
 		return board, nil
 	}
-	var pourNets []string
-	for n := range poured {
-		pourNets = append(pourNets, n)
-	}
-	sort.Strings(pourNets)
 	tried := map[string]bool{}
 	var kept []finishJoin
 	var passes []map[string]any
@@ -983,7 +1064,7 @@ func (r *kicadRun) finishSignals(board string, pours []kicad.Pour) (string, erro
 	cur := board
 	nodes := 0
 	for pass := 1; pass <= finishMaxPasses; pass++ {
-		groups, err := r.kt.PadGroups(cur, append(append([]string(nil), nets...), pourNets...))
+		groups, err := r.kt.PadGroups(cur, all)
 		if err != nil {
 			cannot("pad groups: " + err.Error())
 			return cur, nil
@@ -1010,7 +1091,8 @@ func (r *kicadRun) finishSignals(board string, pours []kicad.Pour) (string, erro
 			cannot("board copper: " + err.Error())
 			return cur, nil
 		}
-		f := &finisher{idx: newFinishIndex(), clr: clr, defClr: defClr, maxClr: maxClr, bounds: bounds, layers: layers, pour: pourLayer, pourMode: r.o.finishPourLayers}
+		// One search budget for all passes.
+		f := &finisher{idx: newFinishIndex(), clr: clr, defClr: defClr, maxClr: maxClr, bounds: bounds, layers: layers, pour: pourLayer, pourMode: r.o.finishPourLayers, nodes: nodes}
 		padByID := map[string]boardPad{}
 		for _, p := range pads {
 			padByID[p.ID] = p
@@ -1029,12 +1111,13 @@ func (r *kicadRun) finishSignals(board string, pours []kicad.Pour) (string, erro
 			}
 		}
 		plan, fails := f.plan(split, groups, padByID, tracks, vias, size, tried)
-		nodes += f.nodes
+		info["nodes"] = f.nodes - nodes
+		nodes = f.nodes
 		reasons := map[string]int{}
 		for _, why := range fails {
 			reasons[why]++
 		}
-		info["planned"], info["failed"], info["nodes"] = len(plan), reasons, f.nodes
+		info["planned"], info["failed"] = len(plan), reasons
 		if len(plan) == 0 {
 			stop = "no join found"
 			break
@@ -1054,11 +1137,12 @@ func (r *kicadRun) finishSignals(board string, pours []kicad.Pour) (string, erro
 				cannot("finish edit: " + err.Error())
 				return cur, nil
 			}
-			held, again, err := r.finishProve(next, good, append(append([]string(nil), split...), pourNets...), base, groups, isoBase, isoOf, pass)
+			held, again, away, err := r.finishProve(next, good, all, base, groups, isoBase, isoOf, pass)
 			if err != nil {
 				cannot(err.Error())
 				return cur, nil
 			}
+			info["newErrorsAwayFromJoins"] = away
 			if len(again) == 0 {
 				settled = true
 				break
@@ -1094,88 +1178,165 @@ func (r *kicadRun) finishSignals(board string, pours []kicad.Pour) (string, erro
 	return cur, nil
 }
 
-// finishProve checks a filled board: which joins merged their two groups with
-// no new DRC or insulation error at their copper. A pad that left its group
-// fails the nearest join; with none near, nothing can be named and the pass
-// fails ("board").
-func (r *kicadRun) finishProve(board string, plan []finishJoin, nets []string, base *kicad.DRCReport, before map[string][]kicad.PadGroup, isoBase map[string]pcbauto.IsoFinding, isoOf func([]byte) (map[string]pcbauto.IsoFinding, error), pass int) ([]finishJoin, map[string]string, error) {
+// finishErr is a new DRC or insulation error: where it is and the nets its
+// items name.
+type finishErr struct {
+	what string
+	at   [][2]float64
+	nets []string
+}
+
+var reItemNet = regexp.MustCompile(`\[([^\]]+)\]`)
+
+// finishProve checks a filled board (finishJudge decides).
+func (r *kicadRun) finishProve(board string, plan []finishJoin, nets []string, base *kicad.DRCReport, before map[string][]kicad.PadGroup, isoBase []pcbauto.IsoFinding, isoOf func([]byte) ([]pcbauto.IsoFinding, error), pass int) ([]finishJoin, map[string]string, []string, error) {
 	rep, err := r.kt.DRC(board, filepath.Join(r.work, fmt.Sprintf("%02d-finish-drc%d.json", r.step, pass)))
 	if err != nil {
-		return nil, nil, fmt.Errorf("DRC after finishing: %w", err)
+		return nil, nil, nil, fmt.Errorf("DRC after finishing: %w", err)
 	}
 	groups, err := r.kt.PadGroups(board, nets)
 	if err != nil {
-		return nil, nil, fmt.Errorf("pad groups after finishing: %w", err)
+		return nil, nil, nil, fmt.Errorf("pad groups after finishing: %w", err)
 	}
-	_, raw, err := r.snapshot(board)
+	s, raw, err := r.snapshot(board)
 	if err != nil {
-		return nil, nil, fmt.Errorf("board snapshot after finishing: %w", err)
+		return nil, nil, nil, fmt.Errorf("board snapshot after finishing: %w", err)
 	}
 	iso, err := isoOf(raw)
 	if err != nil {
-		return nil, nil, fmt.Errorf("insulation check after finishing: %w", err)
+		return nil, nil, nil, fmt.Errorf("insulation check after finishing: %w", err)
 	}
-	var at [][2]float64 // where each new error is
-	var what []string
+	var errs []finishErr
 	for _, v := range newViolations(base, rep) {
+		e := finishErr{what: "new DRC " + v.Rule}
+		if v.Net != "" {
+			e.nets = append(e.nets, v.Net)
+		}
 		for _, it := range v.Items {
-			at, what = append(at, [2]float64{it.X, it.Y}), append(what, "new DRC "+v.Rule)
-		}
-		if v.X != nil && v.Y != nil {
-			at, what = append(at, [2]float64{*v.X, *v.Y}), append(what, "new DRC "+v.Rule)
-		}
-	}
-	for k, f := range iso {
-		if _, old := isoBase[k]; !old {
-			at, what = append(at, [2]float64{f.At.X, f.At.Y}), append(what, "new "+f.Kind)
-		}
-	}
-	reasons := map[string]string{}
-	blamed := map[int]bool{}
-	// A pad cut off its group, or a new error, is the nearest join's.
-	padAt := map[string][2]float64{}
-	s, _ := decodeKicadSnapshot(raw)
-	if s != nil {
-		for i := range s.Components {
-			for _, p := range s.Components[i].Pads {
-				padAt[p.ID] = [2]float64{p.X, p.Y}
+			e.at = append(e.at, [2]float64{it.X, it.Y})
+			for _, m := range reItemNet.FindAllStringSubmatch(it.Description, -1) {
+				e.nets = append(e.nets, m[1])
 			}
 		}
+		if v.X != nil && v.Y != nil {
+			e.at = append(e.at, [2]float64{*v.X, *v.Y})
+		}
+		errs = append(errs, e)
 	}
-	nearestJoin := func(q [2]float64, within float64) int {
+	for _, f := range newIsoFindings(isoBase, iso) {
+		errs = append(errs, finishErr{what: "new " + f.Kind, at: [][2]float64{{f.At.X, f.At.Y}}, nets: []string{f.NetA, f.NetB}})
+	}
+	padAt := map[string][2]float64{}
+	for i := range s.Components {
+		for _, p := range s.Components[i].Pads {
+			padAt[p.ID] = [2]float64{p.X, p.Y}
+		}
+	}
+	good, reasons, away := finishJudge(plan, before, groups, errs, padAt)
+	return good, reasons, away, nil
+}
+
+// newIsoFindings are the findings of cur beyond those of base, compared as a
+// multiset of exact fingerprints (kind, items, nets, layer, position).
+func newIsoFindings(base, cur []pcbauto.IsoFinding) []pcbauto.IsoFinding {
+	key := func(f pcbauto.IsoFinding) string {
+		return fmt.Sprintf("%s|%s|%s|%s|%s|%d|%.1f|%.1f", f.Kind, f.ItemA, f.ItemB, f.NetA, f.NetB, f.Layer, f.At.X, f.At.Y)
+	}
+	seen := map[string]int{}
+	for _, f := range base {
+		seen[key(f)]++
+	}
+	var out []pcbauto.IsoFinding
+	for _, f := range cur {
+		if k := key(f); seen[k] > 0 {
+			seen[k]--
+		} else {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// finishJudge decides which joins hold: each must have merged its own two
+// groups. A new error belongs to the join within finishNearMil of it, else to
+// the nearest join of a net its items name, else to a join within
+// finishFarMil; an error none of these reach is returned as away (refill can
+// move an old error onto another item). A pad cut off its group fails the
+// nearest join within stitchCutMil; with none, the pass fails ("board").
+func finishJudge(plan []finishJoin, before, after map[string][]kicad.PadGroup, errs []finishErr, padAt map[string][2]float64) ([]finishJoin, map[string]string, []string) {
+	reasons := map[string]string{}
+	bad := map[int]string{}
+	nearest := func(q [2]float64, within float64, net string) int {
 		best, bi := within, -1
 		for i := range plan {
+			if net != "" && plan[i].Net != net {
+				continue
+			}
 			if d := plan[i].near(q); d <= best {
 				best, bi = d, i
 			}
 		}
 		return bi
 	}
-	errAt := map[int]string{}
-	for i, q := range at {
-		if k := nearestJoin(q, finishNearMil); k >= 0 {
-			if _, ok := errAt[k]; !ok {
-				errAt[k] = what[i]
-			}
+	blame := func(i int, why string) {
+		if _, ok := bad[i]; !ok {
+			bad[i] = why
 		}
 	}
-	for _, id := range sortedKeysOf(padsSplit(before, groups)) {
-		q, ok := padAt[id]
+	var away []string
+	for _, e := range errs {
 		k := -1
-		if ok {
-			k = nearestJoin(q, stitchCutMil)
+		for _, q := range e.at {
+			if k = nearest(q, finishNearMil, ""); k >= 0 {
+				break
+			}
+		}
+		if k < 0 {
+		names:
+			for _, n := range e.nets {
+				for i := range plan {
+					if plan[i].Net != n {
+						continue
+					}
+					k = i
+					for _, q := range e.at {
+						if m := nearest(q, math.Inf(1), n); m >= 0 {
+							k = m
+							break
+						}
+					}
+					break names
+				}
+			}
+		}
+		if k < 0 {
+			for _, q := range e.at {
+				if k = nearest(q, finishFarMil, ""); k >= 0 {
+					break
+				}
+			}
+		}
+		if k < 0 {
+			away = append(away, e.what)
+			continue
+		}
+		blame(k, e.what)
+	}
+	for _, id := range sortedKeysOf(padsSplit(before, after)) {
+		k := -1
+		if q, ok := padAt[id]; ok {
+			k = nearest(q, stitchCutMil, "")
 		}
 		if k < 0 {
 			reasons["board"] = "pad " + id + " was cut off with no join near it"
 			continue
 		}
-		blamed[k] = true
+		blame(k, "near a pad cut off its group")
 	}
 	var good []finishJoin
 	for i, j := range plan {
-		bad := ""
 		where := map[string]int{}
-		for gi, g := range groups[j.Net] {
+		for gi, g := range after[j.Net] {
 			for _, id := range g.Pads {
 				where[id] = gi
 			}
@@ -1189,19 +1350,15 @@ func (r *kicadRun) finishProve(board string, plan []finishJoin, nets []string, b
 				}
 			}
 		}
-		switch {
-		case !joined:
-			bad = "groups still apart"
-		case blamed[i]:
-			bad = "near a pad cut off its group"
-		case errAt[i] != "":
-			bad = errAt[i]
+		why := bad[i]
+		if !joined {
+			why = "groups still apart"
 		}
-		if bad != "" {
-			reasons[j.key()] = bad
+		if why != "" {
+			reasons[j.key()] = why
 			continue
 		}
 		good = append(good, j)
 	}
-	return good, reasons, nil
+	return good, reasons, away
 }
