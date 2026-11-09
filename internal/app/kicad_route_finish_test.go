@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"math"
 	"testing"
 
@@ -244,5 +245,59 @@ func TestCopperItem(t *testing.T) {
 		if reCopperItem.MatchString(d) != want {
 			t.Errorf("%q", d)
 		}
+	}
+}
+
+func TestFinishSettle(t *testing.T) {
+	plan := make([]finishJoin, 8)
+	for i := range plan {
+		plan[i] = finishJoin{Net: fmt.Sprint("N", i)}
+	}
+	// try drops one join per round until want are left.
+	shed := func(want int, board bool) (func([]finishJoin) (string, []finishJoin, map[string]string, error), *int) {
+		calls := 0
+		return func(good []finishJoin) (string, []finishJoin, map[string]string, error) {
+			calls++
+			if len(good) <= want {
+				return fmt.Sprint("b", calls), good, nil, nil
+			}
+			again := map[string]string{good[0].Net: "new DRC clearance"}
+			if board {
+				again["board"] = "away"
+			}
+			return "", good[1:], again, nil
+		}, &calls
+	}
+	none := func(int, map[string]string) {}
+	// Five drops then settles on round six: kept.
+	try, calls := shed(3, false)
+	good, board, err := finishSettle(plan, 6, try, none)
+	if err != nil || len(good) != 3 || board != "b6" || *calls != 6 {
+		t.Fatalf("round six: %d joins, board %q, %d calls, %v", len(good), board, *calls, err)
+	}
+	// Still failing after six rounds: nothing kept.
+	try, calls = shed(1, false)
+	if good, board, err = finishSettle(plan, 6, try, none); err != nil || good != nil || board != "" || *calls != 6 {
+		t.Fatalf("unsettled: %d joins, board %q, %d calls, %v", len(good), board, *calls, err)
+	}
+	// A board-wide failure that no drop clears stops at once.
+	stuck := func(good []finishJoin) (string, []finishJoin, map[string]string, error) {
+		return "x", good, map[string]string{"board": "away"}, nil
+	}
+	if good, _, _ = finishSettle(plan, 6, stuck, none); good != nil {
+		t.Fatal("board failure kept joins")
+	}
+	// Dropped reasons are reported per round; an error ends the pass.
+	var rounds []int
+	try, _ = shed(6, true)
+	finishSettle(plan, 6, try, func(r int, _ map[string]string) { rounds = append(rounds, r) })
+	if fmt.Sprint(rounds) != "[0 1]" {
+		t.Fatalf("rounds %v", rounds)
+	}
+	boom := func([]finishJoin) (string, []finishJoin, map[string]string, error) {
+		return "", nil, nil, fmt.Errorf("edit")
+	}
+	if _, _, err := finishSettle(plan, 6, boom, none); err == nil {
+		t.Fatal("error lost")
 	}
 }

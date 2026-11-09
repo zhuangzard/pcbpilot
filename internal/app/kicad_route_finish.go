@@ -1153,35 +1153,22 @@ func (r *kicadRun) finishSignals(board string, pours []kicad.Pour) (string, erro
 		for _, j := range plan {
 			tried[j.key()] = true
 		}
-		// Each round drops what failed and checks the rest again: taking one
-		// out can change another's result. A pass that cannot settle changes
-		// nothing.
-		good := plan
-		next := ""
-		settled := false
-		for round := 0; round < finishMaxRounds && len(good) > 0; round++ {
-			next = r.next("finish")
+		good, next, err := finishSettle(plan, finishMaxRounds, func(good []finishJoin) (string, []finishJoin, map[string]string, error) {
+			next := r.next("finish")
 			if _, err := r.kt.Edit(cur, finishOps(good), next); err != nil {
-				cannot("finish edit: " + err.Error())
-				return cur, nil
+				return "", nil, nil, fmt.Errorf("finish edit: %w", err)
 			}
 			held, again, away, err := r.finishProve(next, good, all, base, groups, isoBase, isoOf, pass)
-			if err != nil {
-				cannot(err.Error())
-				return cur, nil
-			}
 			info["newErrorsAwayFromJoins"] = away
-			if len(again) == 0 {
-				settled = true
-				break
-			}
+			return next, held, again, err
+		}, func(round int, again map[string]string) {
 			info[fmt.Sprintf("dropped%d", round+1)] = again
-			if _, away := again["board"]; away && len(held) == len(good) {
-				break
-			}
-			good = held
+		})
+		if err != nil {
+			cannot(err.Error())
+			return cur, nil
 		}
-		if !settled || len(good) == 0 {
+		if len(good) == 0 {
 			stop = "a pass did not settle after its failures came out"
 			break
 		}
@@ -1206,6 +1193,30 @@ func (r *kicadRun) finishSignals(board string, pours []kicad.Pour) (string, erro
 	rep["joins"] = kept
 	fmt.Fprintf(r.stderr, "finish: %d signal join(s) kept, %.0f mil, %d via(s), stopped: %s\n", len(kept), length, vias, stop)
 	return cur, nil
+}
+
+// finishSettle runs the rounds of one pass. try edits a board with good and
+// proves it, returning the board, the joins that held and why the others did
+// not. Each round drops what failed and checks the rest again: taking one out
+// can change another's result. A pass that has not settled after rounds, or
+// whose board-wide failure no drop can clear, keeps nothing (nil).
+func finishSettle(plan []finishJoin, rounds int, try func(good []finishJoin) (string, []finishJoin, map[string]string, error), dropped func(round int, again map[string]string)) ([]finishJoin, string, error) {
+	good := plan
+	for round := 0; round < rounds && len(good) > 0; round++ {
+		board, held, again, err := try(good)
+		if err != nil {
+			return nil, "", err
+		}
+		if len(again) == 0 {
+			return good, board, nil
+		}
+		dropped(round, again)
+		if _, away := again["board"]; away && len(held) == len(good) {
+			return nil, "", nil
+		}
+		good = held
+	}
+	return nil, "", nil
 }
 
 // finishErr is a new DRC or insulation error: where it is and the nets its
