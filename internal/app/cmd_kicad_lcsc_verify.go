@@ -3,11 +3,13 @@ package app
 // cmd_kicad_lcsc_verify.go — `pcbpilot kicad lcsc --verify`: every assembled
 // part's LCSC number is looked up exactly (its EasyEDA library record, the one
 // `--import` uses; a catalog search returns near matches only) and compared
-// with the part: the number must exist, a chip passive's size code
-// must match the catalog package, and an R/C/L value must match the catalog
-// description. A number can be valid in form and still order the wrong part.
+// with the part: the number must exist, a chip size must match the record's
+// package, and an R/C/L value must match the record's value. A number can be
+// valid in form and still order the wrong part; what cannot be established is
+// an error, never a pass.
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,10 +18,14 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/zhuangzard/pcbpilot/internal/kicad"
 	"github.com/zhuangzard/pcbpilot/pkg/powersim"
 )
+
+// lcscVerifyDeadline bounds all lookups of one run.
+const lcscVerifyDeadline = 10 * time.Minute
 
 // lcscFinding is one verify result. Level "error" fails the run.
 type lcscFinding struct {
@@ -33,64 +39,94 @@ type lcscFinding struct {
 }
 
 var (
-	// Chip size codes, imperial (KiCad names R_0402_1005Metric: imperial first).
-	reChipSize = regexp.MustCompile(`(?:^|[^0-9])(01005|0201|0402|0603|0805|1008|1206|1210|1806|1812|2010|2512)(?:[^0-9]|$)`)
-	reDescRV   = regexp.MustCompile(`([0-9.]+\s*[pnuµμmkKMG]?)\s*Ω`)
-	reDescCV   = regexp.MustCompile(`(?:^|[\s,;])([0-9.]+\s*[pnuµμm]?)F(?:[\s,;]|$)`)
-	reDescLV   = regexp.MustCompile(`(?:^|[\s,;])([0-9.]+\s*[pnuµμm]?)H(?:[\s,;]|$)`)
-	reRefKind  = regexp.MustCompile(`^([A-Z]+)[0-9]`)
+	// A size token: up to three letters (R0402, LED0603) then a size code,
+	// optionally "Metric" (KiCad's R_0402_1005Metric names both).
+	reSizeToken = regexp.MustCompile(`^[A-Za-z]{0,3}([0-9]{4,5})(Metric|metric)?$`)
+	reSizeSplit = regexp.MustCompile(`[_\-\s()/,;:+\[\]]+`)
+	reURLNumber = regexp.MustCompile(`(?i)_C[0-9]+\.html$`)
+	imperial    = map[string]bool{"01005": true, "0201": true, "0402": true, "0603": true, "0805": true, "1008": true, "1206": true, "1210": true, "1806": true, "1812": true, "2010": true, "2512": true}
+	metricToImp = map[string]string{"0402": "01005", "0603": "0201", "1005": "0402", "1608": "0603", "2012": "0805", "2520": "1008", "3216": "1206", "3225": "1210", "4516": "1806", "4532": "1812", "5025": "2010", "6332": "2512"}
+	// A value with its unit in a record: "10kΩ", "100nF (104)", "4.7uH".
+	reRecVal = map[string]*regexp.Regexp{
+		"R": regexp.MustCompile(`(?:^|[^0-9A-Za-z.])([0-9]+(?:\.[0-9]+)?\s*[pnuµμmkKMG]?)\s*(?:Ω|ohm)`),
+		"C": regexp.MustCompile(`(?:^|[^0-9A-Za-z.])([0-9]+(?:\.[0-9]+)?\s*[pnuµμm]?)F(?:[^A-Za-z]|$)`),
+		"L": regexp.MustCompile(`(?:^|[^0-9A-Za-z.])([0-9]+(?:\.[0-9]+)?\s*[pnuµμm]?)H(?:[^A-Za-z]|$)`),
+	}
+	reRefKind = regexp.MustCompile(`^([A-Z]+)[0-9]`)
+	reRKM     = regexp.MustCompile(`^([0-9]+)([RpnumkKMG])([0-9]+)$`)
 )
 
-// lcscChipSize is the imperial size code in a footprint name or catalog
-// package ("" when there is none).
+// lcscChipSize is the imperial size code in a footprint name, package or
+// record URL ("" when there is none). Only whole tokens count, so model
+// numbers, pitches and the URL's own C-number never read as a size.
 func lcscChipSize(s string) string {
-	if m := reChipSize.FindStringSubmatch(s); m != nil {
-		return m[1]
+	s = reURLNumber.ReplaceAllString(s, "")
+	for _, t := range reSizeSplit.Split(s, -1) {
+		m := reSizeToken.FindStringSubmatch(t)
+		if m == nil {
+			continue
+		}
+		if m[2] != "" {
+			if imp, ok := metricToImp[m[1]]; ok {
+				return imp
+			}
+			continue
+		}
+		if imperial[m[1]] {
+			return m[1]
+		}
 	}
 	return ""
 }
 
-// lcscValue parses a schematic value or catalog value ("4k7", "100nF", "10kΩ").
+// lcscValue parses a schematic or record value ("4k7", "100nF", "10kΩ",
+// "10K 1%", "0R", "600R@100MHz"): the first word is the value.
 func lcscValue(s string) (float64, bool) {
 	s = strings.TrimSpace(s)
+	if i := strings.IndexAny(s, " \t/@,;"); i > 0 {
+		s = s[:i]
+	}
 	for _, u := range []string{"Ω", "ohm", "Ohm", "OHM"} {
 		s = strings.ReplaceAll(s, u, "")
 	}
 	s = strings.ReplaceAll(s, "µ", "u")
 	s = strings.ReplaceAll(s, "μ", "u")
 	s = strings.TrimRight(s, "FHfh")
-	// 4k7 / 2R2 / 4n7 notation.
-	if m := regexp.MustCompile(`^([0-9]+)([RpnumkKMG])([0-9]+)$`).FindStringSubmatch(s); m != nil {
+	if m := reRKM.FindStringSubmatch(s); m != nil { // 4k7, 2R2, 4n7
 		mult := m[2]
 		if mult == "R" {
 			mult = ""
 		}
 		s = m[1] + "." + m[3] + mult
 	}
-	if strings.HasSuffix(s, "R") {
-		s = strings.TrimSuffix(s, "R")
-	}
+	s = strings.TrimSuffix(s, "R")
 	if s == "" {
 		return 0, false
 	}
 	return powersim.ParseValue(s)
 }
 
-// lcscDescValue is the R/C/L value in a catalog description.
-func lcscDescValue(kind, desc string) (float64, bool) {
-	re := map[string]*regexp.Regexp{"R": reDescRV, "C": reDescCV, "L": reDescLV}[kind]
-	if re == nil {
-		return 0, false
+// lcscRecordValue is the value of kind (R, C or L) a record states, from its
+// Value field, else its description. A ferrite (L) may state ohms instead.
+func lcscRecordValue(kind string, h kicad.EasyEDAPart) (float64, bool) {
+	kinds := []string{kind}
+	if kind == "L" {
+		kinds = append(kinds, "R")
 	}
-	m := re.FindStringSubmatch(desc)
-	if m == nil {
-		return 0, false
+	for _, k := range kinds {
+		for _, s := range []string{h.Value, h.Description} {
+			if m := reRecVal[k].FindStringSubmatch(s); m != nil {
+				if v, ok := lcscValue(m[1]); ok {
+					return v, true
+				}
+			}
+		}
 	}
-	return lcscValue(m[1])
+	return 0, false
 }
 
-// lcscVerify compares each assembled part with the catalog row of its LCSC
-// number. catalog holds the rows found; a number absent from it was not found.
+// lcscVerify compares each assembled part with the record of its LCSC number.
+// catalog holds the records found; a number absent from it has none.
 func lcscVerify(parts []kicad.Part, catalog map[string]kicad.EasyEDAPart) []lcscFinding {
 	var out []lcscFinding
 	for _, p := range parts {
@@ -105,8 +141,12 @@ func lcscVerify(parts []kicad.Part, catalog map[string]kicad.EasyEDAPart) []lcsc
 		}
 		h, ok := catalog[p.LCSC]
 		if !ok {
-			add("error", "LCSC number not found in the JLC catalog", "")
+			add("error", "LCSC number has no record (not a real part number)", "")
 			continue
+		}
+		kind := ""
+		if m := reRefKind.FindStringSubmatch(strings.ToUpper(p.Ref)); m != nil {
+			kind = map[string]string{"R": "R", "C": "C", "L": "L"}[m[1]]
 		}
 		fpSize := lcscChipSize(footprintName(p.Footprint))
 		catSize := ""
@@ -115,21 +155,25 @@ func lcscVerify(parts []kicad.Part, catalog map[string]kicad.EasyEDAPart) []lcsc
 				break
 			}
 		}
-		if fpSize != "" && catSize != "" && fpSize != catSize {
-			add("error", fmt.Sprintf("footprint size %s, catalog package %s", fpSize, catSize), h.Package)
-		}
-		kind := ""
-		if m := reRefKind.FindStringSubmatch(strings.ToUpper(p.Ref)); m != nil {
-			kind = map[string]string{"R": "R", "C": "C", "L": "L"}[m[1]]
+		switch {
+		case fpSize != "" && catSize != "" && fpSize != catSize:
+			add("error", fmt.Sprintf("footprint size %s, record package %s", fpSize, catSize), h.Package)
+		case fpSize != "" && catSize == "" && kind != "":
+			add("error", fmt.Sprintf("footprint size %s, the record names no chip size: check the part by hand", fpSize), h.Package)
+		case fpSize != "" && catSize == "":
+			add("warning", fmt.Sprintf("footprint size %s, the record names no chip size", fpSize), h.Package)
 		}
 		if kind != "" {
 			want, okW := lcscValue(p.Value)
-			got, okG := lcscDescValue(kind, h.Value)
-			if !okG {
-				got, okG = lcscDescValue(kind, h.Description)
-			}
-			if okW && okG && want > 0 && math.Abs(got-want)/want > 0.005 {
-				add("error", fmt.Sprintf("value %s, catalog %s", p.Value, powersimFormat(got, kind)), strings.TrimSpace(h.Value+" "+h.Description))
+			got, okG := lcscRecordValue(kind, h)
+			rec := strings.TrimSpace(h.Value + " " + h.Description)
+			switch {
+			case !okW:
+				add("error", fmt.Sprintf("value %q cannot be read: check the part by hand", p.Value), rec)
+			case !okG:
+				add("error", fmt.Sprintf("the record states no %s value (a different kind of part?)", map[string]string{"R": "resistance", "C": "capacitance", "L": "inductance"}[kind]), rec)
+			case want == 0 && got != 0, want != 0 && math.Abs(got-want)/want > 0.005:
+				add("error", fmt.Sprintf("value %s, record %s", p.Value, lcscFormat(got, kind)), rec)
 			}
 		}
 		if h.Stock <= 0 {
@@ -153,7 +197,7 @@ func footprintName(fp string) string {
 	return fp
 }
 
-func powersimFormat(v float64, kind string) string {
+func lcscFormat(v float64, kind string) string {
 	unit := map[string]string{"R": "Ω", "C": "F", "L": "H"}[kind]
 	for _, s := range []struct {
 		f float64
@@ -167,25 +211,35 @@ func powersimFormat(v float64, kind string) string {
 }
 
 // lcscLookup fetches the record of each number, two at a time (the endpoint
-// throttles bursts). A number with no record is absent from the map.
-func lcscLookup(numbers []string, lookup func(n string) (kicad.EasyEDAPart, bool, error)) (map[string]kicad.EasyEDAPart, error) {
+// throttles bursts). A number with no record is absent from the map. The first
+// error cancels the rest; nothing partial is returned with it.
+func lcscLookup(ctx context.Context, numbers []string, lookup func(ctx context.Context, n string) (kicad.EasyEDAPart, bool, error)) (map[string]kicad.EasyEDAPart, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	out := map[string]kicad.EasyEDAPart{}
 	var mu sync.Mutex
 	var firstErr error
 	sem := make(chan struct{}, 2)
 	var wg sync.WaitGroup
 	for _, n := range numbers {
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+		}
+		if ctx.Err() != nil {
+			break
+		}
 		wg.Add(1)
-		sem <- struct{}{}
 		go func(n string) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			part, found, err := lookup(n)
+			part, found, err := lookup(ctx, n)
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
 				if firstErr == nil {
 					firstErr = err
+					cancel()
 				}
 				return
 			}
@@ -195,28 +249,32 @@ func lcscLookup(numbers []string, lookup func(n string) (kicad.EasyEDAPart, bool
 		}(n)
 	}
 	wg.Wait()
-	return out, firstErr
+	if firstErr == nil && ctx.Err() != nil {
+		firstErr = ctx.Err()
+	}
+	if firstErr != nil {
+		return nil, firstErr
+	}
+	return out, nil
 }
 
 func runLcscVerify(stdout, stderr io.Writer, pcb, sch string, asJSON bool) error {
-	if pcb == "" {
-		return fmt.Errorf("--verify needs --pcb (placed parts come from the board)")
+	if pcb == "" || sch == "" {
+		return fmt.Errorf("--verify needs --pcb and --sch (placed parts from the board, values from the schematic)")
 	}
 	bd, err := kicad.ReadBoard(pcb)
 	if err != nil {
 		return err
 	}
-	var rows []kicad.SchPart
-	if sch != "" {
-		cli, err := kicad.ResolveFabCLI()
-		if err != nil {
-			return err
-		}
-		if rows, err = kicad.ReadSchematicParts(cli, sch); err != nil {
-			return err
-		}
+	cli, err := kicad.ResolveFabCLI()
+	if err != nil {
+		return err
 	}
-	parts, warns := kicad.MergeParts(bd, rows, sch != "")
+	rows, err := kicad.ReadSchematicParts(cli, sch)
+	if err != nil {
+		return err
+	}
+	parts, warns := kicad.MergeParts(bd, rows, true)
 	missing, invalid := kicad.CheckLCSC(parts)
 	seen := map[string]bool{}
 	var numbers []string
@@ -227,7 +285,9 @@ func runLcscVerify(stdout, stderr io.Writer, pcb, sch string, asJSON bool) error
 		}
 	}
 	sort.Strings(numbers)
-	catalog, err := lcscLookup(numbers, kicad.LookupEasyEDAPart)
+	ctx, cancel := context.WithTimeout(context.Background(), lcscVerifyDeadline)
+	defer cancel()
+	catalog, err := lcscLookup(ctx, numbers, kicad.LookupEasyEDAPart)
 	if err != nil {
 		return fmt.Errorf("LCSC lookup failed (live, needs the network; nothing was judged): %w", err)
 	}
