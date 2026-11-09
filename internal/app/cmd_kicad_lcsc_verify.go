@@ -39,13 +39,17 @@ type lcscFinding struct {
 }
 
 var (
-	// A size token: up to three letters (R0402, LED0603) then a size code,
-	// optionally "Metric" (KiCad's R_0402_1005Metric names both).
-	reSizeToken = regexp.MustCompile(`^[A-Za-z]{0,3}([0-9]{4,5})(Metric|metric)?$`)
-	reSizeSplit = regexp.MustCompile(`[_\-\s()/,;:+\[\]]+`)
-	reURLNumber = regexp.MustCompile(`(?i)_C[0-9]+\.html$`)
-	imperial    = map[string]bool{"01005": true, "0201": true, "0402": true, "0603": true, "0805": true, "1008": true, "1206": true, "1210": true, "1806": true, "1812": true, "2010": true, "2512": true}
-	metricToImp = map[string]string{"0402": "01005", "0603": "0201", "1005": "0402", "1608": "0603", "2012": "0805", "2520": "1008", "3216": "1206", "3225": "1210", "4516": "1806", "4532": "1812", "5025": "2010", "6332": "2512"}
+	// A size token: a size code, optionally "Metric" (KiCad's
+	// R_0402_1005Metric names both); in a package name also R0402 / C0603 /
+	// L0805 / LED0603 / D0603 / FB0402.
+	reSizeToken    = regexp.MustCompile(`^([0-9]{4,5})(Metric|metric)?$`)
+	reSizePkgToken = regexp.MustCompile(`^(?:R|C|L|D|F|FB|LED)([0-9]{4,5})$`)
+	reSpacedUnit   = regexp.MustCompile(`([0-9])\s+([pnuµμmkKMGRrΩ])`)
+	reOhmMark      = regexp.MustCompile(`(?i)(Ω|ohm|^[0-9.]+\s*[kKM]?R|^[0-9]+[Rr][0-9]+)`)
+	reSizeSplit    = regexp.MustCompile(`[_\-\s()/,;:+\[\]]+`)
+	reURLNumber    = regexp.MustCompile(`(?i)_C[0-9]+\.html$`)
+	imperial       = map[string]bool{"01005": true, "0201": true, "0402": true, "0603": true, "0805": true, "1008": true, "1206": true, "1210": true, "1806": true, "1812": true, "2010": true, "2512": true}
+	metricToImp    = map[string]string{"0402": "01005", "0603": "0201", "1005": "0402", "1608": "0603", "2012": "0805", "2520": "1008", "3216": "1206", "3225": "1210", "4516": "1806", "4532": "1812", "5025": "2010", "6332": "2512"}
 	// A value with its unit in a record: "10kΩ", "100nF (104)", "4.7uH".
 	reRecVal = map[string]*regexp.Regexp{
 		"R": regexp.MustCompile(`(?:^|[^0-9A-Za-z.])([0-9]+(?:\.[0-9]+)?\s*[pnuµμmkKMG]?)\s*(?:Ω|ohm)`),
@@ -53,16 +57,27 @@ var (
 		"L": regexp.MustCompile(`(?:^|[^0-9A-Za-z.])([0-9]+(?:\.[0-9]+)?\s*[pnuµμm]?)H(?:[^A-Za-z]|$)`),
 	}
 	reRefKind = regexp.MustCompile(`^([A-Z]+)[0-9]`)
-	reRKM     = regexp.MustCompile(`^([0-9]+)([RpnumkKMG])([0-9]+)$`)
+	reRKM     = regexp.MustCompile(`^([0-9]+)([RrpnumkKMG])([0-9]+)$`)
 )
 
-// lcscChipSize is the imperial size code in a footprint name, package or
-// record URL ("" when there is none). Only whole tokens count, so model
-// numbers, pitches and the URL's own C-number never read as a size.
-func lcscChipSize(s string) string {
+// lcscChipSize is the imperial size code in a footprint name, record
+// description or URL ("" when there is none). Only whole tokens count, so model
+// numbers, pitches, C-numbers and the URL's own number never read as a size.
+func lcscChipSize(s string) string { return chipSize(s, false) }
+
+// lcscPackageSize is lcscChipSize for a package name, where R0402 / C0603 and
+// the like are sizes too.
+func lcscPackageSize(s string) string { return chipSize(s, true) }
+
+func chipSize(s string, pkg bool) string {
 	s = reURLNumber.ReplaceAllString(s, "")
 	for _, t := range reSizeSplit.Split(s, -1) {
 		m := reSizeToken.FindStringSubmatch(t)
+		if m == nil && pkg {
+			if n := reSizePkgToken.FindStringSubmatch(t); n != nil {
+				m = []string{t, n[1], ""}
+			}
+		}
 		if m == nil {
 			continue
 		}
@@ -79,10 +94,10 @@ func lcscChipSize(s string) string {
 	return ""
 }
 
-// lcscValue parses a schematic or record value ("4k7", "100nF", "10kΩ",
-// "10K 1%", "0R", "600R@100MHz"): the first word is the value.
+// lcscValue parses a schematic or record value ("4k7", "100nF", "10 kΩ",
+// "10K 1%", "0R", "4r7", "600R@100MHz"): the first word is the value.
 func lcscValue(s string) (float64, bool) {
-	s = strings.TrimSpace(s)
+	s = reSpacedUnit.ReplaceAllString(strings.TrimSpace(s), "$1$2")
 	if i := strings.IndexAny(s, " \t/@,;"); i > 0 {
 		s = s[:i]
 	}
@@ -99,30 +114,33 @@ func lcscValue(s string) (float64, bool) {
 		}
 		s = m[1] + "." + m[3] + mult
 	}
-	s = strings.TrimSuffix(s, "R")
+	s = strings.TrimSuffix(strings.TrimSuffix(s, "R"), "r")
 	if s == "" {
 		return 0, false
 	}
 	return powersim.ParseValue(s)
 }
 
-// lcscRecordValue is the value of kind (R, C or L) a record states, from its
-// Value field, else its description. A ferrite (L) may state ohms instead.
-func lcscRecordValue(kind string, h kicad.EasyEDAPart) (float64, bool) {
-	kinds := []string{kind}
-	if kind == "L" {
-		kinds = append(kinds, "R")
-	}
-	for _, k := range kinds {
-		for _, s := range []string{h.Value, h.Description} {
-			if m := reRecVal[k].FindStringSubmatch(s); m != nil {
-				if v, ok := lcscValue(m[1]); ok {
-					return v, true
-				}
+// lcscRecordValue is the value in unit (R ohms, C farads, L henries) a record
+// states, from its Value field, else its description.
+func lcscRecordValue(unit string, h kicad.EasyEDAPart) (float64, bool) {
+	for _, s := range []string{h.Value, h.Description} {
+		if m := reRecVal[unit].FindStringSubmatch(s); m != nil {
+			if v, ok := lcscValue(m[1]); ok {
+				return v, true
 			}
 		}
 	}
 	return 0, false
+}
+
+// lcscUnit is the unit a part's value is compared in: its kind's, except an
+// L whose value is in ohms (a ferrite bead, "600R@100MHz") compares ohms.
+func lcscUnit(kind, value string) string {
+	if kind == "L" && reOhmMark.MatchString(strings.TrimSpace(value)) {
+		return "R"
+	}
+	return kind
 }
 
 // lcscVerify compares each assembled part with the record of its LCSC number.
@@ -148,12 +166,13 @@ func lcscVerify(parts []kicad.Part, catalog map[string]kicad.EasyEDAPart) []lcsc
 		if m := reRefKind.FindStringSubmatch(strings.ToUpper(p.Ref)); m != nil {
 			kind = map[string]string{"R": "R", "C": "C", "L": "L"}[m[1]]
 		}
-		fpSize := lcscChipSize(footprintName(p.Footprint))
-		catSize := ""
-		for _, s := range []string{h.Package, h.Description, h.URL} {
-			if catSize = lcscChipSize(s); catSize != "" {
+		fpSize := lcscPackageSize(footprintName(p.Footprint))
+		catSize := lcscPackageSize(h.Package)
+		for _, s := range []string{h.Description, h.URL} {
+			if catSize != "" {
 				break
 			}
+			catSize = lcscChipSize(s)
 		}
 		switch {
 		case fpSize != "" && catSize != "" && fpSize != catSize:
@@ -164,16 +183,17 @@ func lcscVerify(parts []kicad.Part, catalog map[string]kicad.EasyEDAPart) []lcsc
 			add("warning", fmt.Sprintf("footprint size %s, the record names no chip size", fpSize), h.Package)
 		}
 		if kind != "" {
+			unit := lcscUnit(kind, p.Value)
 			want, okW := lcscValue(p.Value)
-			got, okG := lcscRecordValue(kind, h)
+			got, okG := lcscRecordValue(unit, h)
 			rec := strings.TrimSpace(h.Value + " " + h.Description)
 			switch {
 			case !okW:
 				add("error", fmt.Sprintf("value %q cannot be read: check the part by hand", p.Value), rec)
 			case !okG:
-				add("error", fmt.Sprintf("the record states no %s value (a different kind of part?)", map[string]string{"R": "resistance", "C": "capacitance", "L": "inductance"}[kind]), rec)
+				add("error", fmt.Sprintf("the record states no %s value (a different kind of part?)", map[string]string{"R": "resistance", "C": "capacitance", "L": "inductance"}[unit]), rec)
 			case want == 0 && got != 0, want != 0 && math.Abs(got-want)/want > 0.005:
-				add("error", fmt.Sprintf("value %s, record %s", p.Value, lcscFormat(got, kind)), rec)
+				add("error", fmt.Sprintf("value %s, record %s", p.Value, lcscFormat(got, unit)), rec)
 			}
 		}
 		if h.Stock <= 0 {

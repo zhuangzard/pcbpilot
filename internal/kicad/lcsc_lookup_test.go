@@ -60,6 +60,15 @@ func TestLookupEasyEDAPart(t *testing.T) {
 	if _, found, err := look(anon.URL); found || err == nil {
 		t.Fatalf("no identity: %v %v", found, err)
 	}
+	// A hanging reply is cut off by the context deadline.
+	hang := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
+	t.Cleanup(hang.Close)
+	dctx, dcancel := context.WithTimeout(ctx, 200*time.Millisecond)
+	defer dcancel()
+	start := time.Now()
+	if _, _, err := lookupEasyEDAPart(dctx, http.DefaultClient, []string{hang.URL}, time.Hour, "C1"); err == nil || time.Since(start) > 5*time.Second {
+		t.Fatalf("hanging host: %v after %v", err, time.Since(start))
+	}
 	// The context bounds the whole lookup.
 	cctx, cancel := context.WithCancel(ctx)
 	cancel()
