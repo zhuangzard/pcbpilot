@@ -425,3 +425,14 @@ func TestPlanStitchInPour(t *testing.T) {
 		t.Error("margin")
 	}
 }
+
+// The KiCad snapshot names a poured zone pourPrimitiveId; its fills must parse.
+func TestParseKicadPouredFills(t *testing.T) {
+	poured := []any{map[string]any{"pourPrimitiveId": "z-gnd", "net": "GND", "layer": 2.0, "fills": []any{
+		map[string]any{"source": []any{[]any{20.0, -20.0, "L", 1550.0, -20.0, 1550.0, -1160.0, 20.0, -1160.0}}},
+	}}}
+	areas, err := parseCopperAreaObstacles(nil, poured)
+	if err != nil || len(areas) != 1 || areas[0].Net != "GND" || areas[0].Layer != 2 {
+		t.Fatalf("areas %+v err %v", areas, err)
+	}
+}

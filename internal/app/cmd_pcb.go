@@ -280,6 +280,9 @@ func parseCopperAreaObstacles(fillsRaw, pouredRaw []any) ([]pcbCopperArea, error
 			return nil, fmt.Errorf("materialized poured[%d] is not an object", i)
 		}
 		id := strings.TrimSpace(asString(m["primitiveId"]))
+		if id == "" { // the KiCad snapshot names the zone pourPrimitiveId
+			id = strings.TrimSpace(asString(m["pourPrimitiveId"]))
+		}
 		if id == "" {
 			return nil, fmt.Errorf("materialized poured[%d] primitiveId is unknown", i)
 		}
