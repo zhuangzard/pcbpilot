@@ -449,6 +449,80 @@ func FetchEasyEDAComponent(lcsc string) ([]byte, error) {
 	return nil, fmt.Errorf("%s: no EasyEDA library record (%s)", lcsc, strings.Join(errs, "; "))
 }
 
+// EasyEDAPart is the identity in an LCSC number's EasyEDA library record.
+type EasyEDAPart struct {
+	LCSC, MPN, Manufacturer, Package, Value, Description, URL, PartClass string
+	Stock                                                                int64
+}
+
+// LookupEasyEDAPart reads the library record of one LCSC number. found is
+// false when a host answered that the number has no record; err is set when
+// no host gave a usable answer (the endpoint sometimes answers empty under
+// load, so each host is tried a few times).
+func LookupEasyEDAPart(lcsc string) (part EasyEDAPart, found bool, err error) {
+	var errs []string
+	client := &http.Client{Timeout: 30 * time.Second}
+	for _, h := range easyEDAHosts {
+		for try := 0; try < 3; try++ {
+			if try > 0 {
+				time.Sleep(time.Duration(try) * 1500 * time.Millisecond)
+			}
+			req, _ := http.NewRequest(http.MethodGet, EasyEDAComponentURL(h, lcsc), nil)
+			req.Header.Set("User-Agent", "Mozilla/5.0 (pcbpilot kicad lcsc --verify)")
+			resp, rerr := client.Do(req)
+			if rerr != nil {
+				errs = append(errs, h+": "+rerr.Error())
+				continue
+			}
+			b, rerr := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
+			resp.Body.Close()
+			if rerr != nil || resp.StatusCode != http.StatusOK || len(bytes.TrimSpace(b)) == 0 {
+				errs = append(errs, fmt.Sprintf("%s: HTTP %d, %d bytes %v", h, resp.StatusCode, len(b), rerr))
+				continue
+			}
+			var env struct {
+				Success bool `json:"success"`
+				Result  *struct {
+					Title       string `json:"title"`
+					Description string `json:"description"`
+					LCSC        *struct {
+						Number string `json:"number"`
+						Stock  int64  `json:"stock"`
+						URL    string `json:"url"`
+					} `json:"lcsc"`
+					DataStr struct {
+						Head struct {
+							CPara map[string]any `json:"c_para"`
+						} `json:"head"`
+					} `json:"dataStr"`
+				} `json:"result"`
+			}
+			if jerr := json.Unmarshal(b, &env); jerr != nil {
+				errs = append(errs, h+": "+jerr.Error())
+				continue
+			}
+			if !env.Success || env.Result == nil {
+				return EasyEDAPart{LCSC: lcsc}, false, nil
+			}
+			r := env.Result
+			str := func(k string) string { v, _ := r.DataStr.Head.CPara[k].(string); return strings.TrimSpace(v) }
+			part = EasyEDAPart{LCSC: lcsc, MPN: str("Manufacturer Part"), Manufacturer: str("Manufacturer"), Package: str("package"),
+				Value: str("Value"), Description: r.Description, PartClass: str("JLCPCB Part Class")}
+			if part.MPN == "" {
+				part.MPN = r.Title
+			}
+			if r.LCSC != nil {
+				part.Stock, part.URL = r.LCSC.Stock, r.LCSC.URL
+				if r.LCSC.Number != "" && !strings.EqualFold(r.LCSC.Number, lcsc) {
+					return part, false, nil // a record of another number
+				}
+			}
+			return part, true, nil
+		}
+	}
+	return EasyEDAPart{LCSC: lcsc}, false, fmt.Errorf("%s: no usable answer (%s)", lcsc, strings.Join(errs, "; "))
+}
+
 // ImportResult is fab.py import-lcsc's reply.
 type ImportResult struct {
 	LCSC         string `json:"lcsc"`

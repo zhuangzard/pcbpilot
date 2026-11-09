@@ -14,6 +14,7 @@
 建库   pcbpilot kicad lcsc --import C25744 --lib-dir lib # 嘉立创 EasyEDA 库记录 → KiCad 自带导入器
 写号   pcbpilot kicad lcsc --pcb b.kicad_pcb --sch b.kicad_sch --set R1=C25744
 检查   pcbpilot kicad lcsc --pcb b.kicad_pcb --sch b.kicad_sch --check
+核号   pcbpilot kicad lcsc --pcb b.kicad_pcb --sch b.kicad_sch --verify  # 逐 C 号精确查：存在、片式尺寸、R/C/L 值
 预检   pcbpilot kicad fab  --preflight --pcb b.kicad_pcb --sch b.kicad_sch --contract order-contract.json
 出图   pcbpilot kicad fab  --pcb b.kicad_pcb --sch b.kicad_sch --out fab/
 ```

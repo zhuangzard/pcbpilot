@@ -4,7 +4,7 @@ description: "用 pcbpilot 为 KiCad 工程出制造与贴片文件并验收：�
 license: MIT
 metadata:
   author: "zhuangzard (pcbpilot); original easyeda-agent by zhoushoujianwork"
-  version: "0.12.6"
+  version: "0.12.7"
   homepage: "https://github.com/zhuangzard/pcbpilot"
 ---
 
@@ -64,7 +64,11 @@ router 修板（归属与修法见 [drc-triage.md](../pcbpilot/references/drc-tr
 pcbpilot kicad lcsc --search "<MPN 或 值+封装>" --qty <需求量>      # --offline 只查内置常用料
 pcbpilot kicad lcsc --pcb <board>.kicad_pcb --sch <root>.kicad_sch --set R1=C25744 --set C1=C1525,C2=C1525
 pcbpilot kicad lcsc --pcb <board>.kicad_pcb --sch <root>.kicad_sch --check     # 直到 0 missing / 0 invalid
+pcbpilot kicad lcsc --pcb <board>.kicad_pcb --sch <root>.kicad_sch --verify    # 出图前必跑：逐个 C 号精确查记录，0 mismatch
 ```
+
+`--verify` 先做 `--check`，再按 C 号精确取 EasyEDA/LCSC 记录（联网；查不到就报错，不判断）：号不存在、片式尺寸（0402/0603…）与封装不符、
+R/C/L 值与原理图值不符都算失败（退出 1）；LCSC 库存为 0 只警告。它不比对 IC 的型号与功能，IC 仍要核 MPN。
 
 `--qty` 是**这个 C 号**的需求量 = 板数 × 每板贴装位数（BOM 里该 C 号的位号数）+ 厂商损耗/备料，拼板时板数按拼板数取整后的
 实际贴装板数（算法见 [§4](references/fab-acceptance.md#4-bom-与-cpl-审核)）。候选的 MPN 与原理图完全一致才能直接写；只是兼容/替代型号时先给用户确认。安装孔、Mark、测试点、Logo、PCB 保险丝这类
