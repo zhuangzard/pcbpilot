@@ -435,4 +435,15 @@ func TestParseKicadPouredFills(t *testing.T) {
 	if err != nil || len(areas) != 1 || areas[0].Net != "GND" || areas[0].Layer != 2 {
 		t.Fatalf("areas %+v err %v", areas, err)
 	}
+	fill := []any{map[string]any{"source": []any{[]any{0.0, 0.0, "L", 10.0, 0.0, 10.0, 10.0}}}}
+	both := []any{map[string]any{"primitiveId": "p", "pourPrimitiveId": "z", "net": "GND", "layer": 2.0, "fills": fill}}
+	if areas, err := parseCopperAreaObstacles(nil, both); err != nil || areas[0].ID != "p:0" {
+		t.Fatalf("primitiveId must win: %+v %v", areas, err)
+	}
+	for _, m := range []map[string]any{{}, {"primitiveId": " ", "pourPrimitiveId": ""}} {
+		m["net"], m["layer"], m["fills"] = "GND", 2.0, fill
+		if _, err := parseCopperAreaObstacles(nil, []any{m}); err == nil {
+			t.Fatalf("a pour with no id must fail: %v", m)
+		}
+	}
 }
