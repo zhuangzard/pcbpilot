@@ -58,22 +58,68 @@ func zeroLengthIdentity(f checkFinding) string {
 	return ""
 }
 
-func dropDuplicateZeroLengthFindings(existing, extra []checkFinding) []checkFinding {
-	seen := map[string]struct{}{}
-	for _, f := range existing {
-		if k := zeroLengthIdentity(f); k != "" {
-			seen[k] = struct{}{}
-		}
+// checkLevelRank orders finding levels for duplicate merging. Unknown levels
+// rank with warn, matching checkLevelBlocks (they block only under strict).
+func checkLevelRank(level string) int {
+	switch strings.ToLower(level) {
+	case "fatal":
+		return 3
+	case "error":
+		return 2
+	case "info":
+		return 0
+	default:
+		return 1
 	}
-	out := make([]checkFinding, 0, len(extra))
-	for _, f := range extra {
-		if k := zeroLengthIdentity(f); k != "" {
-			if _, ok := seen[k]; ok {
+}
+
+// mergeDuplicateZeroLengthFindings folds the geometry guard's findings (extra)
+// into the connector's (existing) without reporting one zero-length wire
+// twice. A duplicate keeps the HIGHEST severity together with that finding's
+// own evidence: a guard ERROR for a primitive the connector only warned about
+// replaces the WARN in place, so the blocking finding is never lost. It
+// returns the possibly upgraded existing findings and the extra findings that
+// are still new.
+func mergeDuplicateZeroLengthFindings(existing, extra []checkFinding) (merged, added []checkFinding) {
+	merged = append([]checkFinding(nil), existing...)
+	type slot struct {
+		inAdded bool
+		index   int
+	}
+	seen := map[string]slot{}
+	for i, f := range merged {
+		k := zeroLengthIdentity(f)
+		if k == "" {
+			continue
+		}
+		if prev, ok := seen[k]; ok {
+			// existing already holds a duplicate; point at its most severe copy.
+			if checkLevelRank(f.Level) <= checkLevelRank(merged[prev.index].Level) {
 				continue
 			}
-			seen[k] = struct{}{}
 		}
-		out = append(out, f)
+		seen[k] = slot{index: i}
 	}
-	return out
+	added = make([]checkFinding, 0, len(extra))
+	for _, f := range extra {
+		k := zeroLengthIdentity(f)
+		if k == "" {
+			added = append(added, f)
+			continue
+		}
+		prev, ok := seen[k]
+		if !ok {
+			seen[k] = slot{inAdded: true, index: len(added)}
+			added = append(added, f)
+			continue
+		}
+		held := &merged[prev.index]
+		if prev.inAdded {
+			held = &added[prev.index]
+		}
+		if checkLevelRank(f.Level) > checkLevelRank(held.Level) {
+			*held = f
+		}
+	}
+	return merged, added
 }

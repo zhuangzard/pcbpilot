@@ -80,27 +80,60 @@ func TestZeroLengthIdentity(t *testing.T) {
 	}
 }
 
-// The connector reports one zero-length-wire WARN and the Go geometry guard adds
-// its own ERROR for the same primitive. Only the duplicate is dropped, by primitive
-// id or (when the id is missing) by anchor; other rules that share an id stay.
-func TestDropDuplicateZeroLengthFindings(t *testing.T) {
+// One zero-length wire is reported once — matched by primitive id or (when the
+// id is missing) by anchor — and the surviving copy carries the highest
+// severity with its own evidence. Other rules that share an id stay.
+func TestMergeDuplicateZeroLengthFindingsKeepsHighestSeverity(t *testing.T) {
 	base := []checkFinding{
-		{Type: "zero-length-wire", Level: "warn", WirePrimitiveId: "w1"},
+		{Type: "zero-length-wire", Level: "warn", WirePrimitiveId: "w1", Message: "connector"},
 		{Type: "zero-length-wire", Level: "warn", At: &checkPoint{X: 5, Y: 6}},
 		{Type: "wire-crossing", Level: "error", At: &checkPoint{X: 5, Y: 6}},
+		{Type: "zero-length-wire", Level: "error", WirePrimitiveId: "w3", Message: "connector"},
 	}
 	extra := []checkFinding{
-		{Type: "zero-length-wire", Level: "error", WirePrimitiveId: "w1"},       // same primitive
-		{Type: "zero-length-wire", Level: "error", At: &checkPoint{X: 5, Y: 6}}, // same coordinate
-		{Type: "zero-length-wire", Level: "error", WirePrimitiveId: "w2"},       // new primitive
-		{Type: "wire-through-body", Level: "error", WirePrimitiveId: "w1"},      // other rule, same id
+		{Type: "zero-length-wire", Level: "error", WirePrimitiveId: "w1", Message: "guard"}, // same primitive, more severe
+		{Type: "zero-length-wire", Level: "error", At: &checkPoint{X: 5, Y: 6}},             // same coordinate, more severe
+		{Type: "zero-length-wire", Level: "warn", WirePrimitiveId: "w2"},                    // new primitive
+		{Type: "zero-length-wire", Level: "error", WirePrimitiveId: "w2", Message: "guard"}, // repeats it, more severe
+		{Type: "wire-through-body", Level: "error", WirePrimitiveId: "w1"},                  // other rule, same id
+		{Type: "zero-length-wire", Level: "warn", WirePrimitiveId: "w3", Message: "guard"},  // less severe: existing wins
 	}
-	got := dropDuplicateZeroLengthFindings(base, extra)
-	want := []checkFinding{extra[2], extra[3]}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("dedupe kept %+v, want %+v", got, want)
+	snapshot := append([]checkFinding(nil), base...)
+	merged, added := mergeDuplicateZeroLengthFindings(base, extra)
+	if !reflect.DeepEqual(base, snapshot) {
+		t.Fatalf("input slice was modified: %+v", base)
 	}
-	if all := dropDuplicateZeroLengthFindings(nil, extra); !reflect.DeepEqual(all, extra) {
+	wantMerged := []checkFinding{extra[0], extra[1], base[2], base[3]}
+	if !reflect.DeepEqual(merged, wantMerged) {
+		t.Fatalf("merged = %+v, want %+v", merged, wantMerged)
+	}
+	wantAdded := []checkFinding{extra[3], extra[4]}
+	if !reflect.DeepEqual(added, wantAdded) {
+		t.Fatalf("added = %+v, want %+v", added, wantAdded)
+	}
+	if _, all := mergeDuplicateZeroLengthFindings(nil, extra[4:]); !reflect.DeepEqual(all, extra[4:]) {
 		t.Fatalf("empty existing must keep every geometry finding: %+v", all)
+	}
+}
+
+// WARN from the connector plus ERROR from the geometry guard for the same
+// primitive is ONE blocking finding, and the report fails even without --strict.
+func TestZeroLengthWarnPlusErrorIsOneBlockingFinding(t *testing.T) {
+	rep := checkReport{Findings: []checkFinding{{Type: "zero-length-wire", Level: "warn", WirePrimitiveId: "w1"}}}
+	if blockingCheckFindings(rep, false) != 0 {
+		t.Fatal("precondition: a lone WARN does not block without strict")
+	}
+	var added []checkFinding
+	rep.Findings, added = mergeDuplicateZeroLengthFindings(rep.Findings,
+		[]checkFinding{{Type: "zero-length-wire", Level: "error", WirePrimitiveId: "w1"}})
+	rep.Findings = append(rep.Findings, added...)
+	rep.Summary.Total = len(rep.Findings)
+	rep.Passed = len(rep.Findings) == 0
+	if len(rep.Findings) != 1 || rep.Findings[0].Level != "error" {
+		t.Fatalf("findings = %+v, want exactly one ERROR", rep.Findings)
+	}
+	if rep.Passed || rep.Summary.Total != 1 || blockingCheckFindings(rep, false) != 1 {
+		t.Fatalf("report must fail with one blocking finding: passed=%v total=%d blocking=%d",
+			rep.Passed, rep.Summary.Total, blockingCheckFindings(rep, false))
 	}
 }

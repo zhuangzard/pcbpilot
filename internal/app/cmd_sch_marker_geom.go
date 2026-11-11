@@ -543,8 +543,13 @@ func mergeMarkerGeomFindingsWith(cfg *appConfig, window string, allPages bool, o
 		geo = append(geo, checkFinding{Type: "partition-geometry-unavailable", Level: "ERROR", Message: "multi-page shallow reads cannot verify frame/Designator geometry; run sch check separately with --doc for each page"})
 	}
 
-	geo = dropDuplicateZeroLengthFindings(rep.Findings, geo)
+	// A duplicate zero-length finding may have been upgraded in place (guard
+	// ERROR over connector WARN), so the totals are restated even when nothing
+	// new is appended.
+	rep.Findings, geo = mergeDuplicateZeroLengthFindings(rep.Findings, geo)
 	if len(geo) == 0 {
+		rep.Summary.Total = len(rep.Findings)
+		rep.Passed = len(rep.Findings) == 0
 		return
 	}
 	rep.Findings = append(rep.Findings, geo...)
@@ -568,6 +573,10 @@ func mergeMarkerGeomFindingsWith(cfg *appConfig, window string, allPages bool, o
 			rep.Summary.ReversedNetFlags++
 		case "folded-net-label":
 			rep.Summary.FoldedNetLabels++
+		case "zero-length-wire":
+			// Only guard findings for primitives the connector did not already
+			// count reach this loop (duplicates were merged above).
+			rep.Summary.ZeroLengthWires++
 		}
 	}
 	rep.Summary.Total = len(rep.Findings)
