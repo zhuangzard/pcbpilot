@@ -253,3 +253,40 @@ func TestZoneDrawSkipsFrameFullySwallowedByTitleBlock(t *testing.T) {
 		t.Error("a frame fully inside the keep-out must not be drawable")
 	}
 }
+
+func TestZoneFrameAliveSetFailsClosedOnMalformedEntries(t *testing.T) {
+	good := map[string]any{"primitiveId": "ok"}
+	inv := func(rects, texts any) map[string]any {
+		return map[string]any{"pagePrimitives": map[string]any{"rectangles": rects, "texts": texts}}
+	}
+	for name, result := range map[string]map[string]any{
+		"rectangle empty object":     inv([]any{map[string]any{}}, []any{}),
+		"rectangle not an object":    inv([]any{"r1"}, []any{}),
+		"rectangle null entry":       inv([]any{nil}, []any{}),
+		"rectangle id null":          inv([]any{map[string]any{"primitiveId": nil}}, []any{}),
+		"rectangle id not a string":  inv([]any{map[string]any{"primitiveId": 7.0}}, []any{}),
+		"rectangle id blank":         inv([]any{map[string]any{"primitiveId": "  "}}, []any{}),
+		"bad rectangle after a good": inv([]any{good, map[string]any{}}, []any{}),
+		"text empty object":          inv([]any{good}, []any{map[string]any{}}),
+		"text not an object":         inv([]any{}, []any{42.0}),
+		"text id blank":              inv([]any{}, []any{map[string]any{"primitiveId": ""}}),
+		"rectangles null":            inv(nil, []any{}),
+		"texts not a list":           inv([]any{}, map[string]any{}),
+	} {
+		if got, err := zoneFrameAliveSet(result); err == nil {
+			t.Errorf("%s: accepted as alive set %v", name, got)
+		}
+	}
+	if got, err := zoneFrameAliveSet(inv([]any{}, []any{})); err != nil || len(got) != 0 {
+		t.Fatalf("well-formed empty inventory = %v, %v", got, err)
+	}
+
+	// The clear must not report success on an inventory it could not read.
+	frames := &workflow.SchZoneFrames{Rects: []string{"r1"}, Texts: []string{"t1"}}
+	deleted := 0
+	alive := func() (map[string]bool, error) { return zoneFrameAliveSet(inv([]any{map[string]any{}}, []any{})) }
+	n, err := clearZoneFramesWith(frames, func(string) error { deleted++; return nil }, alive)
+	if err == nil || n != 0 || deleted != 0 {
+		t.Fatalf("clear on malformed inventory = (%d, %v) with %d deletes, want an error and no deletes", n, err, deleted)
+	}
+}

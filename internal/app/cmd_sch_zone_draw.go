@@ -300,7 +300,8 @@ func typedZoneFrameClear(cfg *appConfig, window, docUUID string) zoneFrameClearF
 }
 
 // zoneFrameAliveSet collects live rectangle and text ids from a components.list
-// pagePrimitives read; a missing inventory is an error, never "all deleted".
+// pagePrimitives read; a missing inventory or a malformed entry is an error,
+// never "all deleted".
 func zoneFrameAliveSet(result map[string]any) (map[string]bool, error) {
 	pp, _ := result["pagePrimitives"].(map[string]any)
 	if pp == nil {
@@ -312,12 +313,19 @@ func zoneFrameAliveSet(result map[string]any) (map[string]bool, error) {
 		if !ok {
 			return nil, fmt.Errorf("page primitive inventory has no %s list", kind)
 		}
-		for _, it := range items {
-			if m, ok := it.(map[string]any); ok {
-				if id := strField(m, "primitiveId"); id != "" {
-					alive[id] = true
-				}
+		for i, it := range items {
+			// An entry that cannot name its primitive is a primitive this
+			// read failed to identify, possibly the very frame being cleared.
+			// Skipping it would turn "unknown" into "deleted".
+			m, ok := it.(map[string]any)
+			if !ok {
+				return nil, fmt.Errorf("page primitive inventory %s[%d] is not an object", kind, i)
 			}
+			id, ok := m["primitiveId"].(string)
+			if !ok || strings.TrimSpace(id) == "" {
+				return nil, fmt.Errorf("page primitive inventory %s[%d] has no primitiveId", kind, i)
+			}
+			alive[id] = true
 		}
 	}
 	return alive, nil
