@@ -113,9 +113,13 @@ func mergeDuplicateZeroLengthFindings(existing, extra []checkFinding) (merged, a
 			added = append(added, f)
 			continue
 		}
-		held := &merged[prev.index]
+		// Pick the slice before indexing: an index into added is not a valid
+		// index into merged (it is out of range whenever existing is shorter).
+		var held *checkFinding
 		if prev.inAdded {
 			held = &added[prev.index]
+		} else {
+			held = &merged[prev.index]
 		}
 		if checkLevelRank(f.Level) > checkLevelRank(held.Level) {
 			*held = f

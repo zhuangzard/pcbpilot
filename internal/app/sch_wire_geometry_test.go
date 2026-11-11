@@ -137,3 +137,40 @@ func TestZeroLengthWarnPlusErrorIsOneBlockingFinding(t *testing.T) {
 			rep.Passed, rep.Summary.Total, blockingCheckFindings(rep, false))
 	}
 }
+
+// A duplicate whose first occurrence came from the geometry findings must be
+// looked up in the added slice, never by that index in the existing one.
+func TestMergeDuplicateZeroLengthFindingsIndexesAddedSlice(t *testing.T) {
+	warn := checkFinding{Type: "zero-length-wire", Level: "warn", WirePrimitiveId: "w1", Message: "first"}
+	fail := checkFinding{Type: "zero-length-wire", Level: "error", WirePrimitiveId: "w1", Message: "second"}
+
+	// Nothing reported by the connector at all.
+	merged, added := mergeDuplicateZeroLengthFindings(nil, []checkFinding{warn, fail})
+	if len(merged) != 0 || !reflect.DeepEqual(added, []checkFinding{fail}) {
+		t.Fatalf("empty existing: merged=%+v added=%+v, want one error in added", merged, added)
+	}
+	merged, added = mergeDuplicateZeroLengthFindings([]checkFinding{}, []checkFinding{fail, warn})
+	if len(merged) != 0 || !reflect.DeepEqual(added, []checkFinding{fail}) {
+		t.Fatalf("empty existing, error first: merged=%+v added=%+v", merged, added)
+	}
+
+	// The duplicate sits at an added index past the end of existing.
+	other := checkFinding{Type: "wire-crossing", Level: "error", WirePrimitiveId: "x"}
+	pad1 := checkFinding{Type: "wire-through-body", Level: "error", WirePrimitiveId: "a"}
+	pad2 := checkFinding{Type: "wire-through-body", Level: "error", WirePrimitiveId: "b"}
+	existing := []checkFinding{other}
+	merged, added = mergeDuplicateZeroLengthFindings(existing, []checkFinding{pad1, pad2, warn, fail})
+	if !reflect.DeepEqual(merged, existing) {
+		t.Fatalf("existing must be untouched: %+v", merged)
+	}
+	if want := []checkFinding{pad1, pad2, fail}; !reflect.DeepEqual(added, want) {
+		t.Fatalf("added = %+v, want %+v", added, want)
+	}
+
+	// An added index that is in range for existing must still not rewrite it.
+	existing = []checkFinding{other, pad1}
+	merged, added = mergeDuplicateZeroLengthFindings(existing, []checkFinding{warn, fail})
+	if !reflect.DeepEqual(merged, existing) || !reflect.DeepEqual(added, []checkFinding{fail}) {
+		t.Fatalf("in-range added index: merged=%+v added=%+v", merged, added)
+	}
+}
