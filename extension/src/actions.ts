@@ -10678,6 +10678,13 @@ async function clickImportConfirm(timeoutMs: number): Promise<string> {
 	return 'no-dialog';
 }
 
+// A footprint-embedded primitive's id is its parent component's primitiveId
+// followed by its own `e<digits>` id (ba45…f3 + e184). A bare prefix match is
+// not ownership: top-level `e200` starts with component `e2` but is independent.
+export function pcbEmbeddedParent(id: string, componentIds: ReadonlyArray<string>): string | undefined {
+	return componentIds.find(cid => id.startsWith(cid) && /^e\d+$/.test(id.slice(cid.length)));
+}
+
 const pcbImportChanges: Handler = async (payload) => {
 	const schematicUuid = optionalString(payload, 'schematicUuid');
 	const ensureBoard = optionalBoolean(payload, 'ensureBoard') !== false;
@@ -13824,8 +13831,7 @@ const pcbRouteDelete: Handler = async (payload) => {
 		componentIds = (comps ?? []).map(c => c.getState_PrimitiveId()).filter(Boolean);
 	}
 	catch { /* best-effort: without component ids the readback below still reports honestly */ }
-	const embeddedParent = (id: string): string | undefined =>
-		componentIds.find(cid => id !== cid && id.startsWith(cid));
+	const embeddedParent = (id: string): string | undefined => pcbEmbeddedParent(id, componentIds);
 
 	const toDelete: Record<'track' | 'arc' | 'via', Array<string>> = { track: [], arc: [], via: [] };
 	const removed: Array<Record<string, unknown>> = [];
