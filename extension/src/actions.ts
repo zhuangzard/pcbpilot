@@ -11950,6 +11950,13 @@ export const pcbPageClear: Handler = async (payload) => {
 	// later rounds: retrying is what fixes a stale enumeration, not a rejected batch —
 	// hammering it 5× would only repeat the same warning.
 	const failedSet = new Set<string>();
+	// Footprint-embedded vias (thermal-pad vias: <componentId>e<n>) go with their
+	// component — deleted with it, or kept with it. The via API cannot delete
+	// them: enumerating them made the whole via batch throw, so a clean board
+	// reported failed:["vias"]. Component ids are unioned across rounds because a
+	// stale enumeration can still list a just-deleted component's vias.
+	const componentIds = new Set<string>();
+	const embeddedSkipped = new Set<string>();
 
 	// Collect this round's ids for one kind, skipping locked (unless includeLocked)
 	// and applying each kind's copper-layer / membership filter. An enumeration
@@ -11966,8 +11973,13 @@ export const pcbPageClear: Handler = async (payload) => {
 			return [];
 		}
 		const ids: Array<string> = [];
+		const owners = kind.key === 'vias' ? [...componentIds] : [];
 		for (const p of items) {
 			if (kind.filter && !kind.filter(p)) continue;
+			if (kind.key === 'vias') {
+				const id = p.getState_PrimitiveId();
+				if (pcbEmbeddedParent(id, owners)) { embeddedSkipped.add(id); continue; }
+			}
 			if (!ignoreLock && !includeLocked && pcbPrimLocked(p)) {
 				if (countLocked) skippedLocked[kind.key] = (skippedLocked[kind.key] ?? 0) + 1;
 				continue;
@@ -11998,6 +12010,10 @@ export const pcbPageClear: Handler = async (payload) => {
 	let leftover = 0;
 	for (let r = 0; r < maxRounds; r++) {
 		rounds++;
+		try {
+			for (const c of (await eda.pcb_PrimitiveComponent.getAll()) ?? []) componentIds.add(c.getState_PrimitiveId());
+		}
+		catch (err) { warnings.push(warnText('enumerate components for embedded-via ownership', err)); }
 		const round: Record<string, Array<string>> = {};
 		let found = 0;
 		for (const { kind, ignoreLock } of targets) {
@@ -12051,6 +12067,7 @@ export const pcbPageClear: Handler = async (payload) => {
 			deletedIds: idsByKey,
 			rounds,
 			...(skippedTotal ? { skippedLocked, skippedLockedTotal: skippedTotal } : {}),
+			...(embeddedSkipped.size ? { skippedEmbeddedVias: embeddedSkipped.size } : {}),
 			...(failed.length ? { failed } : {}),
 			preserveOutline,
 			includeLocked,
