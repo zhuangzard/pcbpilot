@@ -160,8 +160,39 @@ if command -v sha256sum >/dev/null 2>&1; then
 elif command -v shasum >/dev/null 2>&1; then
   SHA_CMD="shasum -a 256"
 fi
+# A private repository answers every anonymous request with 404 and serves its
+# assets through the REST API only. private_asset fetches one by name with the
+# token (GITHUB_TOKEN / GH_TOKEN / the gh CLI); the token goes to
+# api.github.com and nowhere else.
+PRIVATE_REPO=0
+DL_TOKEN=""
+private_asset() {
+  _pname="$1"; _pdest="$2"
+  [ -n "$DL_TOKEN" ] || DL_TOKEN=$(github_token)
+  [ -n "$DL_TOKEN" ] || return 1
+  if [ ! -s "$TMP/release.json" ]; then
+    curl -fsSL --connect-timeout 15 --max-time 60 \
+      -H 'Accept: application/vnd.github+json' -H "Authorization: Bearer ${DL_TOKEN}" \
+      "https://api.github.com/repos/${REPO}/releases/tags/${VERSION}" -o "$TMP/release.json" \
+      || { rm -f "$TMP/release.json"; return 1; }
+  fi
+  # Each asset's API url (.../releases/assets/<id>) precedes its name.
+  _pid=$(tr ',{' '\n\n' < "$TMP/release.json" | awk -v n="$_pname" '
+    /"url": *"[^"]*\/releases\/assets\/[0-9]+"/ { id = $0; sub(/"[^"]*$/, "", id); sub(/.*\//, "", id) }
+    index($0, "\"name\":\"" n "\"") || index($0, "\"name\": \"" n "\"") { print id; exit }')
+  case "$_pid" in ''|*[!0-9]*) return 1 ;; esac
+  curl -fsSL --connect-timeout 15 --max-time 300 \
+    -H 'Accept: application/octet-stream' -H "Authorization: Bearer ${DL_TOKEN}" \
+    "https://api.github.com/repos/${REPO}/releases/assets/${_pid}" -o "$_pdest"
+}
+
 SUM_CODE=$(curl -sSL --connect-timeout 15 --max-time 120 -w '%{http_code}' \
   "${BASE_URL}/checksums.txt" -o "$TMP/checksums.txt") || fatal "Could not download checksums.txt"
+if [ "$SUM_CODE" = 404 ] && private_asset checksums.txt "$TMP/checksums.txt"; then
+  SUM_CODE=200
+  PRIVATE_REPO=1
+  info "Private release repository: downloading through the GitHub API"
+fi
 case "$SUM_CODE" in
   200) [ -n "$SHA_CMD" ] || fatal "Install sha256sum or shasum to verify this release" ;;
   404) warn "Old release has no checksums.txt; binary version and Skill metadata will be checked" ;;
@@ -182,7 +213,9 @@ download_release_asset() {
   _name="$1"; _dest="$2"; _primary="${BASE_URL}/${_name}"
   _attempt=1
   while [ "$_attempt" -le 3 ]; do
-    if curl -fsSL --connect-timeout 15 --max-time 300 "$_primary" -o "$_dest"; then
+    if [ "$PRIVATE_REPO" = 1 ]; then
+      if private_asset "$_name" "$_dest"; then return 0; fi
+    elif curl -fsSL --connect-timeout 15 --max-time 300 "$_primary" -o "$_dest"; then
       return 0
     fi
     warn "GitHub download attempt ${_attempt}/3 failed for ${_name}"
@@ -192,6 +225,7 @@ download_release_asset() {
 
   # A third-party transport is trusted only for availability. The expected
   # digest must already have come directly from GitHub.
+  [ "$PRIVATE_REPO" = 0 ] || fatal "download failed through the GitHub API: ${_name} (a private repository has no mirror)"
   [ "$SUM_CODE" = 200 ] || fatal "GitHub download failed and no trusted checksum is available; mirror fallback refused"
   _proxy="${PCBPILOT_GITHUB_PROXY-https://gh-proxy.com/}"
   case "$_proxy" in

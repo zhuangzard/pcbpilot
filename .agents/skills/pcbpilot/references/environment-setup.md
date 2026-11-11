@@ -96,6 +96,17 @@ curl -fsSL https://raw.githubusercontent.com/zhuangzard/pcbpilot/main/install.sh
 irm https://raw.githubusercontent.com/zhuangzard/pcbpilot/main/install.ps1 | iex
 ```
 
+发布仓库为私有时，上面两条匿名命令返回 404。先 `gh auth login`（或设置 `GH_TOKEN`），再用带登录态的命令取脚本；
+脚本和 `pcbpilot update` 自己会用同一登录态经 GitHub API 下载各资产，token 只发给 `api.github.com`：
+
+```bash
+gh api -H "Accept: application/vnd.github.raw" repos/zhuangzard/pcbpilot/contents/install.sh | bash
+```
+
+```powershell
+gh api -H "Accept: application/vnd.github.raw" repos/zhuangzard/pcbpilot/contents/install.ps1 | Out-String | iex
+```
+
 #### 自动升级（默认开启）
 
 daemon 是唯一检查和应用升级的地方：启动时、每 6 小时、以及空闲 30 分钟后的第一个 action 时
