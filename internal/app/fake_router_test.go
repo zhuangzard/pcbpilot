@@ -15,12 +15,13 @@ import (
 )
 
 const (
-	envFakeRouter    = "PCBPILOT_FAKE_ROUTER" // fastroute | tracemaker
-	envFakeCalls     = "PCBPILOT_FAKE_CALLS"  // fastroute: file that gets one "call" line per run
-	envFakeReport    = "PCBPILOT_FAKE_REPORT" // fastroute: report JSON to write
-	envFakeFRMode    = "PCBPILOT_FAKE_FR"     // fastroute: "" | wait-stop | ignore-stop | crash-parallel | crash
-	envFakeFRReady   = "PCBPILOT_FAKE_READY"  // fastroute wait-stop / ignore-stop: file written once the stop handler is in place
-	envFakeTMBehaves = "PCBPILOT_FAKE_TM"     // tracemaker: ok | incomplete | crash | norep | sleep
+	envFakeRouter      = "PCBPILOT_FAKE_ROUTER" // fastroute | tracemaker | freerouting
+	envFakeCalls       = "PCBPILOT_FAKE_CALLS"  // fastroute: file that gets one "call" line per run
+	envFakeReport      = "PCBPILOT_FAKE_REPORT" // fastroute: report JSON to write
+	envFakeFRMode      = "PCBPILOT_FAKE_FR"     // fastroute: "" | wait-stop | ignore-stop | crash-parallel | crash
+	envFakeFRReady     = "PCBPILOT_FAKE_READY"  // fastroute wait-stop / ignore-stop: file written once the stop handler is in place
+	envFakeTMBehaves   = "PCBPILOT_FAKE_TM"     // tracemaker: ok | incomplete | crash | norep | sleep
+	envFakeFreeBehaves = "PCBPILOT_FAKE_FREE"   // freerouting: ok | incomplete | nocount | noses | crash | sleep
 )
 
 // fakeRouterBin makes this test binary act as the named router for the rest
@@ -122,6 +123,34 @@ func fakeRouterMain(router string, args []string) int {
 			return 2
 		}
 		return 0
+	case "freerouting":
+		ses := argAfter(args, "-do")
+		fmt.Println("2026-01-01 00:00:00.000 INFO   Freerouting v9.9.9 (build-date: 2026-01-01)")
+		switch os.Getenv(envFakeFreeBehaves) {
+		case "ok":
+			if _, err := os.Stat(argAfter(args, "-de")); err != nil {
+				return 2
+			}
+			fmt.Println("INFO   [A\\B] Auto-routing stage completed: started with 5 unrouted nets, completed in 1.00 seconds, final score: 900.00 (2 unrouted and 3 violations), using 1.00 total CPU seconds.")
+			fmt.Println("INFO   [A\\B] Optimization was completed in 0.04 seconds with the score of 990.00 (0 unrouted and 1 violation).")
+			os.WriteFile(ses, []byte("(session x)\n"), 0o644)
+			return 0
+		case "incomplete":
+			fmt.Println("INFO   [A\\B] Auto-routing pass #1 on board 'x' was completed in 1.97 seconds with score 497.89 (1 unrouted and 0 violations), using 1.50 CPU seconds.")
+			fmt.Println("INFO   [A\\B] Auto-routing stage completed: started with 5 unrouted nets, completed in 1.00 seconds, final score: 497.89 (9 unrouted and 7 violations), using 1.00 total CPU seconds.")
+			os.WriteFile(ses, []byte("(session x)\n"), 0o644)
+			return 0
+		case "nocount":
+			os.WriteFile(ses, []byte("(session x)\n"), 0o644)
+			return 0
+		case "noses":
+			return 0
+		case "crash":
+			return 1
+		case "sleep":
+			time.Sleep(30 * time.Second)
+			return 0
+		}
 	case "tracemaker":
 		if len(args) > 0 && args[0] == "version" {
 			fmt.Println("tracemaker 9.9.9")

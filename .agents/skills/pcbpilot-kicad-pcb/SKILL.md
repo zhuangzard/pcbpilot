@@ -127,8 +127,8 @@ post-layout 仿真 → 签核 → 保存（复制回工程）。板框、层叠�
 
 ## 布线前要确认的决策
 
-- **后端** `--router fastroute|tracemaker|both`：fastroute（默认，外部进程，需自行安装到 `~/.pcbpilot/fastroute/current`
-  或 `$FASTROUTE_BIN`）；TraceMaker 需 `--tracemaker-bin` / `$TRACEMAKER_BIN`；`both` 并行取先过全部门禁者。两个都没有 →
+- **后端** `--router fastroute|tracemaker|freerouting|both|all`：fastroute（默认，外部进程，需自行安装到 `~/.pcbpilot/fastroute/current`
+  或 `$FASTROUTE_BIN`）；TraceMaker 需 `--tracemaker-bin` / `$TRACEMAKER_BIN`；`both` 并行取先过全部门禁者；Freerouting 需 `--freerouting-bin` / `$FREEROUTING_BIN`（自带 Java 的官方包，与 fastroute 同内核，无检查点），`all` 三个一起跑。两个都没有 →
   布线步骤 `BLOCKED`，只交付布局。`current` 若链接到解压目录（Windows 包里是 `fastroute-<版本>-windows-x64/fastroute.exe`），
   显式 `--fastroute-bin <exe>`，否则要等输入板 DRC 跑完（可达数分钟）才报 “executable file not found”。
 - **重布还是续布**：已有部分走线且要保留 → 不加 `--rip-up`；推倒重来 → `--rip-up`（锁定的走线保留）。

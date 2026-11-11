@@ -492,12 +492,20 @@ pcbpilot kicad route --pcb board-b-v5a.kicad_pcb --intent intent.json --sim sim.
    路由器可执行文件：`--fastroute-bin` / `$FASTROUTE_BIN` / `~/.pcbpilot/fastroute/current` / PATH（tracemaker 同理）。`current`
    或显式路径是目录时（Windows 解压布局 `0.1.14/fastroute-0.1.14-windows-x64/fastroute.exe`）解析到其中、`bin/` 或下一层
    子目录里唯一的可执行文件；找不到或有多个即在启动阶段报错。
-3a. **`--router fastroute|tracemaker|both`**（默认 fastroute）：TraceMaker 是第二个后端（`~/.pcbpilot/tracemaker/current`、
+3a. **`--router fastroute|tracemaker|freerouting|both|all`**（默认 fastroute）：TraceMaker 是第二个后端（`~/.pcbpilot/tracemaker/current`、
    `$TRACEMAKER_BIN` 或 `--tracemaker-bin`；`--tracemaker-time` 默认 300 s——它同时决定格点间距，Board-A 上 ≥300 s 为 0.05 mm
    全通 359/359，90–180 s 为 0.1 mm、2 条未布通）。直接读 classed 板（含 `.kicad_pro/.kicad_dru`）写出布好的板，不走 DSN/SES；
    约束由意图生成：有 `widthMil.min` 且小于类宽的网只允许在焊盘处缩到该最小（`min_width_mm`），其余宽于 DSN 下限的网禁止缩细
    （`no_neckdown`），显式差分对带间距/偏斜。`both`：两个后端同时跑，**先「完整 + 无新增 DRC 错误」的胜出并取消另一个**，胜出者仍要过
    本次运行的全部门禁；任一门禁失败就换下一个（被取消的会重跑），全都不过则按最少未布通/新增 DRC 的那个报告失败。
+   **Freerouting**（`--router freerouting`，`all` = 三个后端一起跑）：同一份 DSN 进、SES 出，导入与 fastroute 相同。
+   用官方发行包里**自带 Java 运行时**的启动器（Windows 为 MSI 包内的 `freerouting.exe`；2.5.0 的 native CLI 包会崩溃挂起，不要用），
+   放到 `~/.pcbpilot/freerouting/current`、`$FREEROUTING_BIN` 或 `--freerouting-bin`。pcbpilot 固定加 `--gui.enabled=false -da`
+   （无界面、关闭使用统计上报，板数据不出本机）。`--freerouting-passes`（默认 100）限制布线轮数；`--freerouting-time`（默认 30 min）
+   到点即杀——它**只在结束时写 SES，没有检查点**，超时等于没有结果，大板要么给足时间要么减少轮数。它不认 fastroute 的
+   禁止缩细/差分对/调优参数，结果由全部门禁按板面实况判定；日志在 `route.freerouting.log`，数不出未布通数的结果按不完整处理。
+   fastroute 与 Freerouting 是同一个布线内核（同板同分数、同未布通数），所以它不是互补的第二意见；互补后端是 TraceMaker。
+   Freerouting 为 GPL-3.0，只在内部使用；对外分发含它的包须履行 GPL 义务。
    `summary.routerCandidates` 记录每个后端的未布通数、用时、快检结果、是否过全量门禁。任何门禁、签核都不因后端而减少。
 3. **过孔尺寸**：fastroute（0.1.14）不会让每个过孔都用类的 `use_via`：fanout 等路径从 DSN structure `(via …)` 列表里取过孔（实板 262 个
    过孔全是 Default 的 0.6 mm，类要求 0.6096 / 0.7 mm，`kicad rules --check` 的 via-size 判失败）。所以列表里只放**逐项取最大**的
