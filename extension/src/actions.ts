@@ -11494,7 +11494,27 @@ export function normalizePcbComponentPatch(raw: Record<string, unknown>): Record
 	if (Object.keys(out).length === 0) {
 		throw new ActionError(ErrorCodes.MISSING_PAYLOAD_FIELD, 'Patch object is empty — nothing to modify.');
 	}
+	if ('layer' in out) out.layer = pcbComponentLayerId(out.layer);
 	return out;
+}
+
+/**
+ * A placed component lives on TOP (1) or BOTTOM (2). The host accepts a layer
+ * NAME like "BOTTOM", reports success and leaves the part where it was
+ * (upstream #275), so names are mapped to the numeric id here — which also
+ * lets the fresh readback verify the flip.
+ */
+export function pcbComponentLayerId(value: unknown): number {
+	if (value === 1 || value === 2) return value;
+	if (typeof value === 'string') {
+		const name = value.trim().toLowerCase().replace(/[\s_-]+/g, ' ');
+		if (name === 'top' || name === 'top layer' || name === '1') return 1;
+		if (name === 'bottom' || name === 'bottom layer' || name === '2') return 2;
+	}
+	throw new ActionError(
+		ErrorCodes.PRECONDITION_REFUSED,
+		`Component layer ${JSON.stringify(value)} is not a component side; use "top"/"bottom" or 1/2. Nothing was modified.`,
+	);
 }
 
 export interface PcbPatchVerification {

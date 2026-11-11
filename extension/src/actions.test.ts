@@ -3202,6 +3202,7 @@ test('disconnect: wire-id locator stays targeted (single wire) and still verifie
 import {
 	classifyLockReadback,
 	normalizePcbComponentPatch,
+	pcbComponentLayerId,
 	pcbComponentLock,
 	pcbComponentModify,
 	verifyPcbComponentPatch,
@@ -4462,4 +4463,16 @@ test('pcb.route.delete deletes a top-level track whose id merely starts with a c
 		assert.deepEqual(res.result.notDeletable.map((n: any) => [n.primitiveId, n.parentComponent]), [['ba45f3e184', 'ba45f3'], ['e2e5', 'e2']]);
 	}
 	finally { delete (globalThis as any).eda; }
+});
+
+test('component layer names map to side ids so a flip is written and verified, never silently dropped (#275)', () => {
+	for (const [input, id] of [['BOTTOM', 2], ['bottom', 2], ['Bottom Layer', 2], ['bottom_layer', 2], [2, 2], ['TOP', 1], ['Top Layer', 1], [1, 1]] as const) {
+		assert.equal(pcbComponentLayerId(input), id, String(input));
+	}
+	for (const bad of ['TOP_SILKSCREEN', 'inner1', 3, 15, null]) {
+		assert.throws(() => pcbComponentLayerId(bad), (err: any) => err.code === 'PRECONDITION_REFUSED');
+	}
+	const patch = normalizePcbComponentPatch({ rotation: 90, layer: 'BOTTOM' });
+	assert.deepEqual(patch, { rotation: 90, layer: 2 });
+	assert.deepEqual(verifyPcbComponentPatch(patch, { rotation: 90, layer: 1 }).notApplied, [{ field: 'layer', expected: 2, actual: 1 }]);
 });

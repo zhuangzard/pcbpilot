@@ -968,7 +968,7 @@ ROTATING does change it, --center refuses a patch that also sets rotation:
 rotate first ('--patch {"rotation":…}'), then --center in a second call.`,
 			Args: cobra.NoArgs,
 			Example: `  pcbpilot pcb modify --id <pid> --patch '{"x":1000,"y":2000}'   # x/y = ANCHOR
-  pcbpilot pcb modify --id <pid> --patch '{"rotation":90,"layer":"BOTTOM"}'
+  pcbpilot pcb modify --id <pid> --patch '{"rotation":90,"layer":"bottom"}'   # layer: top|bottom or 1|2, verified by readback
   pcbpilot pcb modify --id <id> --patch-file patch.json    # PowerShell-safe UTF-8 JSON
   pcbpilot pcb modify --id <pid> --patch '{"locked":false}'      # verified via readback (#174); batches → 'pcb lock'
   pcbpilot pcb modify --id <pid> --center --x 1500 --y 2200      # x/y = desired bbox CENTER`,
