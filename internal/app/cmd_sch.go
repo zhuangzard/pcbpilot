@@ -494,7 +494,7 @@ named keep their value. --show/--hide do not apply (KiCad always draws it).`,
 					}
 					payload["expectedPagePrimitives"] = expectedPagePrimitives
 				}
-				res, err := dispatchCapture(cfg, "schematic.page.clear", window, payload, stdout)
+				res, err := dispatchCaptureTimed(cfg, "schematic.page.clear", window, payload, stdout, 120*time.Second)
 				if err != nil {
 					return err
 				}
@@ -2182,7 +2182,7 @@ the selection). Without --ids it exports the whole active page.`,
 				if out != "" {
 					payload["fileName"] = filepath.Base(out)
 				}
-				res, err := dispatchCapture(cfg, "schematic.export.image", window, payload, stdout)
+				res, err := dispatchCaptureTimed(cfg, "schematic.export.image", window, payload, stdout, 90*time.Second)
 				if err != nil {
 					return err
 				}
