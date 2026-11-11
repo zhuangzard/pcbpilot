@@ -3,7 +3,9 @@
 package app
 
 import (
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 )
 
@@ -14,7 +16,14 @@ import (
 // launcher is still alive; the launcher itself is then killed in any case.
 func killTreeOnCancel(cmd *exec.Cmd) {
 	cmd.Cancel = func() error {
-		_ = exec.Command("taskkill", "/T", "/F", "/PID", strconv.Itoa(cmd.Process.Pid)).Run()
+		// from the system directory: PATH may not hold it
+		taskkill := "taskkill"
+		if root := os.Getenv("SystemRoot"); root != "" {
+			if p := filepath.Join(root, "System32", "taskkill.exe"); fileExists(p) {
+				taskkill = p
+			}
+		}
+		_ = exec.Command(taskkill, "/T", "/F", "/PID", strconv.Itoa(cmd.Process.Pid)).Run()
 		return cmd.Process.Kill()
 	}
 }
