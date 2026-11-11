@@ -4590,6 +4590,19 @@ test('components.list: a netlist record owned by another component of the same d
 	], { 'id-ua': rec('U7', 'OWN_NET') });
 	assert.deepEqual([out.ub.pins[0].net, out.ub.netSource, out.ub.netlistRecordForeign], ['OWN_NET', undefined, undefined]);
 
+	// Two separate placements of the SAME library device under one designator:
+	// a shared device is not multi-unit evidence, so the one without a record
+	// must not inherit the other's nets. Same sub-part name, or none at all.
+	for (const sub of ['X.1', '']) {
+		out = await run([
+			mockComponent({ PrimitiveId: 'own', ComponentType: 'part', Designator: 'U7', UniqueId: 'id-own', Component: dev('DEV-A'), SubPartName: sub }),
+			mockComponent({ PrimitiveId: 'stray', ComponentType: 'part', Designator: 'U7', UniqueId: 'id-stray', Component: dev('DEV-A'), SubPartName: sub }),
+		], { 'id-own': rec('U7', 'OWN_NET') });
+		assert.deepEqual([out.own.pins[0].net, out.own.netSource], ['OWN_NET', undefined]);
+		assert.deepEqual([out.stray.pins[0].net, out.stray.netSource, out.stray.netlistRecordForeign], ['WIRE_1', 'wire-geometry', true],
+			`same device, sub-part "${sub}"`);
+	}
+
 	// A stale designator: the component's own record sits under "R9", and the
 	// record under its current designator "U7" belongs to something else.
 	out = await run([
@@ -4615,13 +4628,18 @@ test('components.list: a netlist record owned by another component of the same d
 		identitiesByDesignator: new Map([['U7', new Set(['id-own'])], ['R1', new Set(['id-r1'])]]),
 		identities: new Set(['id-own', 'id-r1']),
 	};
-	const probe = (uniqueId: string, designator: string, kind: string, deviceUuid = '') => ({ uniqueId, designator, kind, deviceUuid });
+	const probe = (uniqueId: string, designator: string, kind: string, deviceUuid = '', subPartName = '') => ({ uniqueId, designator, kind, deviceUuid, subPartName });
 	const listed = [probe('id-r1', 'R1', 'part', 'DEV-R')];
 	assert.equal(netlistRecordIsForeign(probe('id-blk', 'U7', 'block_symbol'), listed, netlist), true);
 	assert.equal(netlistRecordIsForeign(probe('', 'U7', 'block_symbol'), listed, netlist), false, 'no own identity, no conclusion');
 	assert.equal(netlistRecordIsForeign(probe('id-r1', 'U7', 'block_symbol'), listed, netlist), true, 'own record sits under another designator: the U7 record is not its own');
 	assert.equal(netlistRecordIsForeign(probe('id-r1', 'U7', 'part', 'DEV-R'), [], netlist), true, 'a stale designator needs no other listed component to prove the namespace');
 	assert.equal(netlistRecordIsForeign(probe('id-own', 'U7', 'part', 'DEV-A'), listed, netlist), false, 'owns the record under its designator');
+	const owner = probe('id-own', 'U7', 'part', 'DEV-A', 'X.1');
+	assert.equal(netlistRecordIsForeign(probe('id-b', 'U7', 'part', 'DEV-A', 'X.2'), [owner], netlist), false, 'another unit of the same device');
+	assert.equal(netlistRecordIsForeign(probe('id-b', 'U7', 'part', 'DEV-A', 'X.1'), [owner], netlist), true, 'same unit name is a second placement');
+	assert.equal(netlistRecordIsForeign(probe('id-b', 'U7', 'part', 'DEV-A', ''), [owner], netlist), true, 'no unit name, no multi-unit evidence');
+	assert.equal(netlistRecordIsForeign(probe('id-b', 'U7', 'part', 'DEV-B', 'X.2'), [owner], netlist), true, 'different device');
 	assert.equal(netlistRecordIsForeign(probe('id-blk', 'U9', 'block_symbol'), listed, netlist), false, 'no record under that designator');
 	assert.equal(netlistRecordIsForeign(probe('id-blk', 'U7', 'block_symbol'), [], netlist), false, 'namespace not proven');
 });

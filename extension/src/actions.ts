@@ -1364,6 +1364,7 @@ export const schematicComponentsList: Handler = async (payload) => {
 		designator: String(c.getState_Designator?.() ?? ''),
 		kind: String(c.getState_ComponentType?.() ?? ''),
 		deviceUuid: String((c.getState_Component?.() as { uuid?: unknown } | undefined)?.uuid ?? ''),
+		subPartName: String(c.getState_SubPartName?.() ?? '').trim(),
 	});
 	if (includePins && includePinNets) {
 		try {
@@ -4062,6 +4063,7 @@ interface NetlistMemberProbe {
 	designator: string;
 	kind: string;
 	deviceUuid: string;
+	subPartName: string;
 }
 
 /**
@@ -4079,7 +4081,10 @@ interface NetlistMemberProbe {
  *   - a component whose identity sits only under ANOTHER designator has a
  *     stale designator: the record under its current one is someone else's;
  *   - otherwise, when a listed component owns the record, the two share it
- *     only when both are parts of the same device;
+ *     only on positive multi-unit evidence: both are parts of the same device
+ *     and carry different, non-empty sub-part names. The same device alone
+ *     proves nothing, since two separate placements of one library device
+ *     share it too;
  *   - when the owner is not listed, only a block instance is foreign, because
  *     it cannot be a sub-symbol of anything.
  * A part whose record owner is on a page this listing does not cover stays on
@@ -4093,8 +4098,10 @@ export function netlistRecordIsForeign(self: NetlistMemberProbe, listed: Netlist
 	if (!listed.some(c => c.uniqueId && netlist.identities.has(c.uniqueId))) return false;
 	const owner = listed.find(c => c.designator === self.designator && c.uniqueId && recordIds.has(c.uniqueId));
 	if (!owner) return self.kind === 'block_symbol';
-	if (self.kind !== 'part' || owner.kind !== 'part') return true;
-	return Boolean(self.deviceUuid && owner.deviceUuid && self.deviceUuid !== owner.deviceUuid);
+	const sameDevice = self.kind === 'part' && owner.kind === 'part'
+		&& self.deviceUuid !== '' && self.deviceUuid === owner.deviceUuid;
+	const distinctUnits = self.subPartName !== '' && owner.subPartName !== '' && self.subPartName !== owner.subPartName;
+	return !(sameDevice && distinctUnits);
 }
 
 // ─── Polarity-convention outlier (#183 phase 1) ─────────────────────────────
