@@ -45,6 +45,11 @@ Both 0.12.7 runs used `--finish-signals`, `--power-extra-layers` and `--stitch-p
 - Skill: how to drive pcbpilot from Codex (full access is needed to reach KiCad and Python; reviewers must be installed and signed in;
   `PCBPILOT_CACHE_DIR` moves the cache).
 
+**Known limit**
+- `project import` on EasyEDA Pro 3.2.209: the host's importer returned no project for KiCad 9 and KiCad 10 archives alike, so the
+  command fails and nothing is created. Import the zip by hand in EasyEDA (File → Import → KiCad), then read the project back. The
+  skill says so.
+
 ## [0.12.6] — 2026-11-03
 
 **CLI, daemon, Skills and MCP move to 0.12.6. The connector runtime is UNCHANGED (only its version number moves); import the
