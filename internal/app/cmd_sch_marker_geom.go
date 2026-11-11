@@ -543,6 +543,7 @@ func mergeMarkerGeomFindingsWith(cfg *appConfig, window string, allPages bool, o
 		geo = append(geo, checkFinding{Type: "partition-geometry-unavailable", Level: "ERROR", Message: "multi-page shallow reads cannot verify frame/Designator geometry; run sch check separately with --doc for each page"})
 	}
 
+	geo = dropDuplicateZeroLengthFindings(rep.Findings, geo)
 	if len(geo) == 0 {
 		return
 	}
