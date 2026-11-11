@@ -11950,13 +11950,15 @@ export const pcbPageClear: Handler = async (payload) => {
 	// later rounds: retrying is what fixes a stale enumeration, not a rejected batch —
 	// hammering it 5× would only repeat the same warning.
 	const failedSet = new Set<string>();
-	// Footprint-embedded vias (thermal-pad vias: <componentId>e<n>) go with their
-	// component — deleted with it, or kept with it. The via API cannot delete
-	// them: enumerating them made the whole via batch throw, so a clean board
-	// reported failed:["vias"]. Component ids are unioned across rounds because a
-	// stale enumeration can still list a just-deleted component's vias.
+	// Footprint-embedded routing primitives (<componentId>e<n>: thermal-pad vias,
+	// and tracks/arcs drawn inside a footprint) go with their component — deleted
+	// with it, or kept with it. The primitive API cannot delete them: an embedded
+	// via made the whole via batch throw, so a clean board reported
+	// failed:["vias"]. This is the same ownership rule pcb.route.delete applies
+	// to tracks, arcs and vias. Component ids are unioned across rounds because a
+	// stale enumeration can still list a just-deleted component's primitives.
 	const componentIds = new Set<string>();
-	const embeddedSkipped = new Set<string>();
+	const embeddedSkipped: Record<string, Set<string>> = {};
 
 	// Collect this round's ids for one kind, skipping locked (unless includeLocked)
 	// and applying each kind's copper-layer / membership filter. An enumeration
@@ -11973,12 +11975,13 @@ export const pcbPageClear: Handler = async (payload) => {
 			return [];
 		}
 		const ids: Array<string> = [];
-		const owners = kind.key === 'vias' ? [...componentIds] : [];
+		const routable = kind.scope === 'routing';
+		const owners = routable ? [...componentIds] : [];
 		for (const p of items) {
 			if (kind.filter && !kind.filter(p)) continue;
-			if (kind.key === 'vias') {
+			if (routable) {
 				const id = p.getState_PrimitiveId();
-				if (pcbEmbeddedParent(id, owners)) { embeddedSkipped.add(id); continue; }
+				if (pcbEmbeddedParent(id, owners)) { (embeddedSkipped[kind.key] ??= new Set<string>()).add(id); continue; }
 			}
 			if (!ignoreLock && !includeLocked && pcbPrimLocked(p)) {
 				if (countLocked) skippedLocked[kind.key] = (skippedLocked[kind.key] ?? 0) + 1;
@@ -12058,6 +12061,9 @@ export const pcbPageClear: Handler = async (payload) => {
 	for (const [key, ids] of Object.entries(idsByKey)) { deleted[key] = ids.length; total += ids.length; }
 	const skippedTotal = Object.values(skippedLocked).reduce((a, b) => a + b, 0);
 	const failed = [...failedSet];
+	const skippedEmbedded: Record<string, number> = {};
+	for (const [key, ids] of Object.entries(embeddedSkipped)) skippedEmbedded[key] = ids.size;
+	const skippedEmbeddedTotal = Object.values(skippedEmbedded).reduce((a, b) => a + b, 0);
 
 	return {
 		result: {
@@ -12067,7 +12073,8 @@ export const pcbPageClear: Handler = async (payload) => {
 			deletedIds: idsByKey,
 			rounds,
 			...(skippedTotal ? { skippedLocked, skippedLockedTotal: skippedTotal } : {}),
-			...(embeddedSkipped.size ? { skippedEmbeddedVias: embeddedSkipped.size } : {}),
+			...(skippedEmbeddedTotal ? { skippedEmbedded, skippedEmbeddedTotal } : {}),
+			...(skippedEmbedded.vias ? { skippedEmbeddedVias: skippedEmbedded.vias } : {}),
 			...(failed.length ? { failed } : {}),
 			preserveOutline,
 			includeLocked,

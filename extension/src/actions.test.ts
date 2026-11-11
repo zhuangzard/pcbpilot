@@ -4498,3 +4498,33 @@ test('pcbPageClear: footprint-embedded vias stay out of the via delete; standalo
 	assert.equal(res.result.skippedEmbeddedVias, 2);
 	delete (globalThis as any).eda;
 });
+
+test('pcbPageClear: footprint-embedded tracks and arcs are skipped like vias, each kind counted', async () => {
+	const s = installPcbClearStub({
+		components: [pcbPrim('c0ffee01', 1), pcbPrim('e2', 1)],
+		lines: [pcbPrim('c0ffee01e7', 1), pcbPrim('t1', 1), pcbPrim('e200', 2)],
+		arcs: [pcbPrim('c0ffee01e8', 1), pcbPrim('e2e9', 1), pcbPrim('a1', 2)],
+		vias: [pcbPrim('c0ffee01e184'), pcbPrim('v9')],
+	});
+	const res: any = await pcbPageClear({ only: 'routing' });
+	assert.equal(res.result.failed, undefined, JSON.stringify(res.result.warnings));
+	assert.deepEqual((s.deleted.lines ?? []).sort(), ['e200', 't1'], 'e200 merely shares the e2 prefix');
+	assert.deepEqual((s.deleted.arcs ?? []).sort(), ['a1']);
+	assert.deepEqual((s.deleted.vias ?? []).sort(), ['v9']);
+	assert.equal(s.deleted.components, undefined, 'routing scope leaves components, so their embedded primitives stay too');
+	assert.deepEqual(res.result.skippedEmbedded, { tracks: 1, arcs: 2, vias: 1 });
+	assert.equal(res.result.skippedEmbeddedTotal, 4);
+	assert.equal(res.result.skippedEmbeddedVias, 1);
+	assert.deepEqual(res.result.deletedIds.tracks.sort(), ['e200', 't1']);
+
+	// Dry run reports the same split without deleting.
+	const d = installPcbClearStub({
+		components: [pcbPrim('c0ffee01', 1)],
+		lines: [pcbPrim('c0ffee01e7', 1), pcbPrim('t1', 1)],
+	});
+	const dry: any = await pcbPageClear({ dryRun: true });
+	assert.deepEqual(dry.result.deletedIds.tracks, ['t1']);
+	assert.deepEqual(dry.result.skippedEmbedded, { tracks: 1 });
+	assert.deepEqual(d.deleted, {});
+	delete (globalThis as any).eda;
+});
