@@ -151,16 +151,25 @@ func fakeRouterMain(router string, args []string) int {
 		case "sleep":
 			time.Sleep(30 * time.Second)
 			return 0
-		case "tree": // a launcher: the real work is a child process
+		case "tree", "mid": // a launcher: a wrapper below it, the real work below that
+			next, said := "mid", "child started"
+			if os.Getenv(envFakeFreeBehaves) == "mid" {
+				next, said = "late", "grandchild started"
+			}
 			child := exec.Command(os.Args[0], args...)
-			child.Env = append(os.Environ(), envFakeFreeBehaves+"=late")
+			child.Env = append(os.Environ(), envFakeFreeBehaves+"="+next)
+			if next == "late" {
+				child.Stdout = nil // detached from the launcher's output
+			} else {
+				child.Stdout = os.Stdout
+			}
 			if err := child.Start(); err != nil {
 				return 2
 			}
-			fmt.Println("child started")
+			fmt.Println(said)
 			time.Sleep(30 * time.Second)
 			return 0
-		case "late": // the child of "tree": writes its session after a while
+		case "late": // the grandchild of "tree": writes its session after a while
 			time.Sleep(3 * time.Second)
 			os.WriteFile(ses, []byte("(session late)\n"), 0o644)
 			return 0

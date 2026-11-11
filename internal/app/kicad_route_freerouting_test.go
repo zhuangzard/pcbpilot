@@ -124,8 +124,8 @@ func (s *syncBuf) String() string {
 	return s.b.String()
 }
 
-// A launcher that runs the router as a child: cancelling must stop the child
-// too, or it writes a session after pcbpilot moved on.
+// A launcher that runs the router below a wrapper process: cancelling must
+// stop the whole tree, or it writes a session after pcbpilot moved on.
 func TestRunFreeroutingKillsTheTree(t *testing.T) {
 	dir := t.TempDir()
 	ses := filepath.Join(dir, "o.ses")
@@ -134,7 +134,7 @@ func TestRunFreeroutingKillsTheTree(t *testing.T) {
 	defer cancel()
 	var out syncBuf
 	go func() {
-		for i := 0; i < 200 && !strings.Contains(out.String(), "child started"); i++ {
+		for i := 0; i < 200 && !strings.Contains(out.String(), "grandchild started"); i++ {
 			time.Sleep(50 * time.Millisecond)
 		}
 		cancel()
@@ -144,8 +144,8 @@ func TestRunFreeroutingKillsTheTree(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("err %v", err)
 	}
-	if !strings.Contains(out.String(), "child started") {
-		t.Fatalf("the child never started: %q", out.String())
+	if !strings.Contains(out.String(), "grandchild started") {
+		t.Fatalf("the grandchild never started: %q", out.String())
 	}
 	// a surviving child keeps the output pipe open until WaitDelay (10 s)
 	if d := time.Since(start); d > 8*time.Second {
