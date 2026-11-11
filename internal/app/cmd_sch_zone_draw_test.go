@@ -290,3 +290,72 @@ func TestZoneFrameAliveSetFailsClosedOnMalformedEntries(t *testing.T) {
 		t.Fatalf("clear on malformed inventory = (%d, %v) with %d deletes, want an error and no deletes", n, err, deleted)
 	}
 }
+
+// A first inventory that predates the frames must not pass for "already
+// absent": the ids that show up on the settle re-read are deleted and counted.
+func TestClearZoneFramesWithRereadsIdsMissingFromFirstInventory(t *testing.T) {
+	f := &workflow.SchZoneFrames{Rects: []string{"r1"}, Texts: []string{"t1"}}
+	reads, deleted := 0, map[string]int{}
+	gone := map[string]bool{}
+	alive := func() (map[string]bool, error) {
+		reads++
+		if reads == 1 { // unsettled: the frames are not in the inventory yet
+			return map[string]bool{"user": true}, nil
+		}
+		out := map[string]bool{"user": true}
+		for _, id := range []string{"r1", "t1"} {
+			if !gone[id] {
+				out[id] = true
+			}
+		}
+		return out, nil
+	}
+	found, err := clearZoneFramesWith(f, func(id string) error { deleted[id]++; gone[id] = true; return nil }, alive)
+	if err != nil || found != 2 || deleted["r1"] != 1 || deleted["t1"] != 1 || deleted["user"] != 0 {
+		t.Fatalf("late-appearing frames: found=%d err=%v deleted=%v", found, err, deleted)
+	}
+
+	// Absent on every read: confirmed absent, nothing deleted, more than one read.
+	reads = 0
+	found, err = clearZoneFramesWith(f, func(string) error { t.Fatal("deleted an absent id"); return nil },
+		func() (map[string]bool, error) { reads++; return map[string]bool{"user": true}, nil })
+	if err != nil || found != 0 || reads != settleAttempts {
+		t.Fatalf("confirmed-absent clear: found=%d err=%v reads=%d", found, err, reads)
+	}
+
+	// Every id present at once: no extra read before deleting.
+	reads = 0
+	gone = map[string]bool{}
+	if _, err = clearZoneFramesWith(f, func(id string) error { gone[id] = true; return nil }, func() (map[string]bool, error) {
+		reads++
+		return map[string]bool{"r1": !gone["r1"], "t1": !gone["t1"]}, nil
+	}); err != nil || reads != 2 {
+		t.Fatalf("all-present clear: err=%v reads=%d, want one pre-read and one verify read", err, reads)
+	}
+}
+
+// When the re-read that should confirm absence fails, absence is unproven: the
+// clear errors, and the prior record stays in the workflow state.
+func TestClearPriorZoneFramesKeepsRecordWhenAbsenceIsUnconfirmed(t *testing.T) {
+	const doc = "doc-1"
+	prev := &workflow.SchZoneFrames{Rects: []string{"r1"}, Texts: []string{"t1"}, DocumentUUID: doc}
+	st := &pcbStageState{SchZoneFrameIdsByPage: map[string]*workflow.SchZoneFrames{doc: prev}}
+	reads := 0
+	clear := func(f *workflow.SchZoneFrames, _ string) (int, error) {
+		return clearZoneFramesWith(f, func(string) error { t.Fatal("deleted without a confirmed inventory"); return nil },
+			func() (map[string]bool, error) {
+				reads++
+				if reads == 1 {
+					return map[string]bool{}, nil
+				}
+				return nil, errors.New("inventory unavailable")
+			})
+	}
+	cleared, err := clearPriorZoneFrames(st, doc, clear, io.Discard)
+	if err == nil || cleared {
+		t.Fatalf("unconfirmed absence reported as cleared: cleared=%v err=%v", cleared, err)
+	}
+	if st.SchZoneFrameIdsByPage[doc] != prev {
+		t.Fatalf("recovery record dropped: %+v", st.SchZoneFrameIdsByPage)
+	}
+}

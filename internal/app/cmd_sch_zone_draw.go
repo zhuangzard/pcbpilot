@@ -334,14 +334,38 @@ func zoneFrameAliveSet(result map[string]any) (map[string]bool, error) {
 // clearZoneFramesWith deletes the recorded ids that are present on the page with
 // the repository's single verified-delete routine (one by one, settled readback,
 // one retry). Ids already absent are not deleted and not counted.
+//
+// "Already absent" is itself a claim about the page, and one inventory read is
+// not proof of it: a read taken right after a draw can predate the frames, and
+// would then report a clean page with every frame still on it (the record is
+// dropped, the frames become untracked). An id missing from the first read is
+// therefore re-read on the shared settle budget; it counts as absent only when
+// every read agrees, and a read that fails leaves absence unconfirmed, which
+// is an error so that callers keep the recovery record.
 func clearZoneFramesWith(f *workflow.SchZoneFrames, deleteOne func(string) error, alive func() (map[string]bool, error)) (int, error) {
-	live, err := alive()
+	recorded := append(append([]string(nil), f.Rects...), f.Texts...)
+	seen := map[string]bool{}
+	_, _, err := settleRead(func() (struct{}, bool, error) {
+		live, rerr := alive()
+		if rerr != nil {
+			return struct{}{}, false, rerr
+		}
+		complete := true
+		for _, id := range recorded {
+			if live[id] {
+				seen[id] = true
+			} else if !seen[id] {
+				complete = false
+			}
+		}
+		return struct{}{}, complete, nil
+	})
 	if err != nil {
 		return 0, fmt.Errorf("read zone frames before delete: %w", err)
 	}
 	var present []string
-	for _, id := range append(append([]string(nil), f.Rects...), f.Texts...) {
-		if live[id] {
+	for _, id := range recorded {
+		if seen[id] {
 			present = append(present, id)
 		}
 	}
