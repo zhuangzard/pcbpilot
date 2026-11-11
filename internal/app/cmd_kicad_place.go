@@ -323,6 +323,7 @@ func runKicadPlace(o kicadPlaceOpts, deps kicadPlaceDeps, stderr io.Writer) (*ki
 		popt.Deadline = time.Now().Add(o.timeBudget)
 		rep.TimeBudget = o.timeBudget.String()
 	}
+	popt.MedianMoves = len(b.Parts)-len(rep.Fixed) > placeLargeBoard
 	outs, trials, err := pcbauto.PlaceSeeds(b, prep, mc, popt, o.placeSeeds)
 	prog.stop()
 	if err != nil {

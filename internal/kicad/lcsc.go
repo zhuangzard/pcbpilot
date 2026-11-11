@@ -6,6 +6,7 @@ package kicad
 
 import (
 	"bytes"
+	"context"
 	_ "embed"
 	"encoding/csv"
 	"encoding/json"
@@ -447,6 +448,111 @@ func FetchEasyEDAComponent(lcsc string) ([]byte, error) {
 		return env.Result, nil
 	}
 	return nil, fmt.Errorf("%s: no EasyEDA library record (%s)", lcsc, strings.Join(errs, "; "))
+}
+
+// EasyEDAPart is the identity in an LCSC number's EasyEDA library record.
+type EasyEDAPart struct {
+	LCSC, MPN, Manufacturer, Package, Value, Description, URL, PartClass string
+	Stock                                                                int64
+}
+
+// LookupEasyEDAPart reads the library record of one LCSC number. found is
+// false only when every host answered that the number has no record; err is
+// set when no host gave a usable answer. The endpoint sometimes answers empty
+// or with a null result under load, so those are retried; a record counts only
+// when it names the number asked for. ctx bounds the whole lookup.
+func LookupEasyEDAPart(ctx context.Context, lcsc string) (part EasyEDAPart, found bool, err error) {
+	return lookupEasyEDAPart(ctx, http.DefaultClient, easyEDAHosts, 1500*time.Millisecond, lcsc)
+}
+
+func lookupEasyEDAPart(ctx context.Context, client *http.Client, hosts []string, backoff time.Duration, lcsc string) (EasyEDAPart, bool, error) {
+	var errs []string
+	notFound := 0
+	for _, h := range hosts {
+	tries:
+		for try := 0; try < 3; try++ {
+			if try > 0 {
+				select {
+				case <-ctx.Done():
+					return EasyEDAPart{LCSC: lcsc}, false, ctx.Err()
+				case <-time.After(time.Duration(try) * backoff):
+				}
+			}
+			rctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			req, _ := http.NewRequestWithContext(rctx, http.MethodGet, EasyEDAComponentURL(h, lcsc), nil)
+			req.Header.Set("User-Agent", "Mozilla/5.0 (pcbpilot kicad lcsc --verify)")
+			resp, rerr := client.Do(req)
+			if rerr != nil {
+				cancel()
+				if ctx.Err() != nil {
+					return EasyEDAPart{LCSC: lcsc}, false, ctx.Err()
+				}
+				errs = append(errs, h+": "+rerr.Error())
+				continue
+			}
+			b, rerr := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
+			resp.Body.Close()
+			cancel()
+			if rerr != nil || resp.StatusCode != http.StatusOK || len(bytes.TrimSpace(b)) == 0 {
+				errs = append(errs, fmt.Sprintf("%s: HTTP %d, %d bytes %v", h, resp.StatusCode, len(b), rerr))
+				continue
+			}
+			var env struct {
+				Success *bool `json:"success"`
+				Result  *struct {
+					Title       string `json:"title"`
+					Description string `json:"description"`
+					LCSC        *struct {
+						Number string `json:"number"`
+						Stock  int64  `json:"stock"`
+						URL    string `json:"url"`
+					} `json:"lcsc"`
+					DataStr struct {
+						Head struct {
+							CPara map[string]any `json:"c_para"`
+						} `json:"head"`
+					} `json:"dataStr"`
+				} `json:"result"`
+			}
+			if jerr := json.Unmarshal(b, &env); jerr != nil || env.Success == nil {
+				errs = append(errs, fmt.Sprintf("%s: unreadable reply %v", h, jerr))
+				continue
+			}
+			if !*env.Success {
+				// The endpoint's answer for a number it has no record of; asked
+				// once per host so one host's hiccup cannot fail a real part.
+				notFound++
+				break tries
+			}
+			r := env.Result
+			if r == nil {
+				errs = append(errs, h+": success with no record")
+				continue
+			}
+			str := func(k string) string { v, _ := r.DataStr.Head.CPara[k].(string); return strings.TrimSpace(v) }
+			number := str("Supplier Part")
+			if r.LCSC != nil && r.LCSC.Number != "" {
+				number = r.LCSC.Number
+			}
+			if !strings.EqualFold(strings.TrimSpace(number), lcsc) {
+				errs = append(errs, fmt.Sprintf("%s: record names %q, not %s", h, number, lcsc))
+				continue
+			}
+			part := EasyEDAPart{LCSC: lcsc, MPN: str("Manufacturer Part"), Manufacturer: str("Manufacturer"), Package: str("package"),
+				Value: str("Value"), Description: r.Description, PartClass: str("JLCPCB Part Class")}
+			if part.MPN == "" {
+				part.MPN = r.Title
+			}
+			if r.LCSC != nil {
+				part.Stock, part.URL = r.LCSC.Stock, r.LCSC.URL
+			}
+			return part, true, nil
+		}
+	}
+	if notFound == len(hosts) {
+		return EasyEDAPart{LCSC: lcsc}, false, nil
+	}
+	return EasyEDAPart{LCSC: lcsc}, false, fmt.Errorf("%s: no usable answer (%s)", lcsc, strings.Join(errs, "; "))
 }
 
 // ImportResult is fab.py import-lcsc's reply.

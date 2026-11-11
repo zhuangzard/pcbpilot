@@ -1,5 +1,55 @@
 # Changelog
 
+## [0.12.7] — 2026-11-09
+
+**CLI, daemon, Skills and MCP move to 0.12.7. The connector runtime is UNCHANGED (only its version number moves); import the
+0.12.7 `pcbpilot-connector.eext` so the versions match — the daemon pauses design actions until they do.**
+
+Summary: `kicad route --finish-signals` joins signal nets the router left in pieces, stitch vias now see the poured copper they land
+in, and `kicad lcsc --verify` looks every LCSC number up exactly. On the 1443-part test board, measured by pcbnew on the final board
+with one run per placement, connections made went from 82 % in 0.12.6 to 93.6 % and 94.2 %. **That board still does not pass:** 201
+to 224 of its 3493 connections stay open, and results vary between runs. Reviewed by Codex and Kimi round after round.
+
+| Test board, one run each | Connections made | Open | Other DRC errors | Insulation gate errors |
+| --- | --- | --- | --- | --- |
+| 0.12.6, `--domain-zones edge` | 82 % | 641 | 115 | 11 |
+| 0.12.7, placement A | 93.6 % | 224 | 110 | 2 |
+| 0.12.7, placement B | 94.2 % | 201 | 111 | 2 |
+
+Both 0.12.7 runs used `--finish-signals`, `--power-extra-layers` and `--stitch-path-mil 400`, with a 2-hour router budget.
+
+**Finishing signals (`kicad route --finish-signals`)**
+- After the router, the pours and the stitch vias, each signal net still in pieces gets a searched track (and vias) between its
+  nearest pieces. `--finish-pour-layers on`, the default, lets that track run on poured layers too; `escape` keeps it to a short exit.
+- Every join has to prove itself after a refill: pcbnew must show the pieces joined, DRC must show no new violation, and pours must
+  keep every pad they had. A pass that fails drops the joins blamed and tries again, up to six rounds; a pass that does not settle is
+  thrown away whole.
+- `route-complete` credits only joins pcbnew proved. The result is in `summary.finishSignals`.
+
+**Stitching**
+- Stitch vias read the poured fills KiCad writes (`pourPrimitiveId`); before, the fill check could not read them and was skipped.
+  A via site must lie wholly inside its net's fill.
+- `--stitch-path-mil` lets a stitch search a track up to that length to a via site; a failed trial blames the nearest stitch.
+- A new DRC error near no stitch no longer throws away the whole pass; the final DRC still counts it.
+
+**LCSC numbers (`kicad lcsc --verify --pcb … --sch …`)**
+- Looks every assembled part's LCSC number up exactly in the EasyEDA catalogue and fails on a number with no record, a chip size
+  that does not match the footprint, an R/C/L value that does not match (ohms for a ferrite bead), or a value it cannot read.
+  LCSC stock 0 is a warning. Use it before a JLC PCBA order.
+
+**Other changes**
+- `--power-extra-layers` pours the power rail on more layers. Pours keep off a partner insulation domain's routed copper.
+- `kicad place` above 1000 movable parts aims some moves at the median of a part's nets.
+- `kicad route` reports where each DRC error comes from: inside one footprint, a footprint pad at the board edge, or other. Every
+  error stays in the gate.
+- Skill: how to drive pcbpilot from Codex (full access is needed to reach KiCad and Python; reviewers must be installed and signed in;
+  `PCBPILOT_CACHE_DIR` moves the cache).
+
+**Known limit**
+- `project import` on EasyEDA Pro 3.2.209: the host's importer returned no project for KiCad 9 and KiCad 10 archives alike, so the
+  command fails and nothing is created. Import the zip by hand in EasyEDA (File → Import → KiCad), then read the project back. The
+  skill says so.
+
 ## [0.12.6] — 2026-11-03
 
 **CLI, daemon, Skills and MCP move to 0.12.6. The connector runtime is UNCHANGED (only its version number moves); import the

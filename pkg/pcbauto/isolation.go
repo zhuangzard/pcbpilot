@@ -1655,6 +1655,31 @@ func isoPartnerDist(b *Board, iso *IsoRules, rr *RouteResult, f *isoField, doms 
 	return edt(set, f.W, f.H)
 }
 
+// snapshotRoutedCopper reads a snapshot's tracks (arcs as their chord) and vias.
+func snapshotRoutedCopper(raw []byte, rr *RouteResult) error {
+	var s struct {
+		Copper *struct {
+			Lines []map[string]any `json:"lines"`
+			Arcs  []map[string]any `json:"arcs"`
+			Vias  []map[string]any `json:"vias"`
+		} `json:"copper"`
+	}
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return err
+	}
+	if s.Copper == nil {
+		return nil
+	}
+	for _, l := range append(s.Copper.Lines, s.Copper.Arcs...) {
+		rr.Tracks = append(rr.Tracks, Track{Net: str(l["net"]), Layer: int(num(l["layer"])), Width: num(l["lineWidth"]),
+			A: Point{num(l["startX"]), num(l["startY"])}, B: Point{num(l["endX"]), num(l["endY"])}})
+	}
+	for _, v := range s.Copper.Vias {
+		rr.Vias = append(rr.Vias, Via{Net: str(v["net"]), C: Point{num(v["x"]), num(v["y"])}, Dia: num(v["diameter"]), Drill: num(v["holeDiameter"])})
+	}
+	return nil
+}
+
 // ClipPoursToIso trims board-outline pours (`kicad route` step 4) to their
 // net's insulated domain like a planned plane (clipPlanesToIso): a pour of a
 // net with no insulation pair comes back unchanged. Each pour is returned as
@@ -1698,7 +1723,12 @@ func ClipPoursToIso(raw []byte, in *Intent, pours []PlaneRegion) (kept, lost []P
 		region = bb.Corners()
 		notes = append(notes, "no board outline in the snapshot: pours of insulated nets clipped within the parts' extent")
 	}
+	// The tracks and vias already on the board count too: a partner domain's
+	// track off its own territory otherwise sits inside the pour.
 	rr := &RouteResult{}
+	if err := snapshotRoutedCopper(raw, rr); err != nil {
+		return nil, nil, nil, err
+	}
 	for _, p := range pours {
 		if len(p.Polys) == 0 {
 			switch {

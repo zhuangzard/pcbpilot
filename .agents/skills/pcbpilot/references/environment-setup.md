@@ -11,6 +11,7 @@
   - [本地开发版（用户明确选择时）](#本地开发版用户明确选择时)
   - [正式版](#正式版)
   - [仿真工具（ngspice / Elmer FEM）](#仿真工具ngspice--elmer-fem)
+- [由 Codex 驱动](#由-codex-驱动)
 - [确认连接和目标文档](#确认连接和目标文档)
   - [官方客户端 CLI 探测（health.officialCli，只读）](#官方客户端-cli-探测healthofficialcli只读)
   - [扩展已启用、权限已开，但始终没有连接尝试](#扩展已启用权限已开但始终没有连接尝试)
@@ -220,6 +221,19 @@ pcbpilot sim tools install --yes [--only ngspice|elmer] [--require-elmer]
 官方 Elmer NSIS 安装包）。Agent 规则：交叉验证前先 `sim tools check --json`；报告里写实际版本；
 工具缺失时如实写“交叉验证未执行”，不把 `skipped` 当通过。安装系统软件（sudo/UAC/长时间编译）
 前告知用户并取得同意，不在 EDA 现场任务中途静默安装；macOS 缺 Homebrew 只转告官方安装命令。
+
+## 由 Codex 驱动
+
+Codex（CLI 或桌面 app）读同一套 Skill（`~/.codex/skills` 或 `~/.agents/skills`），MCP 由安装脚本写进
+`~/.codex/config.toml` 的 `[mcp_servers.pcbpilot]`。实测（Windows，2026-11）需要注意：
+
+- **沙箱要给完全访问**：Codex app 选 Full access，CLI 用 `codex exec -s danger-full-access`。`workspace-write`
+  沙箱读不到 `%LOCALAPPDATA%\Programs\KiCad` 与 Python（`EPERM`），KiCad 离线流程一步都跑不了；新 `CODEX_HOME`
+  第一次用 elevated 沙箱还要弹 UAC，无人确认时报 `ShellExecuteExW ... 1223`。
+- **设计评审器**：`kicad sch-build --review` / `kicad route --reviewers` 会再起评审 CLI。只列已安装且已登录的
+  （如 `codex,kimi`）；沙箱里起不了子 CLI 时评审失败，按规则停下，不要用 `--no-review` 绕过（要签名 waiver）。
+- **缓存目录**：用户目录不可写时设 `PCBPILOT_CACHE_DIR` 到工程内目录（LCSC 导入缓存、KiCad 库转换都在这里）。
+- **出制造文件前**跑 `kicad lcsc --verify`（联网），0 mismatch 才算 C 号正确。
 
 ## 确认连接和目标文档
 

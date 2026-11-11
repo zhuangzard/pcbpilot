@@ -57,6 +57,10 @@ type kicadRouteOpts struct {
 	pours, gndNet, powerNet string
 	gndLayers               []int
 	powerLayer              int
+	powerExtraLayers        []int
+	stitchPathMil           float64
+	finishSignals           bool
+	finishPourLayers        string
 	widenNets               string
 	widenMax                float64
 	optimizer               bool
@@ -134,6 +138,12 @@ Exits non-zero when any gate fails; --waivers takes signed {gate,match,reason,by
 			o.maxTimeSet, o.routerTimeoutSet = cmd.Flags().Changed("max-time"), cmd.Flags().Changed("router-timeout")
 			if o.maxTimeSet && o.fo.maxTime < 0 {
 				return fmt.Errorf("--max-time must be >= 0 (0 = no fastroute time limit)")
+			}
+			if math.IsNaN(o.stitchPathMil) || o.stitchPathMil < 0 || o.stitchPathMil > stitchPathMaxMil {
+				return fmt.Errorf("--stitch-path-mil must be between 0 and %.0f", stitchPathMaxMil)
+			}
+			if o.finishPourLayers != "escape" && o.finishPourLayers != "on" && o.finishPourLayers != "off" {
+				return fmt.Errorf("--finish-pour-layers must be escape, on or off")
 			}
 			if o.stitchPours != "auto" && o.stitchPours != "on" && o.stitchPours != "off" {
 				return fmt.Errorf("--stitch-pours must be auto, on or off")
@@ -219,11 +229,15 @@ Exits non-zero when any gate fails; --waivers takes signed {gate,match,reason,by
 	f.IntSliceVar(&o.gndLayers, "gnd-layers", nil, "ground pour layers, pcbpilot ids (default: 1,15,2 on 4+ layers, 1,2 on 2 layers)")
 	f.StringVar(&o.powerNet, "power-net", "", "power pour net (default: the non-ground power net with the most pads)")
 	f.IntVar(&o.powerLayer, "power-layer", -1, "power pour layer id (default 16 = In2 on 4+ layers; 0 = none)")
+	f.IntSliceVar(&o.powerExtraLayers, "power-extra-layers", nil, "more layers for the power pour, pcbpilot ids, on top of --power-layer (e.g. 17 = In3 on 6 layers)")
 	f.StringVar(&o.widenNets, "widen-net", "", "nets to widen after routing, comma-separated (see 'pcb widen')")
 	f.Float64Var(&o.widenMax, "widen-max-mil", 40, "maximum width for --widen-net and the IR closure (mil)")
 	f.BoolVar(&o.noSilkPlace, "no-silk-place", false, "do not move designators before the silkscreen gate")
 	f.StringVar(&o.silkMode, "silk", "auto", "silk placement mode: auto (defer when routing incomplete), on (always, with time budget), off (skip)")
 	f.DurationVar(&o.silkBudget, "silk-time-budget", 30*time.Minute, "maximum wall clock for silk placement (--silk=on only; 0 = unlimited)")
+	f.Float64Var(&o.stitchPathMil, "stitch-path-mil", 0, "stitch vias: search a path of up to this length (mil, on the pad's layer, full stitch width) for a poured pad no straight track can serve; 0 = off. Lengths are in summary.stitchPours: a long path can connect a decoupling capacitor without making it effective")
+	f.BoolVar(&o.finishSignals, "finish-signals", false, "after the pours and stitch vias, join the signal nets the router left in pieces with pcbpilot's own grid search (tracks and through vias added, router copper untouched; differential pairs, impedance, length-matched and interface nets excluded); every join is proven by refill, KiCad DRC, connectivity and the insulation check, and the rest is reported in summary.finishSignals")
+	f.StringVar(&o.finishPourLayers, "finish-pour-layers", "on", "where --finish-signals may use a poured layer: escape (within 150 mil of a pad it joins) | on (anywhere, at twice the cost) | off")
 	f.BoolVar(&o.pourCredit, "pour-credit", false, "route-complete may credit a connection the router left unrouted when its net is poured, the router's counters are consistent and KiCad's DRC reports 0 unconnected items (off by default: route-complete is then as strict as v0.9.0; credited connections are listed in the gate and summary.pourCredited)")
 	f.StringArrayVar(&o.requirements, "requirements", nil, "project requirement document for the design review (repeatable; required unless --no-review)")
 	f.StringVar(&o.reviewers, "reviewers", "codex,kimi,claude", "design review reviewer CLIs, comma-separated (all must pass)")
@@ -240,7 +254,10 @@ const noReviewMatch = "--no-review"
 
 // kicadRun is one kicad route execution.
 type kicadRun struct {
-	viaProv *viaProvenance // which via came from where (kicad_route_via_audit.go)
+	stitchAway int // new DRC errors near no stitch, in the last stitch check
+	// finishedNets: nets --finish-signals joined (route-complete may credit them).
+	finishedNets map[string]bool
+	viaProv      *viaProvenance // which via came from where (kicad_route_via_audit.go)
 	// silkAutoDeferred: why --silk=auto did not place this board's labels; its
 	// silkscreen gate is then not satisfied, whatever the labels look like.
 	silkAutoDeferred string
@@ -576,6 +593,7 @@ func (r *kicadRun) run() error {
 		r.summary["inputDrc"] = map[string]any{"error": err.Error()}
 		fmt.Fprintf(r.stderr, "input board DRC (before routing) could not be checked: %v\n", err)
 	}
+	r.preRouteIsolation()
 
 	r.lap("input DRC")
 	// 2. Pre-route gate: intent + insulation → netclasses (+ .kicad_dru).
@@ -812,6 +830,14 @@ func (r *kicadRun) postRoute(board string, inSnap *boardSnapshot) (string, bool,
 		}
 		r.lap("stitch vias")
 	}
+	// Signals are finished after the stitch: its vias are on the board first,
+	// and the finisher's proof keeps every pad they joined to its pour.
+	if o.finishSignals {
+		if board, err = r.finishSignals(board, kicadPourPlan(o, inSnap)); err != nil {
+			return board, false, err
+		}
+		r.lap("finish signals")
+	}
 	r.lap("pours + zone fill + thermals")
 	if o.widenNets != "" {
 		nets := map[string]bool{}
@@ -1031,6 +1057,41 @@ func copperOf(s *boardSnapshot) ([]specctra.Track, []widenVia, []boardPad, error
 		pads = append(pads, c.Pads...)
 	}
 	return tracks, vias, pads, nil
+}
+
+// preRouteIsolation runs the insulation check on the input board, before any
+// routing: what it finds lies between parts as placed (fixed ones included),
+// which no routing fixes, so it is said at the start instead of hours later.
+// The isolation gate still judges the routed board; nothing fails here.
+func (r *kicadRun) preRouteIsolation() {
+	if len(r.in.Pairs) == 0 || r.inRaw == nil {
+		return
+	}
+	raw, err := os.ReadFile(r.o.intent)
+	var in *pcbauto.Intent
+	if err == nil {
+		in, err = pcbauto.ParseIntent(raw)
+	}
+	var chk *pcbauto.IsolationCheck
+	if err == nil {
+		chk, err = pcbauto.CheckIsolationSnapshot(r.inRaw, in)
+	}
+	if err != nil {
+		r.summary["preRouteIsolation"] = map[string]any{"error": err.Error()}
+		fmt.Fprintf(r.stderr, "pre-route insulation check could not run: %v\n", err)
+		return
+	}
+	var msgs []string
+	for _, f := range chk.Findings {
+		msgs = append(msgs, f.Message)
+	}
+	for _, f := range chk.Infeasible {
+		msgs = append(msgs, "INFEASIBLE: "+f.Reason)
+	}
+	r.summary["preRouteIsolation"] = map[string]any{"errors": len(msgs), "findings": msgs}
+	if len(msgs) > 0 {
+		fmt.Fprintf(r.stderr, "pre-route insulation: %d error(s) on the input board, before routing: routing cannot fix them, move a part or mill a slot. First: %s\n", len(msgs), msgs[0])
+	}
 }
 
 func clearanceOf(s *boardSnapshot) float64 {
@@ -1545,7 +1606,7 @@ func (r *kicadRun) qualityGates(board string) (bool, error) {
 	} else {
 		delete(r.summary, "simKicadMismatch")
 	}
-	rc := kicadRouteCompleteGate(r.route, drcRep, snap, o.pourCredit)
+	rc := kicadRouteCompleteGateJoined(r.route, drcRep, snap, o.pourCredit, r.finishedNets)
 	r.boardConnectivityGate(&rc)
 	if rc.Pass && len(rc.Info) > 0 {
 		r.summary["pourCredited"] = rc.Info // shown by the design report next to the gate
@@ -1804,6 +1865,13 @@ func boardConnectivityEntry(unconnected int, drc *kicad.DRCReport) map[string]an
 // (Board-B V5 A: GND C2.2–U8.115, a fine-pitch ground pin, joined by the TOP GND
 // pour). Every credited connection is listed in the gate's Info.
 func kicadRouteCompleteGate(run *routeResult, drc *kicad.DRCReport, snap *boardSnapshot, pourCredit bool) gateResult {
+	return kicadRouteCompleteGateJoined(run, drc, snap, pourCredit, nil)
+}
+
+// kicadRouteCompleteGateJoined is kicadRouteCompleteGate that may also credit
+// a connection on a net --finish-signals joined, on the same terms: KiCad
+// reports 0 unconnected items and the router's counters are consistent.
+func kicadRouteCompleteGateJoined(run *routeResult, drc *kicad.DRCReport, snap *boardSnapshot, pourCredit bool, joined map[string]bool) gateResult {
 	g := routeCompleteGate(run)
 	if run != nil && drc != nil && drc.Counts["unconnected_items"] > 0 && g.Pass {
 		g.Pass = false
@@ -1811,7 +1879,7 @@ func kicadRouteCompleteGate(run *routeResult, drc *kicad.DRCReport, snap *boardS
 		g.Items = append(g.Items, fmt.Sprintf("KiCad connectivity disagrees with the router: %d unconnected item(s)", drc.Counts["unconnected_items"]))
 		return g
 	}
-	if !pourCredit || g.Pass || run == nil || run.Fixable != 0 || run.BelowMinWidthNets != 0 || run.UnroutedCount <= 0 || len(run.Unrouted) != run.UnroutedCount ||
+	if !pourCredit && len(joined) == 0 || g.Pass || run == nil || run.Fixable != 0 || run.BelowMinWidthNets != 0 || run.UnroutedCount <= 0 || len(run.Unrouted) != run.UnroutedCount ||
 		drc == nil || drc.Counts["unconnected_items"] != 0 || snap == nil || snap.Copper == nil {
 		return g
 	}
@@ -1822,15 +1890,26 @@ func kicadRouteCompleteGate(run *routeResult, drc *kicad.DRCReport, snap *boardS
 		}
 	}
 	var items []string
+	finished := 0
 	for _, u := range run.Unrouted {
-		if !poured[strings.ToUpper(u.Net)] {
+		switch {
+		case pourCredit && poured[strings.ToUpper(u.Net)]:
+			items = append(items, fmt.Sprintf("POUR-CREDITED %s: unrouted by %s, joined by the %s pour (KiCad DRC: 0 unconnected items)", u, run.Router, u.Net))
+		case joined[u.Net]:
+			finished++
+			items = append(items, fmt.Sprintf("FINISH-CREDITED %s: unrouted by %s, joined by --finish-signals, each join proven (KiCad DRC: 0 unconnected items)", u, run.Router))
+		default:
 			return g
 		}
-		items = append(items, fmt.Sprintf("POUR-CREDITED %s: unrouted by %s, joined by the %s pour (KiCad DRC: 0 unconnected items)", u, run.Router, u.Net))
 	}
 	g.Pass, g.Items = true, nil
 	g.Info = items
-	g.Detail += fmt.Sprintf("; %d unrouted connection(s) credited to a pour: every one is on a poured net and KiCad reports 0 unconnected items", len(items))
+	if finished < len(items) {
+		g.Detail += fmt.Sprintf("; %d unrouted connection(s) credited to a pour: every one is on a poured net and KiCad reports 0 unconnected items", len(items)-finished)
+	}
+	if finished > 0 {
+		g.Detail += fmt.Sprintf("; %d unrouted connection(s) credited to --finish-signals joins: KiCad reports 0 unconnected items", finished)
+	}
 	return g
 }
 
@@ -1899,6 +1978,11 @@ func (r *kicadRun) routedDRCGate(routed string) (all, errs *kicad.DRCReport) {
 	rep, warn, nWarn := all.SplitErrors()
 	_ = writeJSONFile(drcPath, rep)
 	g := kicadDRCGate(rep, drcPath)
+	origin := drcOrigins(rep.Violations)
+	r.summary["drcOrigin"] = origin
+	if origin.FootprintInternal+origin.EdgePad > 0 {
+		g.Info = append(g.Info, fmt.Sprintf("%d error(s) inside one footprint and %d of a footprint's pads against the board edge, on %d footprint(s), listed in summary.drcOrigin: no routing setting changes them; %d other", origin.FootprintInternal, origin.EdgePad, len(origin.Footprints), origin.Other))
+	}
 	// What the project tells DRC not to report is part of the gate: an
 	// excluded or ignored short / clearance / unconnected / parity check
 	// fails it unless a signed waiver matches.

@@ -18,6 +18,11 @@ pcbpilot project import --file design.zip --type KiCad --name Demo --team <teamU
 LTspice；默认 KiCad）。命令返回不等于迁移成功：导入后按下文 Altium 一节“目标工程已经由用户独立提供”的 1–4 步逐页回读连接、
 Board 绑定、板框、层叠与 DRC，数量与关键网不一致时不报告成功。Altium 工程本身仍是 `unsupported`（见下文）。
 
+**已知宿主限制**：在 EasyEDA Pro 3.2.209 上实测，官方导入接口对 KiCad 9 与 KiCad 10 的工程包都直接返回空、不创建工程，
+命令报 `importProjectByProjectFile returned no project`。遇到时先用 `project find --name <名称> --team <teamUuid>` 确认工程
+确实不存在，不要盲目重试；然后请用户在 EasyEDA 里手动导入（文件 → 导入 → KiCad，选工程 zip，新建工程并关联封装），
+再从上面的回读步骤继续。导入前先跑 `kicad lcsc --verify`，导入后回读核对器件的 LCSC 号。
+
 ## EasyEDA 工程转 KiCad 原理图（`kicad sch-import`）
 
 ```bash

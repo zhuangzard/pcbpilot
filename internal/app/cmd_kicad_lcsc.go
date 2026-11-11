@@ -40,7 +40,7 @@ type partsSelectHit struct {
 func newKiCadLcscCmd(stdout, stderr io.Writer) *cobra.Command {
 	var pcb, sch, search, field, scriptPath, libDir, libName string
 	var sets, imports []string
-	var check, offline, asJSON bool
+	var check, verify, offline, asJSON bool
 	var qty, limit int
 	c := &cobra.Command{
 		Use:   "lcsc",
@@ -49,6 +49,10 @@ func newKiCadLcscCmd(stdout, stderr io.Writer) *cobra.Command {
 		Long: `Exactly one mode:
 
   --check            list placed parts that need but lack an LCSC number (exit 1 if any)
+  --verify           --check, then look every LCSC number up exactly (its EasyEDA/LCSC record, live):
+                     exit 1 if a number is not found, a chip size (0402, 0603…) differs
+                     from the footprint, or an R/C/L value differs from the part's value;
+                     out-of-stock numbers are warned about.
   --set REF=Cxxxx    write LCSC numbers (repeat or comma-separate). Updates an existing
                      "LCSC Part #"/"LCSC"/"LCSC Part"/"JLCPCB Part #" field, else creates
                      --field (default "LCSC Part #", hidden). The board is re-saved by
@@ -63,19 +67,20 @@ func newKiCadLcscCmd(stdout, stderr io.Writer) *cobra.Command {
                      KiCad's symbol/footprint library tables once. No 3D model; always
                      review pins and pads against the datasheet.`,
 		Example: `  pcbpilot kicad lcsc --pcb b.kicad_pcb --sch b.kicad_sch --check
+  pcbpilot kicad lcsc --pcb b.kicad_pcb --sch b.kicad_sch --verify
   pcbpilot kicad lcsc --pcb b.kicad_pcb --sch b.kicad_sch --set R1=C25744 --set C1=C1525,C2=C1525
   pcbpilot kicad lcsc --search "10k 0402"
   pcbpilot kicad lcsc --search "AMS1117-3.3" --json
   pcbpilot kicad lcsc --import C6186 --import C25744 --lib-dir ./lib`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			modes := 0
-			for _, on := range []bool{check, len(sets) > 0, search != "", len(imports) > 0} {
+			for _, on := range []bool{check, verify, len(sets) > 0, search != "", len(imports) > 0} {
 				if on {
 					modes++
 				}
 			}
 			if modes != 1 {
-				return fmt.Errorf("choose exactly one of --check, --set, --search, --import")
+				return fmt.Errorf("choose exactly one of --check, --verify, --set, --search, --import")
 			}
 			switch {
 			case search != "":
@@ -84,6 +89,8 @@ func newKiCadLcscCmd(stdout, stderr io.Writer) *cobra.Command {
 				return runLcscImport(stdout, imports, libDir, libName)
 			case check:
 				return runLcscCheck(stdout, stderr, pcb, sch, asJSON)
+			case verify:
+				return runLcscVerify(stdout, stderr, pcb, sch, asJSON)
 			default:
 				return runLcscSet(stdout, pcb, sch, sets, field)
 			}
@@ -93,6 +100,7 @@ func newKiCadLcscCmd(stdout, stderr io.Writer) *cobra.Command {
 	f.StringVar(&pcb, "pcb", "", "board file (.kicad_pcb)")
 	f.StringVar(&sch, "sch", "", "root schematic (.kicad_sch)")
 	f.BoolVar(&check, "check", false, "list placed parts without an LCSC number")
+	f.BoolVar(&verify, "verify", false, "--check, then look every LCSC number up exactly (live) and compare its package and value with the part")
 	f.StringArrayVar(&sets, "set", nil, "REF=Cxxxx assignment(s)")
 	f.StringVar(&field, "field", kicad.DefaultLCSCField, "field name to create when a part has none")
 	f.StringVar(&search, "search", "", "JLCPCB catalog query (value+package, MPN or C-number)")
@@ -102,7 +110,7 @@ func newKiCadLcscCmd(stdout, stderr io.Writer) *cobra.Command {
 	f.BoolVar(&offline, "offline", false, "--search: only the curated standard-parts.json (no network)")
 	f.IntVar(&qty, "qty", 100, "--search: build quantity for stock ranking")
 	f.IntVar(&limit, "limit", 10, "--search: rows to print")
-	f.BoolVar(&asJSON, "json", false, "machine-readable output (--check, --search)")
+	f.BoolVar(&asJSON, "json", false, "machine-readable output (--check, --verify, --search)")
 	f.StringVar(&scriptPath, "parts-select", "", "path to parts-select.py (default: the installed skill)")
 	return c
 }
@@ -189,10 +197,11 @@ func runLcscSet(stdout io.Writer, pcb, sch string, sets []string, field string) 
 	return nil
 }
 
-func runLcscSearch(stdout io.Writer, scriptPath, query string, offline bool, qty, limit int, asJSON bool) error {
+// partsSelectQuery runs one parts-select.py query.
+func partsSelectQuery(scriptPath, query string, offline bool, qty int) ([]partsSelectHit, error) {
 	script, err := partsSelectAsset.resolve(scriptPath)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	args := []string{query, "--json", "--qty", strconv.Itoa(qty)}
 	if !offline {
@@ -200,7 +209,7 @@ func runLcscSearch(stdout io.Writer, scriptPath, query string, offline bool, qty
 	}
 	cmd, err := pythonCommand(script, args...)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	out, err := cmd.Output()
 	// parts-select exits 1 with "[]" for an explicit-resistance query without a
@@ -208,9 +217,17 @@ func runLcscSearch(stdout io.Writer, scriptPath, query string, offline bool, qty
 	var hits []partsSelectHit
 	if jerr := json.Unmarshal(out, &hits); jerr != nil {
 		if err != nil {
-			return fmt.Errorf("parts-select.py: %w", err)
+			return nil, fmt.Errorf("parts-select.py: %w", err)
 		}
-		return fmt.Errorf("parts-select.py: bad JSON: %w", jerr)
+		return nil, fmt.Errorf("parts-select.py: bad JSON: %w", jerr)
+	}
+	return hits, nil
+}
+
+func runLcscSearch(stdout io.Writer, scriptPath, query string, offline bool, qty, limit int, asJSON bool) error {
+	hits, err := partsSelectQuery(scriptPath, query, offline, qty)
+	if err != nil {
+		return err
 	}
 	if limit > 0 && len(hits) > limit {
 		hits = hits[:limit]

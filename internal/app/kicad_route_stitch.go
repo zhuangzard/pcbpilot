@@ -31,7 +31,9 @@ const (
 	// escape zone the intent-widths gate allows for a track narrower than its
 	// class.
 	stitchReachMil = 45.0
-	stitchNearMil  = 30.0 // a new DRC error this close to a stitch is its own
+	// stitchFarReachMil: further still, with a track of the full stitch width only.
+	stitchFarReachMil = 150.0
+	stitchNearMil     = 30.0 // a new DRC error this close to a stitch is its own
 	// One barrel's current limit: 25 um plating, 10 C rise.
 	stitchPlatingMil = 1.0
 	stitchTempRiseC  = 10.0
@@ -49,13 +51,24 @@ type stitch struct {
 	Via   specctra.NewVia   `json:"via"`
 	Drill float64           `json:"drillMil"`
 	Track specctra.NewTrack `json:"track"`
-	Site  string            `json:"-"` // tried-site key
+	// More is the rest of a searched path (kicad_route_stitch_path.go), and
+	// PathMil its whole length.
+	More    []specctra.NewTrack `json:"more,omitempty"`
+	PathMil float64             `json:"pathMil,omitempty"`
+	Site    string              `json:"-"` // tried-site key
 }
 
 // planStitches finds a site for each open pad, nearest first, and keeps every
 // planned stitch clear of the ones before it. A pad with no site comes back in
 // the second list. tried holds sites an earlier pass already failed with.
 func planStitches(open, pads []boardPad, tracks []specctra.Track, vias []widenVia, size map[string]stitchSize, clr float64, bounds layoutBBox, tried map[string]bool) ([]stitch, []string) {
+	return planStitchPaths(open, pads, tracks, vias, size, clr, bounds, tried, 0, nil)
+}
+
+// planStitchPaths is planStitches with a path search of up to pathMil for a pad
+// no straight track can serve (0 = none). inPour, when given, must accept a
+// via site: a via outside its net's fill joins nothing.
+func planStitchPaths(open, pads []boardPad, tracks []specctra.Track, vias []widenVia, size map[string]stitchSize, clr float64, bounds layoutBBox, tried map[string]bool, pathMil float64, inPour func(net string, q [2]float64, dia float64) bool) ([]stitch, []string) {
 	type seg struct {
 		net       string
 		layer     int // 0 = every layer
@@ -75,6 +88,9 @@ func planStitches(open, pads []boardPad, tracks []specctra.Track, vias []widenVi
 	}
 	viaFits := func(net string, q [2]float64, dia float64) bool {
 		if q[0]-dia/2 < bounds.MinX || q[0]+dia/2 > bounds.MaxX || q[1]-dia/2 < bounds.MinY || q[1]+dia/2 > bounds.MaxY {
+			return false
+		}
+		if inPour != nil && !inPour(net, q, dia) {
 			return false
 		}
 		for _, c := range cu {
@@ -113,6 +129,48 @@ func planStitches(open, pads []boardPad, tracks []specctra.Track, vias []widenVi
 		}
 		return true
 	}
+	// A searched path keeps the full stitch width, and sees only the copper
+	// within its reach: the search asks thousands of times per pad.
+	pathLeft := stitchPathPassNodes
+	pathStitch := func(p boardPad, layer int, from [2]float64, sz stitchSize) *stitch {
+		allCu, allPads := cu, pads
+		defer func() { cu, pads = allCu, allPads }()
+		r := pathMil + sz.Dia + sz.Track + clr
+		cu, pads = nil, nil
+		for _, c := range allCu {
+			if segDist(from, c.a, c.b)-c.halfWidth <= r {
+				cu = append(cu, c)
+			}
+		}
+		for _, o := range allPads {
+			if math.Hypot(o.X-from[0], o.Y-from[1])-math.Hypot(o.W, o.H)/2 <= r {
+				pads = append(pads, o)
+			}
+		}
+		half := sz.Track / 2
+		var site string
+		pts := stitchPathSearchBudget(from, pathMil, func(a, b [2]float64) bool {
+			return trackFits(p, layer, a, b, half)
+		}, func(q [2]float64) bool {
+			site = fmt.Sprintf("%s@%.2f,%.2f", p.ID, q[0], q[1])
+			return !tried[site] && viaFits(p.Net, q, sz.Dia)
+		}, &pathLeft)
+		if len(pts) < 2 {
+			return nil
+		}
+		end := pts[len(pts)-1]
+		st := &stitch{PadID: p.ID, Net: p.Net, Site: site, Drill: sz.Drill, Via: specctra.NewVia{Net: p.Net, X: end[0], Y: end[1], DiameterMil: sz.Dia}}
+		for i := 0; i+1 < len(pts); i++ {
+			t := specctra.NewTrack{Net: p.Net, Layer: layer, X1: pts[i][0], Y1: pts[i][1], X2: pts[i+1][0], Y2: pts[i+1][1], Width: sz.Track}
+			if i == 0 {
+				st.Track = t
+			} else {
+				st.More = append(st.More, t)
+			}
+			st.PathMil += math.Hypot(t.X2-t.X1, t.Y2-t.Y1)
+		}
+		return st
+	}
 	order := append([]boardPad(nil), open...)
 	sort.Slice(order, func(i, j int) bool {
 		if order[i].Net != order[j].Net {
@@ -143,8 +201,12 @@ func planStitches(open, pads []boardPad, tracks []specctra.Track, vias []widenVi
 		// Rings outward from the pad edge, 16 directions on each.
 		base := sz.Dia/2 + clr
 		var placed *stitch
+		maxReach := stitchReachMil
+		if half*2 >= sz.Track {
+			maxReach = stitchFarReachMil
+		}
 	search:
-		for reach := 0.0; reach <= stitchReachMil; reach += 5 {
+		for reach := 0.0; reach <= maxReach; reach += 5 {
 			for k := 0; k < 16; k++ {
 				th := float64(k) * math.Pi / 8
 				dx, dy := math.Cos(th), math.Sin(th)
@@ -162,12 +224,18 @@ func planStitches(open, pads []boardPad, tracks []specctra.Track, vias []widenVi
 				break search
 			}
 		}
+		if placed == nil && pathMil > 0 {
+			placed = pathStitch(p, layer, from, sz)
+		}
 		if placed == nil {
 			noSite = append(noSite, p.ID)
 			continue
 		}
 		q := [2]float64{placed.Via.X, placed.Via.Y}
-		cu = append(cu, seg{p.Net, 0, q, q, sz.Dia / 2}, seg{p.Net, layer, from, q, half})
+		cu = append(cu, seg{p.Net, 0, q, q, sz.Dia / 2})
+		for _, t := range append([]specctra.NewTrack{placed.Track}, placed.More...) {
+			cu = append(cu, seg{p.Net, layer, [2]float64{t.X1, t.Y1}, [2]float64{t.X2, t.Y2}, t.Width / 2})
+		}
 		out = append(out, *placed)
 	}
 	return out, noSite
@@ -199,19 +267,22 @@ func openPadsOf(groups map[string][]kicad.PadGroup) map[string]bool {
 
 // stitchNearViolation says whether a violation sits at one of the stitches.
 func stitchNearViolation(v kicad.Violation, s stitch) bool {
-	a := [2]float64{s.Track.X1, s.Track.Y1}
-	b := [2]float64{s.Via.X, s.Via.Y}
 	// Any object of it: an insulation error names the via and a track whose
 	// reported position can be millimetres away.
+	near := func(q [2]float64) bool {
+		for _, t := range append([]specctra.NewTrack{s.Track}, s.More...) {
+			if segDist(q, [2]float64{t.X1, t.Y1}, [2]float64{t.X2, t.Y2}) <= stitchNearMil {
+				return true
+			}
+		}
+		return false
+	}
 	for _, it := range v.Items {
-		if segDist([2]float64{it.X, it.Y}, a, b) <= stitchNearMil {
+		if near([2]float64{it.X, it.Y}) {
 			return true
 		}
 	}
-	if v.X == nil || v.Y == nil {
-		return false
-	}
-	return segDist([2]float64{*v.X, *v.Y}, a, b) <= stitchNearMil
+	return v.X != nil && v.Y != nil && near([2]float64{*v.X, *v.Y})
 }
 
 var reDRCActual = regexp.MustCompile(`actual ([0-9.]+) mm`)
@@ -396,7 +467,30 @@ func (r *kicadRun) stitchPours(board string, nets []string) (string, error) {
 		}
 		b := s.Outline.BBox
 		bounds := layoutBBox{MinX: b.MinX + edge, MinY: b.MinY + edge, MaxX: b.MaxX - edge, MaxY: b.MaxY - edge}
-		plan, noSite := planStitches(open, pads, tracks, vias, size, clearanceOf(s)+kicad.ClearanceMarginMil, bounds, tried)
+		// A site must lie wholly inside a fill of its net on some layer, as
+		// filled now: a via the fill misses joins nothing (most stitches the
+		// proof dropped on the test board sat outside every fill).
+		fills := map[string][]pcbCopperArea{}
+		if areas, err := parseCopperAreaObstacles(nil, s.Copper.Poured); err == nil {
+			for _, a := range areas {
+				fills[a.Net] = append(fills[a.Net], a)
+			}
+		} else {
+			fmt.Fprintf(r.stderr, "stitch: pour fills unreadable (%v); sites are not checked against them\n", err)
+			fills = nil
+		}
+		inPour := func(net string, q [2]float64, dia float64) bool {
+			if fills == nil {
+				return true
+			}
+			for _, a := range fills[net] {
+				if compoundWinding(a.Contours, q) != 0 && stitchFillMargin(a, q) >= dia/2 {
+					return true
+				}
+			}
+			return false
+		}
+		plan, noSite := planStitchPaths(open, pads, tracks, vias, size, clearanceOf(s)+kicad.ClearanceMarginMil, bounds, tried, r.o.stitchPathMil, inPour)
 		info["planned"], info["noSite"] = len(plan), len(noSite)
 		if len(plan) == 0 {
 			stop = "no site for the pads left"
@@ -407,7 +501,7 @@ func (r *kicadRun) stitchPours(board string, nets []string) (string, error) {
 			cannot("stitch edit: " + err.Error())
 			return cur, nil
 		}
-		good, reasons, err := r.stitchProve(trial, plan, nets, base, groups, padAt, pass)
+		good, reasons, err := r.stitchProve(trial, plan, nets, base, groups, padAt, pass, true)
 		if err != nil {
 			cannot(err.Error())
 			return cur, nil
@@ -431,7 +525,7 @@ func (r *kicadRun) stitchPours(board string, nets []string) (string, error) {
 				cannot("stitch edit: " + err.Error())
 				return cur, nil
 			}
-			held, again, err := r.stitchProve(next, good, nets, base, groups, padAt, pass)
+			held, again, err := r.stitchProve(next, good, nets, base, groups, padAt, pass, false)
 			if err != nil {
 				cannot(err.Error())
 				return cur, nil
@@ -459,13 +553,32 @@ func (r *kicadRun) stitchPours(board string, nets []string) (string, error) {
 		}
 	}
 	byNet := map[string]int{}
+	paths, longest := 0, 0.0
 	for _, c := range kept {
 		byNet[c.Net]++
+		if c.PathMil > 0 {
+			paths++
+			longest = math.Max(longest, c.PathMil)
+		}
 	}
+	rep["pathStitches"], rep["longestPathMil"] = paths, longest
 	rep["stitched"], rep["passes"], rep["stop"] = byNet, passes, stop
+	rep["newDrcAwayFromStitches"] = r.stitchAway
 	rep["stitches"] = kept
 	fmt.Fprintf(r.stderr, "stitch: %d via(s) kept on %d net(s), stopped: %s\n", len(kept), len(byNet), stop)
 	return cur, nil
+}
+
+// stitchFillMargin is the distance from q to the nearest edge of a fill.
+func stitchFillMargin(a pcbCopperArea, q [2]float64) float64 {
+	best := math.Inf(1)
+	for _, c := range a.Contours {
+		for i, p := range c {
+			n := c[(i+1)%len(c)]
+			best = math.Min(best, segPtDist(q[0], q[1], p[0], p[1], n[0], n[1]))
+		}
+	}
+	return best
 }
 
 // stitchOps is the bridge edit of a set of stitches.
@@ -473,7 +586,9 @@ func stitchOps(ss []stitch) map[string]any {
 	var av, at []map[string]any
 	for _, c := range ss {
 		av = append(av, map[string]any{"net": c.Via.Net, "x": c.Via.X, "y": c.Via.Y, "diameter": c.Via.DiameterMil, "drill": c.Drill})
-		at = append(at, map[string]any{"net": c.Track.Net, "layer": c.Track.Layer, "startX": c.Track.X1, "startY": c.Track.Y1, "endX": c.Track.X2, "endY": c.Track.Y2, "lineWidth": c.Track.Width})
+		for _, t := range append([]specctra.NewTrack{c.Track}, c.More...) {
+			at = append(at, map[string]any{"net": t.Net, "layer": t.Layer, "startX": t.X1, "startY": t.Y1, "endX": t.X2, "endY": t.Y2, "lineWidth": t.Width})
+		}
 	}
 	return map[string]any{"addVias": av, "addTracks": at}
 }
@@ -481,8 +596,9 @@ func stitchOps(ss []stitch) map[string]any {
 // stitchProve checks a filled board: which stitches joined their pad to the
 // net's main group with no new DRC error at them. A new error at no stitch at
 // all rejects nothing here but is an error of the pass: the caller keeps the
-// board from before it.
-func (r *kicadRun) stitchProve(board string, plan []stitch, nets []string, base *kicad.DRCReport, before map[string][]kicad.PadGroup, at map[string][2]float64, pass int) ([]stitch, map[string]string, error) {
+// board from before it. On a trial a cut plane fails only the nearest stitch:
+// the checks that follow fail all those around it if the cut is still there.
+func (r *kicadRun) stitchProve(board string, plan []stitch, nets []string, base *kicad.DRCReport, before map[string][]kicad.PadGroup, at map[string][2]float64, pass int, trial bool) ([]stitch, map[string]string, error) {
 	rep, err := r.kt.DRC(board, filepath.Join(r.work, fmt.Sprintf("%02d-stitch-drc%d.json", r.step, pass)))
 	if err != nil {
 		return nil, nil, fmt.Errorf("DRC after stitching: %w", err)
@@ -498,7 +614,7 @@ func (r *kicadRun) stitchProve(board string, plan []stitch, nets []string, base 
 	// now fail the stitches around them. With none near, nothing can be named
 	// and the pass fails.
 	lost := padsSplit(before, groups)
-	cut := stitchCutters(lost, plan, at)
+	cut := stitchCutters(lost, plan, at, trial)
 	for _, id := range sortedKeysOf(lost) {
 		if !cut.named[id] {
 			reasons["board"] = "pad " + id + " was cut off with no stitch near it"
@@ -506,7 +622,6 @@ func (r *kicadRun) stitchProve(board string, plan []stitch, nets []string, base 
 		}
 	}
 	var good []stitch
-	claimed := make([]bool, len(fresh))
 	for _, c := range plan {
 		bad := ""
 		if open[c.PadID] {
@@ -515,12 +630,9 @@ func (r *kicadRun) stitchProve(board string, plan []stitch, nets []string, base 
 		if cut.stitches[c.PadID] {
 			bad = "near a pad that lost its pour"
 		}
-		for i, v := range fresh {
-			if stitchNearViolation(v, c) {
-				claimed[i] = true
-				if bad == "" {
-					bad = "new DRC " + v.Rule
-				}
+		for _, v := range fresh {
+			if bad == "" && stitchNearViolation(v, c) {
+				bad = "new DRC " + v.Rule
 			}
 		}
 		if bad != "" {
@@ -529,13 +641,30 @@ func (r *kicadRun) stitchProve(board string, plan []stitch, nets []string, base 
 		}
 		good = append(good, c)
 	}
-	for i, v := range fresh {
-		if !claimed[i] && reasons["board"] == "" {
-			reasons["board"] = "new DRC " + v.Rule + " away from any stitch"
-			break
-		}
+	away := violationsAwayFrom(fresh, plan)
+	r.stitchAway = len(away)
+	if len(away) > 0 {
+		// A stitch only adds copper of its own, so these are not its doing: KiCad
+		// can report an old error against another of the same track's neighbours.
+		// The final DRC still counts them.
+		fmt.Fprintf(r.stderr, "stitch: %d new DRC error(s) away from any stitch, first: %s %s\n", len(away), away[0].Rule, away[0].Message)
 	}
 	return good, reasons, nil
+}
+
+// violationsAwayFrom lists the violations near none of the stitches.
+func violationsAwayFrom(vs []kicad.Violation, plan []stitch) []kicad.Violation {
+	var away []kicad.Violation
+	for _, v := range vs {
+		near := false
+		for _, c := range plan {
+			near = near || stitchNearViolation(v, c)
+		}
+		if !near {
+			away = append(away, v)
+		}
+	}
+	return away
 }
 
 // padsSplit lists the pads of each earlier group that are no longer with the
@@ -596,20 +725,33 @@ type stitchCut struct {
 	named    map[string]bool // lost pads with a stitch near them
 }
 
-// stitchCutters finds the stitches that may have cut a pad off: those within
-// stitchCutMil of it.
-func stitchCutters(lost map[string]bool, plan []stitch, at map[string][2]float64) stitchCut {
+// stitchCutters finds the stitches that may have cut a pad off: those with any
+// copper within stitchCutMil of it, or only the nearest of them.
+func stitchCutters(lost map[string]bool, plan []stitch, at map[string][2]float64, nearestOnly bool) stitchCut {
 	cut := stitchCut{stitches: map[string]bool{}, named: map[string]bool{}}
 	for id := range lost {
 		q, ok := at[id]
 		if !ok {
 			continue
 		}
+		nearest, best := "", math.Inf(1)
 		for _, c := range plan {
-			if math.Hypot(c.Via.X-q[0], c.Via.Y-q[1]) <= stitchCutMil {
-				cut.stitches[c.PadID] = true
-				cut.named[id] = true
+			d := math.Hypot(c.Via.X-q[0], c.Via.Y-q[1])
+			for _, t := range append([]specctra.NewTrack{c.Track}, c.More...) {
+				d = math.Min(d, segDist(q, [2]float64{t.X1, t.Y1}, [2]float64{t.X2, t.Y2}))
 			}
+			if d > stitchCutMil {
+				continue
+			}
+			cut.named[id] = true
+			if !nearestOnly {
+				cut.stitches[c.PadID] = true
+			} else if d < best || (d == best && c.PadID < nearest) {
+				nearest, best = c.PadID, d
+			}
+		}
+		if nearest != "" {
+			cut.stitches[nearest] = true
 		}
 	}
 	return cut

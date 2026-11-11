@@ -110,7 +110,7 @@ copper-to-edge、isolation、via-current。
 
 | # | 项 | 证明 |
 |---|---|---|
-| 8.1 | 每个贴装件有合法 LCSC C 号；安装孔/Mark/测试点/Logo 已排除 BOM | `signoff-parts`；K：`kicad lcsc --check`，`kicad fab` 缺号即失败不写文件 |
+| 8.1 | 每个贴装件有合法 LCSC C 号；安装孔/Mark/测试点/Logo 已排除 BOM | `signoff-parts`；K：`kicad lcsc --check` 与 `--verify`（C 号存在、尺寸、值一致），`kicad fab` 缺号即失败不写文件 |
 | 8.2 | DNP 件：原理图标 DNP 或排除 BOM/坐标，不靠删 BOM 行 | K：`kicad fab` 按 DNP / 排除字段过滤（`--exclude-dnp`）；结果核对 manual；E：manual（`bom export`） |
 | 8.3 | 贴片 Mark 点（全局 ≥3 不共线；细间距件按需局部 Mark） | E：`pcb check` `fiducial-missing`（INFO，仅在顶层焊盘较多的 SMT 板上报）；K：manual |
 | 8.4 | 拼板/工艺边上的 Mark 与工具孔（若出拼板） | manual |

@@ -48,7 +48,7 @@
 | `kicad sch-import --out D` | `.epro`、可选 `--pcb` | `D/<name>.kicad_sch` + 子图、`easyeda.kicad_sym`、`sym-lib-table`、`.kicad_pro`（已有则保留） | 只写 `D` |
 | `kicad lcsc --set` | 板、原理图 | 板由 pcbnew 重新保存；原理图（含子图）最小文本修改 | **是**（无检查点） |
 | `kicad lcsc --import C… --lib-dir L` | 网络（JLC 的 EasyEDA 库记录） | `L/<lib-name>.kicad_sym`、`L/<lib-name>.pretty/` | 只写 `L`；**不改库表**，需要时把两个库加进工程库表（见下） |
-| `kicad lcsc --check` / `--search` | 板、原理图 / 网络 | 无 | 否 |
+| `kicad lcsc --check` / `--verify` / `--search` | 板、原理图 / 网络 | 无 | 否 |
 | `kicad place --pcb B --out Y` | 板 | `Y`（+ `.kicad_pro`）、`Y.seed-N.kicad_pcb`、`Y.report.json`；输出板的走线/过孔被清除、铺铜未灌 | 否 |
 | `kicad route --pcb B --out-dir R` | 板、同名 `.kicad_pro` / `.kicad_dru` | `R/work/` 逐步工作板、`R/routed.kicad_pcb`、`board-final.json`、`summary.json`、`report/`、`manual/`、`review-*/` | 否（复制进 `R/work/`） |
 | `kicad render --out D` | 原理图层次或板（在临时副本上出图） | `D/*.svg`、`D/render.json`、`--png` 时 `D/*-3d-*.png`；`--compare` 只读 | 否；`D` 非空且不是上次 render 的输出时拒绝 |
