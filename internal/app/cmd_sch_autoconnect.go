@@ -651,7 +651,10 @@ func scoreCandidate(pin acPin, dir string, offset float64, canonicalKind, target
 	// the title block, and the same `out-of-sheet` ERROR `sch check` raises after the
 	// fact. Live 2026-10-16: the W25Q64's right-side labels were staggered to offset
 	// 98 and ended 2 raw past the usable edge while offset 18 stayed inside.
-	if rules.AvoidTitleBlock && scene.Usable != nil && !boxInside(lbl, *scene.Usable) {
+	// Not gated on AvoidTitleBlock: the sheet edge is a boundary of its own, and
+	// switching off title-block avoidance must not switch it off too. Usable is
+	// nil whenever the scene carries no sheet, so sheet-less scenes are unaffected.
+	if scene.Usable != nil && !boxInside(lbl, *scene.Usable) {
 		reasons = append(reasons, acReason{costHardReject, "label leaves the usable sheet area (hard reject)"})
 	}
 

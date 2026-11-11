@@ -29,3 +29,32 @@ func TestScoreCandidateRejectsLabelOutsideUsableSheet(t *testing.T) {
 		t.Fatalf("a label inside the usable sheet must not be rejected for it: %+v", c)
 	}
 }
+
+// The sheet edge is a boundary of its own: switching off title-block avoidance
+// must not switch off the usable-area hard reject, and a scene without a sheet
+// (Usable nil) must not reject anything for it.
+func TestScoreCandidateUsableSheetRejectIgnoresAvoidTitleBlock(t *testing.T) {
+	rot := 0.0
+	pin := acPin{X: 1022, Y: 415, Designator: "U1", PinNumber: "5", PinRotation: &rot}
+	usable := schUsableArea(layoutBBox{MinX: 0, MinY: 0, MaxX: 1170, MaxY: 825})
+	hard := func(c acCandidate) bool {
+		for _, r := range c.Reasons {
+			if strings.Contains(r.Desc, "usable sheet") {
+				return true
+			}
+		}
+		return false
+	}
+	rules := defaultAutoconnectRules()
+	rules.AvoidTitleBlock = false
+	scene := acScene{Usable: &usable}
+	if c := scoreCandidate(pin, "right", 98, "netport", "NET_A", scene, rules); !hard(c) {
+		t.Fatalf("AvoidTitleBlock=false must keep the sheet-boundary hard reject: %+v", c)
+	}
+	if c := scoreCandidate(pin, "right", 18, "netport", "NET_A", scene, rules); hard(c) {
+		t.Fatalf("a label inside the usable sheet must not be rejected: %+v", c)
+	}
+	if c := scoreCandidate(pin, "right", 98, "netport", "NET_A", acScene{}, rules); hard(c) {
+		t.Fatalf("a scene without a sheet has no usable area to enforce: %+v", c)
+	}
+}
