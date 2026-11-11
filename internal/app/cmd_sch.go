@@ -417,11 +417,13 @@ named keep their value. --show/--hide do not apply (KiCad always draws it).`,
 				if err != nil {
 					return fmt.Errorf("page-delete sent (platform ok=%v) but the page list could not be read back: %w", res.Result["ok"], err)
 				}
-				for _, p := range mapsField(pages.Result, "pages") {
-					if strField(p, "uuid") == page {
-						return fmt.Errorf("page %s (%s) is still listed after page-delete (platform ok=%v) — not deleted; stop writing to this project and keep the page uuid as evidence",
-							page, strField(p, "name"), res.Result["ok"])
-					}
+				name, listed, err := schPageListedInInventory(pages.Result, page)
+				if err != nil {
+					return fmt.Errorf("page-delete sent (platform ok=%v) but the page list read back is unusable (%w) — deletion NOT proven; re-read with `pcbpilot sch pages`", res.Result["ok"], err)
+				}
+				if listed {
+					return fmt.Errorf("page %s (%s) is still listed after page-delete (platform ok=%v) — not deleted; stop writing to this project and keep the page uuid as evidence",
+						page, name, res.Result["ok"])
 				}
 				fmt.Fprintf(stdout, "✓ deleted page %s (absent from the page list read back)\n", page)
 				return nil
