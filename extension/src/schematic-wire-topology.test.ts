@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { collectWireSegments, connectivityWireSegments, planSchDeleteCascadeTrees, runAction, schematicComponentsList, schematicPinDisconnect } from './actions';
-import { classifyWireContact, classifyWireSegment, isDegenerateWireSegment, parseObservedWireLine, physicalWireIslands, wireContactAnchor, type WireSegment } from './schematic-wire-topology';
+import { classifyWireContact, classifyWireSegment, isDegenerateWireSegment, parseObservedWireLine, physicalWireIslands, resolvePinNetFromWires, wireContactAnchor, type WireSegment } from './schematic-wire-topology';
 
 const H: WireSegment = [-20, 0, 20, 0];
 const V: WireSegment = [0, -20, 0, 20];
@@ -493,4 +493,10 @@ test('legacy disconnect still deletes a verified simple straight stub',async t=>
 	assert.equal(out.result.disconnected,true);
 	assert.deepEqual(out.result.deletedWires,['h']);
 	assert.equal(fx.mutations(),1);
+});
+
+test('a zero-length wire on a pin lends it no net', () => {
+	const pin = { x: 10, y: 10 };
+	assert.deepEqual(resolvePinNetFromWires(pin, [{ seg: [10, 10, 10, 10], net: 'VCC' }]), { unresolved: 'no-touching-wire' });
+	assert.deepEqual(resolvePinNetFromWires(pin, [{ seg: [10, 10, 10, 10], net: 'VCC' }, { seg: [10, 10, 50, 10], net: 'SIG' }]), { net: 'SIG' });
 });

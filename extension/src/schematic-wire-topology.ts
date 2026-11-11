@@ -206,7 +206,8 @@ export function assertLegacySimpleWireOperation(segments: ObservedWireSegment[],
  * the reason, never a silent null.
  */
 export function resolvePinNetFromWires(pin: WireAnchor, segments: ReadonlyArray<{ seg: WireSegment; net: string }>): { net: string } | { unresolved: 'no-touching-wire' | 'unnamed-wire' | 'conflicting-wire-nets' } {
-	const touching = segments.filter(s => wirePointOnSegment(pin, s.seg));
+	// A zero-length wire connects nothing: one sitting on the pin must not lend it a net.
+	const touching = segments.filter(s => !isDegenerateWireSegment(s.seg) && wirePointOnSegment(pin, s.seg));
 	if (!touching.length) return { unresolved: 'no-touching-wire' };
 	const nets = [...new Set(touching.map(s => s.net).filter(n => n))];
 	if (nets.length === 1) return { net: nets[0] };
