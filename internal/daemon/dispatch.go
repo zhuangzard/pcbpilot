@@ -341,7 +341,13 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 	// than released inline so no early return can leak the counter.
 	defer s.beginClientAction(req.WindowID)()
 	guardedDispatch := func(ctx context.Context, req protocol.Request) (*protocol.Response, error) {
-		return s.forwardSchematicGeometry(ctx, req, target.dispatch)
+		resp, err := s.forwardSchematicGeometry(ctx, req, target.dispatch)
+		// Rewrite a wrong-foreground-document host failure before adaptive
+		// health observes it, so it is not sampled as a degraded connector.
+		if err == nil {
+			explainDocTypeMismatch(ctx, &req, resp, target.dispatch)
+		}
+		return resp, err
 	}
 	resp, err, _ := forwardWithAdaptiveRetry(ctx, req, guardedDispatch, hooks)
 	if err != nil {
