@@ -298,6 +298,15 @@ func AllActions() []ActionSpec {
 			Outputs:     []string{"component primitives", "designator", "name", "pins", "pinsAvailable", "pinsError on pin-read failure", "bbox", "wires/wiresAvailable/wiresError", "pagePrimitives (all component/graphic IDs and native drawing state; excludes sheet autosave timestamps)", "connectivitySummary {scope,wires,buses,netflags,netports,netlabels,shortSymbols}"},
 		},
 		{
+			Name:        "schematic.geometry.read",
+			Domain:      DomainSchematic,
+			Phase:       1,
+			Mutates:     false,
+			NeedsWindow: true,
+			Description: "Read-only current-page part body boxes, world-space pins and every wire segment, for geometry checks. Does not hydrate library metadata or compile a netlist. Scope is part geometry: not a complete component/marker inventory and not a rebuild snapshot (use schematic.components.list for those). Missing evidence or a part inventory that changed during the read fails the read.",
+			Outputs:     []string{"scope", "components (parts only: bbox and world-space pins)", "count", "wires", "wiresAvailable"},
+		},
+		{
 			Name:        "schematic.attribute.inspect",
 			Domain:      DomainSchematic,
 			Phase:       1,
