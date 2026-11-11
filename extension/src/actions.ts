@@ -1341,6 +1341,7 @@ export const schematicComponentsList: Handler = async (payload) => {
 	// designator (RK3568 board V0.3/V1.0, 2026-10-23) blanked a real part's nets,
 	// and only after the other schematic's page happened to be opened.
 	let ambiguousDesignators = new Set<string>();
+	let netlistIdentity: Pick<NetlistPinNets, 'identitiesByDesignator' | 'identities'> | null = null;
 	// Whether the netlist behind every pin's `net` was actually fetched+parsed. When
 	// it was not, `net` is FORCED to null on every pin of every component. Reporting
 	// that flag is not cosmetic: a run of nulls used to read as "all these pins are
@@ -1357,11 +1358,19 @@ export const schematicComponentsList: Handler = async (payload) => {
 		try { return readObservedWireSegments(await eda.sch_PrimitiveWire.getAll()); }
 		catch { return undefined; }
 	})();
+	let memberProbes: NetlistMemberProbe[] | undefined;
+	const netlistMemberProbe = (c: (typeof components)[number]): NetlistMemberProbe => ({
+		uniqueId: String(c.getState_UniqueId?.() ?? ''),
+		designator: String(c.getState_Designator?.() ?? ''),
+		kind: String(c.getState_ComponentType?.() ?? ''),
+		deviceUuid: String((c.getState_Component?.() as { uuid?: unknown } | undefined)?.uuid ?? ''),
+	});
 	if (includePins && includePinNets) {
 		try {
 			const collected = await collectNetlistPinNets();
 			pinNetsByDesignator = collected.byDesignator;
 			ambiguousDesignators = collected.ambiguous;
+			netlistIdentity = collected;
 			pinNetsAvailable = collected.available;
 			pinNetsError = collected.error;
 		}
@@ -1436,7 +1445,16 @@ export const schematicComponentsList: Handler = async (payload) => {
 				const designator = String(component.getState_Designator?.() ?? '');
 				const ambiguous = ambiguousDesignators.has(designator);
 				if (ambiguous) record.netAmbiguous = true;
-				const netByNumber = ambiguous ? null : (pinNetsByDesignator?.get(designator) ?? null);
+				let netByNumber = ambiguous ? null : (pinNetsByDesignator?.get(designator) ?? null);
+				// A record under this designator that belongs to another component
+				// is not this component's record: do not let it stand in for one.
+				if (netByNumber && netlistIdentity) {
+					memberProbes ??= components.map(netlistMemberProbe);
+					if (netlistRecordIsForeign(netlistMemberProbe(component), memberProbes, netlistIdentity)) {
+						netByNumber = null;
+						record.netlistRecordForeign = true;
+					}
+				}
 				// Netlist readable but this part has no record in it (a reuse-block
 				// instance, #244): resolve its pins from touching wires instead of a
 				// silent null that reads like "floating".
@@ -3992,6 +4010,11 @@ interface NetlistPinNets {
 	 * scope: another schematic of the same project reusing the designator is not
 	 * a collision. */
 	ambiguous: Set<string>;
+	/** Identity values each designator's netlist record carries: its map key
+	 * and its `Unique ID` prop. Only meaningful once a listed component's own
+	 * uniqueId is found among them (see netlistRecordIsForeign). */
+	identitiesByDesignator: Map<string, Set<string>>;
+	identities: Set<string>;
 	available: boolean;
 	/** Why the netlist could not be fetched/parsed. Set only when available===false,
 	 * so callers can report a CAUSE instead of silently degrading to "no nets". */
@@ -4001,8 +4024,10 @@ interface NetlistPinNets {
 async function collectNetlistPinNets(_allPages = false): Promise<NetlistPinNets> {
 	const byDesignator = new Map<string, Map<string, string>>();
 	const ambiguous = new Set<string>();
+	const identitiesByDesignator = new Map<string, Set<string>>();
+	const identities = new Set<string>();
 	const muted = (error?: string): NetlistPinNets =>
-		({ byDesignator, ambiguous, available: false, ...(error ? { error } : {}) });
+		({ byDesignator, ambiguous, identitiesByDesignator, identities, available: false, ...(error ? { error } : {}) });
 	let file: File | undefined;
 	try { file = await eda.sch_ManufactureData.getNetlistFile(); }
 	catch (err) { return muted(describeThrown(err)); }
@@ -4012,9 +4037,14 @@ async function collectNetlistPinNets(_allPages = false): Promise<NetlistPinNets>
 	catch (err) { return muted(`netlist JSON parse failed: ${describeThrown(err)}`); }
 	const components = (parsed as { components?: Record<string, NetlistComponentInfo> })?.components;
 	if (!components || typeof components !== 'object') return muted('netlist JSON carries no components map');
-	for (const comp of Object.values(components)) {
+	for (const [key, comp] of Object.entries(components)) {
 		const designator = String(comp.props?.Designator ?? '');
 		if (!designator || !comp.pinInfoMap) continue;
+		const own = identitiesByDesignator.get(designator) ?? new Set<string>();
+		for (const id of [key, comp.props?.['Unique ID'], comp.props?.uniqueId]) {
+			if (typeof id === 'string' && id) { own.add(id); identities.add(id); }
+		}
+		identitiesByDesignator.set(designator, own);
 		if (byDesignator.has(designator)) ambiguous.add(designator);
 		const pins = byDesignator.get(designator) ?? new Map<string, string>();
 		for (const pin of Object.values(comp.pinInfoMap)) {
@@ -4024,7 +4054,43 @@ async function collectNetlistPinNets(_allPages = false): Promise<NetlistPinNets>
 		}
 		byDesignator.set(designator, pins);
 	}
-	return { byDesignator, ambiguous, available: true };
+	return { byDesignator, ambiguous, identitiesByDesignator, identities, available: true };
+}
+
+interface NetlistMemberProbe {
+	uniqueId: string;
+	designator: string;
+	kind: string;
+	deviceUuid: string;
+}
+
+/**
+ * Whether the netlist record found under a component's designator belongs to a
+ * DIFFERENT component. The netlist is keyed by designator, so a part or block
+ * instance that has no record of its own would otherwise inherit the nets of
+ * an unrelated component that happens to share its designator.
+ *
+ * This only ever answers true on positive evidence, because the identity the
+ * netlist carries is host data this code cannot assume:
+ *   - nothing is concluded until some listed component's uniqueId is found
+ *     among the netlist identities (that proves the two share a namespace);
+ *   - the component's own uniqueId must be absent from the whole netlist;
+ *   - then either a listed component owns the record and is not the same
+ *     device (sub-symbols of one device share one record and are NOT foreign),
+ *     or the owner is not listed and the component is a block instance, which
+ *     cannot be a sub-symbol of anything.
+ * A part whose record owner is on a page this listing does not cover stays on
+ * the netlist: it cannot be told apart from a sub-symbol of that owner.
+ */
+export function netlistRecordIsForeign(self: NetlistMemberProbe, listed: NetlistMemberProbe[], netlist: Pick<NetlistPinNets, 'identitiesByDesignator' | 'identities'>): boolean {
+	const recordIds = netlist.identitiesByDesignator.get(self.designator);
+	if (!recordIds || recordIds.size === 0 || !self.uniqueId) return false;
+	if (!listed.some(c => c.uniqueId && netlist.identities.has(c.uniqueId))) return false;
+	if (netlist.identities.has(self.uniqueId)) return false;
+	const owner = listed.find(c => c.designator === self.designator && c.uniqueId && recordIds.has(c.uniqueId));
+	if (!owner) return self.kind === 'block_symbol';
+	if (self.kind !== 'part' || owner.kind !== 'part') return true;
+	return Boolean(self.deviceUuid && owner.deviceUuid && self.deviceUuid !== owner.deviceUuid);
 }
 
 // ─── Polarity-convention outlier (#183 phase 1) ─────────────────────────────

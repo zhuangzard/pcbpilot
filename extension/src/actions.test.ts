@@ -4528,3 +4528,90 @@ test('pcbPageClear: footprint-embedded tracks and arcs are skipped like vias, ea
 	assert.deepEqual(d.deleted, {});
 	delete (globalThis as any).eda;
 });
+
+test('components.list: a netlist record owned by another component of the same designator does not suppress the wire fallback', async () => {
+	const { netlistRecordIsForeign } = require('./actions') as typeof import('./actions');
+	const pin = (id: string, num: string, x: number, y: number) => ({
+		getState_PrimitiveId: () => id, getState_PinNumber: () => num, getState_PinName: () => `P${num}`,
+		getState_X: () => x, getState_Y: () => y, getState_Rotation: () => 0, getState_NoConnected: () => false,
+	});
+	const wire = (id: string, line: number[], net: string) => ({ getState_PrimitiveId: () => id, getState_Line: () => line, getState_Net: () => net });
+	const dev = (uuid: string) => ({ libraryUuid: 'LIB', uuid });
+	const run = async (components: any[], netlist: Record<string, unknown>) => {
+		const pins: Record<string, unknown[]> = {};
+		components.forEach((c, i) => { pins[c.getState_PrimitiveId()] = [pin(`${c.getState_PrimitiveId()}-1`, '1', 0, i * 100)]; });
+		(globalThis as any).eda = {
+			sch_PrimitiveComponent: { getAll: async () => components, getAllPinsByPrimitiveId: async (id: string) => pins[id] },
+			sch_PrimitiveWire: { getAll: async () => components.map((c, i) => wire(`w${i}`, [0, i * 100, 50, i * 100], `WIRE_${i}`)) },
+			dmt_SelectControl: { getCurrentDocumentInfo: async () => ({ uuid: 'page', tabId: 'page@project' }) },
+			dmt_EditorControl: { activateDocument: async () => true },
+			sch_ManufactureData: { getNetlistFile: async () => ({ text: async () => JSON.stringify({ components: netlist }) }) },
+		};
+		try {
+			const res: any = await schematicComponentsList({ includePins: true });
+			return Object.fromEntries(res.result.components.map((c: any) => [c.primitiveId, c]));
+		}
+		finally { delete (globalThis as any).eda; }
+	};
+	const rec = (designator: string, net: string, extra: Record<string, unknown> = {}) =>
+		({ props: { Designator: designator, ...extra }, pinInfoMap: { p: { number: '1', net } } });
+	const anchor = mockComponent({ PrimitiveId: 'r1', ComponentType: 'part', Designator: 'R1', UniqueId: 'id-r1', Component: dev('DEV-R') });
+	const block = (): any => mockComponent({ PrimitiveId: 'blk', ComponentType: 'block_symbol', Designator: 'U7', UniqueId: 'id-blk' });
+
+	// Block instance with no record of its own; the only "U7" record belongs to
+	// a component on a page this listing does not cover.
+	let out = await run([anchor, block()], { 'id-r1': rec('R1', 'NET_R1'), 'id-elsewhere': rec('U7', 'FOREIGN_NET') });
+	assert.equal(out.r1.pins[0].net, 'NET_R1');
+	assert.equal(out.r1.netSource, undefined);
+	assert.equal(out.blk.netSource, 'wire-geometry');
+	assert.equal(out.blk.netlistRecordForeign, true);
+	assert.equal(out.blk.pins[0].net, 'WIRE_1', 'the block pin takes its net from the touching wire, not the foreign record');
+
+	// Same, with the identity carried in the Unique ID prop instead of the key.
+	out = await run([anchor, block()], {
+		a: rec('R1', 'NET_R1', { 'Unique ID': 'id-r1' }),
+		b: rec('U7', 'FOREIGN_NET', { 'Unique ID': 'id-elsewhere' }),
+	});
+	assert.equal(out.blk.pins[0].net, 'WIRE_1');
+
+	// Two listed parts share a designator; the record belongs to the first and
+	// the second is a different device with no record.
+	out = await run([
+		mockComponent({ PrimitiveId: 'own', ComponentType: 'part', Designator: 'U7', UniqueId: 'id-own', Component: dev('DEV-A') }),
+		mockComponent({ PrimitiveId: 'stray', ComponentType: 'part', Designator: 'U7', UniqueId: 'id-stray', Component: dev('DEV-B') }),
+	], { 'id-own': rec('U7', 'OWN_NET') });
+	assert.deepEqual([out.own.pins[0].net, out.own.netSource], ['OWN_NET', undefined]);
+	assert.deepEqual([out.stray.pins[0].net, out.stray.netSource, out.stray.netlistRecordForeign], ['WIRE_1', 'wire-geometry', true]);
+
+	// Sub-symbols of one device share one record: the second is not foreign.
+	out = await run([
+		mockComponent({ PrimitiveId: 'ua', ComponentType: 'part', Designator: 'U7', UniqueId: 'id-ua', Component: dev('DEV-A'), SubPartName: 'X.1' }),
+		mockComponent({ PrimitiveId: 'ub', ComponentType: 'part', Designator: 'U7', UniqueId: 'id-ub', Component: dev('DEV-A'), SubPartName: 'X.2' }),
+	], { 'id-ua': rec('U7', 'OWN_NET') });
+	assert.deepEqual([out.ub.pins[0].net, out.ub.netSource, out.ub.netlistRecordForeign], ['OWN_NET', undefined, undefined]);
+
+	// The netlist does not carry component identities at all: nothing can be
+	// concluded, and the designator match is used as before.
+	out = await run([anchor, block()], { c1: rec('R1', 'NET_R1'), c2: rec('U7', 'KEPT_NET') });
+	assert.deepEqual([out.blk.pins[0].net, out.blk.netSource], ['KEPT_NET', undefined]);
+
+	// A part whose record owner is not listed could be a sub-symbol of it: kept.
+	out = await run([
+		anchor,
+		mockComponent({ PrimitiveId: 'p', ComponentType: 'part', Designator: 'U7', UniqueId: 'id-p', Component: dev('DEV-A') }),
+	], { 'id-r1': rec('R1', 'NET_R1'), 'id-elsewhere': rec('U7', 'KEPT_NET') });
+	assert.deepEqual([out.p.pins[0].net, out.p.netSource], ['KEPT_NET', undefined]);
+
+	// The pure rule, including a component that has a record under another designator.
+	const netlist = {
+		identitiesByDesignator: new Map([['U7', new Set(['id-own'])], ['R1', new Set(['id-r1'])]]),
+		identities: new Set(['id-own', 'id-r1']),
+	};
+	const probe = (uniqueId: string, designator: string, kind: string, deviceUuid = '') => ({ uniqueId, designator, kind, deviceUuid });
+	const listed = [probe('id-r1', 'R1', 'part', 'DEV-R')];
+	assert.equal(netlistRecordIsForeign(probe('id-blk', 'U7', 'block_symbol'), listed, netlist), true);
+	assert.equal(netlistRecordIsForeign(probe('', 'U7', 'block_symbol'), listed, netlist), false, 'no own identity, no conclusion');
+	assert.equal(netlistRecordIsForeign(probe('id-r1', 'U7', 'block_symbol'), listed, netlist), false, 'known to the netlist under another designator');
+	assert.equal(netlistRecordIsForeign(probe('id-blk', 'U9', 'block_symbol'), listed, netlist), false, 'no record under that designator');
+	assert.equal(netlistRecordIsForeign(probe('id-blk', 'U7', 'block_symbol'), [], netlist), false, 'namespace not proven');
+});
