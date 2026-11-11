@@ -8,6 +8,7 @@ package app
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strings"
 	"testing"
@@ -21,7 +22,7 @@ const (
 	envFakeFRMode      = "PCBPILOT_FAKE_FR"     // fastroute: "" | wait-stop | ignore-stop | crash-parallel | crash
 	envFakeFRReady     = "PCBPILOT_FAKE_READY"  // fastroute wait-stop / ignore-stop: file written once the stop handler is in place
 	envFakeTMBehaves   = "PCBPILOT_FAKE_TM"     // tracemaker: ok | incomplete | crash | norep | sleep
-	envFakeFreeBehaves = "PCBPILOT_FAKE_FREE"   // freerouting: ok | incomplete | nocount | noses | crash | sleep
+	envFakeFreeBehaves = "PCBPILOT_FAKE_FREE"   // freerouting: ok | incomplete | nocount | noses | crash | sleep | tree
 )
 
 // fakeRouterBin makes this test binary act as the named router for the rest
@@ -149,6 +150,19 @@ func fakeRouterMain(router string, args []string) int {
 			return 1
 		case "sleep":
 			time.Sleep(30 * time.Second)
+			return 0
+		case "tree": // a launcher: the real work is a child process
+			child := exec.Command(os.Args[0], args...)
+			child.Env = append(os.Environ(), envFakeFreeBehaves+"=late")
+			if err := child.Start(); err != nil {
+				return 2
+			}
+			fmt.Println("child started")
+			time.Sleep(30 * time.Second)
+			return 0
+		case "late": // the child of "tree": writes its session after a while
+			time.Sleep(3 * time.Second)
+			os.WriteFile(ses, []byte("(session late)\n"), 0o644)
 			return 0
 		}
 	case "tracemaker":

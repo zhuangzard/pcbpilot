@@ -89,7 +89,10 @@ func parseFreeroutingLog(log string) (unrouted, violations int, version string, 
 // a session whose counts the log does not state is a Partial result (the
 // board's own connectivity then counts it).
 func runFreerouting(ctx context.Context, o freeroutingOpts, dsn, ses, logPath string, stderr io.Writer) (*routeResult, error) {
-	_ = os.Remove(ses)
+	// a session that cannot be removed could pass for this run's result
+	if err := os.Remove(ses); err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("freerouting: cannot remove the previous session %s: %w", ses, err)
+	}
 	args := freeroutingArgs(o, dsn, ses)
 	fmt.Fprintf(stderr, "freerouting: %s %s\n", o.bin, strings.Join(args, " "))
 	lf, err := os.Create(logPath)
@@ -102,9 +105,14 @@ func runFreerouting(ctx context.Context, o freeroutingOpts, dsn, ses, logPath st
 	cmd := exec.CommandContext(rctx, o.bin, args...)
 	w := io.MultiWriter(lf, stderr)
 	cmd.Stdout, cmd.Stderr = w, w
+	killTreeOnCancel(cmd)
 	cmd.WaitDelay = 10 * time.Second
 	start := time.Now()
 	err = cmd.Run()
+	if rctx.Err() != nil {
+		// nothing a stopped run left behind is a result
+		_ = os.Remove(ses)
+	}
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}

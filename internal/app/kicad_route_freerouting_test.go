@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -102,6 +103,72 @@ func TestRunFreeroutingCancelAndLimit(t *testing.T) {
 	_, err = runFreerouting(context.Background(), freeroutingOpts{bin: bin, timeout: 300 * time.Millisecond}, filepath.Join(dir, "i"), filepath.Join(dir, "o"), filepath.Join(dir, "l"), io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "--freerouting-time") || time.Since(start) > 15*time.Second {
 		t.Fatalf("err %v after %s", err, time.Since(start))
+	}
+}
+
+// syncBuf is a writer the test can read while the command still writes.
+type syncBuf struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (s *syncBuf) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuf) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
+}
+
+// A launcher that runs the router as a child: cancelling must stop the child
+// too, or it writes a session after pcbpilot moved on.
+func TestRunFreeroutingKillsTheTree(t *testing.T) {
+	dir := t.TempDir()
+	ses := filepath.Join(dir, "o.ses")
+	bin := fakeFreerouting(t, "tree")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var out syncBuf
+	go func() {
+		for i := 0; i < 200 && !strings.Contains(out.String(), "child started"); i++ {
+			time.Sleep(50 * time.Millisecond)
+		}
+		cancel()
+	}()
+	start := time.Now()
+	_, err := runFreerouting(ctx, freeroutingOpts{bin: bin}, filepath.Join(dir, "i"), ses, filepath.Join(dir, "l"), &out)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err %v", err)
+	}
+	if !strings.Contains(out.String(), "child started") {
+		t.Fatalf("the child never started: %q", out.String())
+	}
+	// a surviving child keeps the output pipe open until WaitDelay (10 s)
+	if d := time.Since(start); d > 8*time.Second {
+		t.Fatalf("the cancelled run took %s: the child was not killed", d)
+	}
+	time.Sleep(4 * time.Second) // the child would have written its session by now
+	if _, err := os.Stat(ses); err == nil {
+		t.Fatal("the launcher's child outlived the cancelled run and wrote a session")
+	}
+}
+
+// A previous session that cannot be removed must stop the run: it could pass
+// for this run's result.
+func TestRunFreeroutingStaleSessionInTheWay(t *testing.T) {
+	dir := t.TempDir()
+	ses := filepath.Join(dir, "o.ses")
+	// a non-empty directory under the session's name cannot be removed
+	if err := os.MkdirAll(filepath.Join(ses, "x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, err := runFreerouting(context.Background(), freeroutingOpts{bin: fakeFreerouting(t, "noses")}, filepath.Join(dir, "i"), ses, filepath.Join(dir, "l"), io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "previous session") {
+		t.Fatalf("err %v", err)
 	}
 }
 
