@@ -1359,6 +1359,10 @@ export const schematicComponentsList: Handler = async (payload) => {
 		catch { return undefined; }
 	})();
 	let memberProbes: NetlistMemberProbe[] | undefined;
+	// Every loaded page's components, read at most once and only when a record
+	// looks foreign on a single-page listing: the record's owner may sit on
+	// another page (a multi-unit part split across pages). null = unreadable.
+	let widerProbes: NetlistMemberProbe[] | null | undefined;
 	const netlistMemberProbe = (c: (typeof components)[number]): NetlistMemberProbe => ({
 		uniqueId: String(c.getState_UniqueId?.() ?? ''),
 		designator: String(c.getState_Designator?.() ?? ''),
@@ -1451,7 +1455,21 @@ export const schematicComponentsList: Handler = async (payload) => {
 				// is not this component's record: do not let it stand in for one.
 				if (netByNumber && netlistIdentity) {
 					memberProbes ??= components.map(netlistMemberProbe);
-					if (netlistRecordIsForeign(netlistMemberProbe(component), memberProbes, netlistIdentity)) {
+					const self = netlistMemberProbe(component);
+					let foreign = netlistRecordIsForeign(self, memberProbes, netlistIdentity);
+					if (foreign && !allPages) {
+						if (widerProbes === undefined) {
+							try {
+								const every = await eda.sch_PrimitiveComponent.getAll(undefined, true);
+								widerProbes = Array.isArray(every) ? every.map(netlistMemberProbe) : null;
+							}
+							catch { widerProbes = null; }
+						}
+						// The wider set only ever adds candidate owners; it can
+						// clear the verdict on multi-unit evidence, never invent one.
+						if (widerProbes) foreign = netlistRecordIsForeign(self, [...memberProbes, ...widerProbes], netlistIdentity);
+					}
+					if (foreign) {
 						netByNumber = null;
 						record.netlistRecordForeign = true;
 					}
@@ -4116,10 +4134,11 @@ interface NetlistMemberProbe {
  *     and carry different, non-empty sub-part names. The same device alone
  *     proves nothing, since two separate placements of one library device
  *     share it too;
- *   - when the owner is not listed, only a block instance is foreign, because
- *     it cannot be a sub-symbol of anything.
- * A part whose record owner is on a page this listing does not cover stays on
- * the netlist: it cannot be told apart from a sub-symbol of that owner.
+ *   - when the owner is not among the listed components it cannot be
+ *     inspected, so nothing proves the two are units of one part: the record
+ *     is not handed out. A single-page listing therefore passes the components
+ *     of every loaded page before settling, so a multi-unit part split across
+ *     pages still finds its owner.
  */
 export function netlistRecordIsForeign(self: NetlistMemberProbe, listed: NetlistMemberProbe[], netlist: Pick<NetlistPinNets, 'identitiesByDesignator' | 'identities'>): boolean {
 	const recordIds = netlist.identitiesByDesignator.get(self.designator);
@@ -4128,7 +4147,7 @@ export function netlistRecordIsForeign(self: NetlistMemberProbe, listed: Netlist
 	if (netlist.identities.has(self.uniqueId)) return true;
 	if (!listed.some(c => c.uniqueId && netlist.identities.has(c.uniqueId))) return false;
 	const owner = listed.find(c => c.designator === self.designator && c.uniqueId && recordIds.has(c.uniqueId));
-	if (!owner) return self.kind === 'block_symbol';
+	if (!owner) return true;
 	const sameDevice = self.kind === 'part' && owner.kind === 'part'
 		&& self.deviceUuid !== '' && self.deviceUuid === owner.deviceUuid;
 	const distinctUnits = self.subPartName !== '' && owner.subPartName !== '' && self.subPartName !== owner.subPartName;

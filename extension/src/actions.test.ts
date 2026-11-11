@@ -4537,11 +4537,16 @@ test('components.list: a netlist record owned by another component of the same d
 	});
 	const wire = (id: string, line: number[], net: string) => ({ getState_PrimitiveId: () => id, getState_Line: () => line, getState_Net: () => net });
 	const dev = (uuid: string) => ({ libraryUuid: 'LIB', uuid });
-	const run = async (components: any[], netlist: Record<string, unknown>) => {
+	let allPageReads = 0;
+	const run = async (components: any[], netlist: Record<string, unknown>, offPage: any[] = []) => {
+		allPageReads = 0;
 		const pins: Record<string, unknown[]> = {};
 		components.forEach((c, i) => { pins[c.getState_PrimitiveId()] = [pin(`${c.getState_PrimitiveId()}-1`, '1', 0, i * 100)]; });
 		(globalThis as any).eda = {
-			sch_PrimitiveComponent: { getAll: async () => components, getAllPinsByPrimitiveId: async (id: string) => pins[id] },
+			sch_PrimitiveComponent: {
+				getAll: async (_kind: unknown, every: boolean) => { if (every) allPageReads++; return every ? [...components, ...offPage] : components; },
+				getAllPinsByPrimitiveId: async (id: string) => pins[id],
+			},
 			sch_PrimitiveWire: { getAll: async () => components.map((c, i) => wire(`w${i}`, [0, i * 100, 50, i * 100], `WIRE_${i}`)) },
 			dmt_SelectControl: { getCurrentDocumentInfo: async () => ({ uuid: 'page', tabId: 'page@project' }) },
 			dmt_EditorControl: { activateDocument: async () => true },
@@ -4616,12 +4621,39 @@ test('components.list: a netlist record owned by another component of the same d
 	out = await run([anchor, block()], { c1: rec('R1', 'NET_R1'), c2: rec('U7', 'KEPT_NET') });
 	assert.deepEqual([out.blk.pins[0].net, out.blk.netSource], ['KEPT_NET', undefined]);
 
-	// A part whose record owner is not listed could be a sub-symbol of it: kept.
-	out = await run([
-		anchor,
-		mockComponent({ PrimitiveId: 'p', ComponentType: 'part', Designator: 'U7', UniqueId: 'id-p', Component: dev('DEV-A') }),
-	], { 'id-r1': rec('R1', 'NET_R1'), 'id-elsewhere': rec('U7', 'KEPT_NET') });
-	assert.deepEqual([out.p.pins[0].net, out.p.netSource], ['KEPT_NET', undefined]);
+	// A part whose record owner cannot be inspected (no loaded page carries
+	// it): nothing proves it is a unit of that owner, so the owner's nets are
+	// never attributed to it.
+	const lone = mockComponent({ PrimitiveId: 'p', ComponentType: 'part', Designator: 'U7', UniqueId: 'id-p', Component: dev('DEV-A'), SubPartName: 'X.2' });
+	const offPageNetlist = { 'id-r1': rec('R1', 'NET_R1'), 'id-elsewhere': rec('U7', 'OFFPAGE_NET') };
+	out = await run([anchor, lone], offPageNetlist);
+	assert.deepEqual([out.p.pins[0].net, out.p.netSource, out.p.netlistRecordForeign], ['WIRE_1', 'wire-geometry', true]);
+	assert.equal(allPageReads, 1, 'the other pages are read once before giving up on the owner');
+
+	// The owner sits on another loaded page and is a separate placement (same
+	// device, same unit name; then a different device): still never attributed.
+	for (const owner of [
+		mockComponent({ PrimitiveId: 'far', ComponentType: 'part', Designator: 'U7', UniqueId: 'id-elsewhere', Component: dev('DEV-A'), SubPartName: 'X.2' }),
+		mockComponent({ PrimitiveId: 'far', ComponentType: 'part', Designator: 'U7', UniqueId: 'id-elsewhere', Component: dev('DEV-B'), SubPartName: 'X.1' }),
+	]) {
+		out = await run([anchor, lone], offPageNetlist, [owner]);
+		assert.deepEqual([out.p.pins[0].net, out.p.netSource, out.p.netlistRecordForeign], ['WIRE_1', 'wire-geometry', true]);
+		assert.equal(out.far, undefined, 'the off-page owner is consulted, not listed');
+	}
+
+	// A multi-unit part split across pages: the off-page owner is another unit
+	// of the same device, so this unit keeps the shared record.
+	out = await run([anchor, lone], offPageNetlist,
+		[mockComponent({ PrimitiveId: 'far', ComponentType: 'part', Designator: 'U7', UniqueId: 'id-elsewhere', Component: dev('DEV-A'), SubPartName: 'X.1' })]);
+	assert.deepEqual([out.p.pins[0].net, out.p.netSource, out.p.netlistRecordForeign], ['OFFPAGE_NET', undefined, undefined]);
+	assert.equal(allPageReads, 1);
+
+	// Two foreign-looking components share the single all-page read; a listing
+	// with nothing foreign never makes it.
+	out = await run([anchor, lone, block()], offPageNetlist);
+	assert.equal(allPageReads, 1);
+	out = await run([anchor], { 'id-r1': rec('R1', 'NET_R1') });
+	assert.equal(allPageReads, 0);
 
 	// The pure rule, including a component that has a record under another designator.
 	const netlist = {
@@ -4640,6 +4672,7 @@ test('components.list: a netlist record owned by another component of the same d
 	assert.equal(netlistRecordIsForeign(probe('id-b', 'U7', 'part', 'DEV-A', 'X.1'), [owner], netlist), true, 'same unit name is a second placement');
 	assert.equal(netlistRecordIsForeign(probe('id-b', 'U7', 'part', 'DEV-A', ''), [owner], netlist), true, 'no unit name, no multi-unit evidence');
 	assert.equal(netlistRecordIsForeign(probe('id-b', 'U7', 'part', 'DEV-B', 'X.2'), [owner], netlist), true, 'different device');
+	assert.equal(netlistRecordIsForeign(probe('id-b', 'U7', 'part', 'DEV-A', 'X.2'), listed, netlist), true, 'owner not listed: unprovable, not handed out');
 	assert.equal(netlistRecordIsForeign(probe('id-blk', 'U9', 'block_symbol'), listed, netlist), false, 'no record under that designator');
 	assert.equal(netlistRecordIsForeign(probe('id-blk', 'U7', 'block_symbol'), [], netlist), false, 'namespace not proven');
 });
