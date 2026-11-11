@@ -120,6 +120,7 @@ func runFreerouting(ctx context.Context, o freeroutingOpts, dsn, ses, logPath st
 		return nil, fmt.Errorf("freerouting did not finish within %s (--freerouting-time) and writes no session before the end; raise the limit or lower --freerouting-passes", o.limit())
 	}
 	if err != nil {
+		_ = os.Remove(ses) // a failed run has no result
 		return nil, fmt.Errorf("freerouting: %w (log: %s)", err, logPath)
 	}
 	if st, serr := os.Stat(ses); serr != nil || st.Size() == 0 {
