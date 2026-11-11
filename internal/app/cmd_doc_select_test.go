@@ -76,3 +76,36 @@ func TestSelectWindowSameTabDifferentHostsStayAmbiguous(t *testing.T) {
 		t.Fatalf("cross-host same tab must be ambiguous and name hosts, got %v", err)
 	}
 }
+
+func TestSelectWindowSameHostAcrossVersionsCollapses(t *testing.T) {
+	const chrome141 = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
+	const chrome142 = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.7444.60 Safari/537.36"
+	const edge142 = chrome142 + " Edg/142.0.3595.53"
+	// The browser updated itself between the stale registration and the new
+	// one: still one host, so the newest registration wins.
+	if id, err := selectWindow([]healthWindow{sameTab("old", chrome141, 1), sameTab("new", chrome142, 2)}, "ceshi", ""); err != nil || id != "new" {
+		t.Fatalf("same browser, new version = (%q,%v), want newest", id, err)
+	}
+	// Same for the desktop shell.
+	deskOld := sameTab("deskOld", "Chrome/152.0 edadesk/0.0.1 Electron/44.4.5", 1)
+	deskNew := sameTab("deskNew", "Chrome/153.1 edadesk/0.0.2 Electron/45.0.0", 2)
+	deskOld.Host.Kind, deskNew.Host.Kind = "edadesk", "edadesk"
+	if id, err := selectWindow([]healthWindow{deskOld, deskNew}, "ceshi", ""); err != nil || id != "deskNew" {
+		t.Fatalf("same shell, new version = (%q,%v), want newest", id, err)
+	}
+	// Two different browsers are two live editors, whatever their versions.
+	if _, err := selectWindow([]healthWindow{sameTab("chrome", chrome142, 1), sameTab("edge", edge142, 2)}, "ceshi", ""); err == nil {
+		t.Fatal("different browsers on the same tab must stay ambiguous")
+	}
+	// A registration without host data next to one with it is not provably
+	// the same host.
+	if _, err := selectWindow([]healthWindow{sameTab("legacy", "", 1), sameTab("new", chrome142, 2)}, "ceshi", ""); err == nil {
+		t.Fatal("host-less and host-reporting registrations must stay ambiguous")
+	}
+	// The same user agent under two kinds is two hosts.
+	other := sameTab("other", chrome142, 2)
+	other.Host.Kind = "electron"
+	if _, err := selectWindow([]healthWindow{sameTab("tab", chrome142, 1), other}, "ceshi", ""); err == nil {
+		t.Fatal("different host kinds must stay ambiguous")
+	}
+}

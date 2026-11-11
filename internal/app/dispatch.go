@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -512,7 +513,10 @@ func newestDuplicateWindow(matches []healthWindow) (string, bool) {
 		// The tab id is "<doc>@<project>", identical in every host. A browser tab
 		// and the edadesk shell on the same document are two live editors, not a
 		// reload leftover, so only same-host registrations count as duplicates.
-		if w.Host.UserAgent != first.Host.UserAgent {
+		// "Same host" ignores version numbers: a browser or shell that updated
+		// itself between the stale registration and the new one is still the
+		// same host, while a different product (or a different kind) is not.
+		if hostIdentity(w) != hostIdentity(first) {
 			return "", false
 		}
 		if w.ConnectedAt.After(newest.ConnectedAt) {
@@ -520,6 +524,18 @@ func newestDuplicateWindow(matches []healthWindow) (string, bool) {
 		}
 	}
 	return newest.WindowID, true
+}
+
+var hostVersionRun = regexp.MustCompile(`[0-9]+(?:[._][0-9]+)*`)
+
+// hostIdentity is what stays constant about a window's host across its own
+// updates: the classified kind plus the user agent with every version number
+// removed. Two registrations that report no host at all (an older daemon or
+// connector) compare equal, which keeps the pre-host behaviour.
+func hostIdentity(w healthWindow) string {
+	kind := strings.ToLower(strings.TrimSpace(w.Host.Kind))
+	ua := hostVersionRun.ReplaceAllString(w.Host.UserAgent, "")
+	return kind + "|" + strings.Join(strings.Fields(ua), " ")
 }
 
 // describeWindows lists candidate windows with host and document for an
