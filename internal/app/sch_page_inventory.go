@@ -1,6 +1,9 @@
 package app
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // schPageListedInInventory reports whether pageUUID is present in a
 // schematic.pages.list result. It fails closed: absence is only proven by a
@@ -23,7 +26,7 @@ func schPageListedInInventory(result map[string]any, pageUUID string) (name stri
 			return "", false, fmt.Errorf("pages[%d] is %T, want an object", i, entry)
 		}
 		uuid, ok := p["uuid"].(string)
-		if !ok || uuid == "" {
+		if !ok || strings.TrimSpace(uuid) == "" {
 			return "", false, fmt.Errorf("pages[%d] has no string uuid", i)
 		}
 		if uuid == pageUUID {

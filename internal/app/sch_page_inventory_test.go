@@ -74,6 +74,7 @@ func TestSchPageDeleteRequiresProvenAbsence(t *testing.T) {
 		"missing":   `{}`,
 		"null":      `{"pages":null}`,
 		"malformed": `{"pages":[{"name":"P1"}]}`,
+		"blank":     `{"pages":[{"uuid":" ","name":"P1"}]}`,
 		"survivor":  `{"pages":[{"uuid":"target","name":"P2"}]}`,
 	} {
 		out, err := run(pagesJSON)
