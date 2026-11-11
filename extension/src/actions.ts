@@ -3454,13 +3454,44 @@ export const schematicPinSetNoConnect: Handler = async (payload) => {
 	const targets = new Set(attributes.filter(a => a.getState_Key() === 'Designator'
 		&& a.getState_Value() === designator && ids.includes(a.getState_ParentPrimitiveId()))
 		.map(a => a.getState_ParentPrimitiveId()));
-	if (targets.size !== 1) {
+	// Several current-page primitives under one designator are either the units
+	// of a multi-unit part or a real designator collision. The requested pin
+	// numbers decide: exactly one primitive must own all of them. Anything else
+	// stays refused, before a component is fetched or a pin is touched.
+	let owners = [...targets];
+	if (owners.length > 1) {
+		const owning: string[] = [];
+		for (const id of owners) {
+			let unitPins;
+			try {
+				unitPins = await eda.sch_PrimitiveComponent.getAllPinsByPrimitiveId(id);
+			}
+			catch (err) {
+				throw edaError(err, `Failed to read pins of "${designator}" (${id}).`);
+			}
+			if (!Array.isArray(unitPins)) {
+				throw new ActionError(ErrorCodes.EDA_CALL_FAILED, `Pins of "${designator}" (${id}) are unavailable.`);
+			}
+			const numbers = new Set(unitPins.map(p => String(p.getState_PinNumber())));
+			if (wantPins.every(n => numbers.has(n))) owning.push(id);
+		}
+		if (owning.length !== 1) {
+			throw new ActionError(
+				ErrorCodes.EDA_CALL_FAILED,
+				`Expected one current-page component with designator "${designator}"; found ${owners.length}, `
+				+ `of which ${owning.length} own all of pin(s) ${wantPins.join(', ')}. `
+				+ 'Pins of different units need one call per unit.',
+			);
+		}
+		owners = owning;
+	}
+	if (owners.length !== 1) {
 		throw new ActionError(
 			ErrorCodes.EDA_CALL_FAILED,
-			`Expected one current-page component with designator "${designator}"; found ${targets.size}.`,
+			`Expected one current-page component with designator "${designator}"; found ${owners.length}.`,
 		);
 	}
-	const cid = [...targets][0];
+	const cid = owners[0];
 
 	let component: SchComponent | undefined;
 	try {

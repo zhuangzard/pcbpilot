@@ -83,3 +83,50 @@ test('NC lookup refuses ambiguous or off-page designators before fetching or mut
 	api.sch_PrimitiveComponent.getAllPrimitiveId = async () => ['other-page-part'];
 	await assert.rejects(schematicPinSetNoConnect({ designator: 'U1', pins: ['1'] }), /found 0/);
 });
+
+test('NC lookup resolves a same-page multi-unit designator to the one unit that owns the requested pins', async t => {
+	const globals = globalThis as any, previous = globals.eda;
+	t.after(() => { globals.eda = previous; });
+	const unitPins: Record<string, string[]> = { 'unit-a': ['1', '2', '3', '8'], 'unit-b': ['5', '6', '7', '8'] };
+	const stored = new Map<string, boolean>();
+	const getCalls: string[] = [];
+	const doneCalls: string[] = [];
+	const pinHandles = (id: string) => unitPins[id].map((number) => {
+		let staged = stored.get(`${id}.${number}`) ?? false;
+		const pin: any = {
+			getState_PinNumber: () => number,
+			getState_NoConnected: () => staged,
+			setState_NoConnected: (value: boolean) => { staged = value; return pin; },
+			done: async () => { stored.set(`${id}.${number}`, staged); doneCalls.push(`${id}.${number}`); return pin; },
+		};
+		return pin;
+	});
+	globals.eda = {
+		sch_PrimitiveAttribute: { getAll: async () => Object.keys(unitPins).map(id => ({
+			getState_Key: () => 'Designator', getState_Value: () => 'U1', getState_ParentPrimitiveId: () => id,
+		})) },
+		sch_PrimitiveComponent: {
+			getAllPrimitiveId: async () => Object.keys(unitPins),
+			getAllPinsByPrimitiveId: async (id: string) => pinHandles(id),
+			get: async (id: string) => { getCalls.push(id); return { getAllPins: async () => pinHandles(id) }; },
+		},
+	};
+
+	const res: any = await schematicPinSetNoConnect({ designator: 'U1', pins: ['6', 7] });
+	assert.deepEqual(res.result.pins, [{ pin: '6', noConnected: true }, { pin: '7', noConnected: true }]);
+	assert.deepEqual(doneCalls, ['unit-b.6', 'unit-b.7']);
+	assert.deepEqual([...new Set(getCalls)], ['unit-b'], 'only the owning unit is fetched');
+
+	// Pins spread over two units, and a pin number both units carry, stay
+	// ambiguous: refused before any component is fetched or any pin committed.
+	getCalls.length = 0; doneCalls.length = 0;
+	await assert.rejects(schematicPinSetNoConnect({ designator: 'U1', pins: ['1', '6'] }), /found 2, of which 0 own/);
+	await assert.rejects(schematicPinSetNoConnect({ designator: 'U1', pins: ['8'] }), /found 2, of which 2 own/);
+	await assert.rejects(schematicPinSetNoConnect({ designator: 'U1', pins: ['99'] }), /found 2, of which 0 own/);
+	assert.deepEqual([getCalls, doneCalls], [[], []]);
+
+	// An unreadable pin inventory is an error, never a guess.
+	globals.eda.sch_PrimitiveComponent.getAllPinsByPrimitiveId = async () => undefined;
+	await assert.rejects(schematicPinSetNoConnect({ designator: 'U1', pins: ['6'] }), /are unavailable/);
+	assert.deepEqual(getCalls, []);
+});
