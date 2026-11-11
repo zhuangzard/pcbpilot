@@ -4590,6 +4590,14 @@ test('components.list: a netlist record owned by another component of the same d
 	], { 'id-ua': rec('U7', 'OWN_NET') });
 	assert.deepEqual([out.ub.pins[0].net, out.ub.netSource, out.ub.netlistRecordForeign], ['OWN_NET', undefined, undefined]);
 
+	// A stale designator: the component's own record sits under "R9", and the
+	// record under its current designator "U7" belongs to something else.
+	out = await run([
+		anchor,
+		mockComponent({ PrimitiveId: 'stale', ComponentType: 'part', Designator: 'U7', UniqueId: 'id-stale', Component: dev('DEV-A') }),
+	], { 'id-r1': rec('R1', 'NET_R1'), 'id-stale': rec('R9', 'OLD_NET'), 'id-elsewhere': rec('U7', 'FOREIGN_NET') });
+	assert.deepEqual([out.stale.pins[0].net, out.stale.netSource, out.stale.netlistRecordForeign], ['WIRE_1', 'wire-geometry', true]);
+
 	// The netlist does not carry component identities at all: nothing can be
 	// concluded, and the designator match is used as before.
 	out = await run([anchor, block()], { c1: rec('R1', 'NET_R1'), c2: rec('U7', 'KEPT_NET') });
@@ -4611,7 +4619,9 @@ test('components.list: a netlist record owned by another component of the same d
 	const listed = [probe('id-r1', 'R1', 'part', 'DEV-R')];
 	assert.equal(netlistRecordIsForeign(probe('id-blk', 'U7', 'block_symbol'), listed, netlist), true);
 	assert.equal(netlistRecordIsForeign(probe('', 'U7', 'block_symbol'), listed, netlist), false, 'no own identity, no conclusion');
-	assert.equal(netlistRecordIsForeign(probe('id-r1', 'U7', 'block_symbol'), listed, netlist), false, 'known to the netlist under another designator');
+	assert.equal(netlistRecordIsForeign(probe('id-r1', 'U7', 'block_symbol'), listed, netlist), true, 'own record sits under another designator: the U7 record is not its own');
+	assert.equal(netlistRecordIsForeign(probe('id-r1', 'U7', 'part', 'DEV-R'), [], netlist), true, 'a stale designator needs no other listed component to prove the namespace');
+	assert.equal(netlistRecordIsForeign(probe('id-own', 'U7', 'part', 'DEV-A'), listed, netlist), false, 'owns the record under its designator');
 	assert.equal(netlistRecordIsForeign(probe('id-blk', 'U9', 'block_symbol'), listed, netlist), false, 'no record under that designator');
 	assert.equal(netlistRecordIsForeign(probe('id-blk', 'U7', 'block_symbol'), [], netlist), false, 'namespace not proven');
 });

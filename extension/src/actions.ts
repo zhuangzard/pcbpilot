@@ -4074,19 +4074,23 @@ interface NetlistMemberProbe {
  * netlist carries is host data this code cannot assume:
  *   - nothing is concluded until some listed component's uniqueId is found
  *     among the netlist identities (that proves the two share a namespace);
- *   - the component's own uniqueId must be absent from the whole netlist;
- *   - then either a listed component owns the record and is not the same
- *     device (sub-symbols of one device share one record and are NOT foreign),
- *     or the owner is not listed and the component is a block instance, which
- *     cannot be a sub-symbol of anything.
+ *   - a component whose own identity sits in the record under its designator
+ *     owns that record;
+ *   - a component whose identity sits only under ANOTHER designator has a
+ *     stale designator: the record under its current one is someone else's;
+ *   - otherwise, when a listed component owns the record, the two share it
+ *     only when both are parts of the same device;
+ *   - when the owner is not listed, only a block instance is foreign, because
+ *     it cannot be a sub-symbol of anything.
  * A part whose record owner is on a page this listing does not cover stays on
  * the netlist: it cannot be told apart from a sub-symbol of that owner.
  */
 export function netlistRecordIsForeign(self: NetlistMemberProbe, listed: NetlistMemberProbe[], netlist: Pick<NetlistPinNets, 'identitiesByDesignator' | 'identities'>): boolean {
 	const recordIds = netlist.identitiesByDesignator.get(self.designator);
 	if (!recordIds || recordIds.size === 0 || !self.uniqueId) return false;
+	if (recordIds.has(self.uniqueId)) return false;
+	if (netlist.identities.has(self.uniqueId)) return true;
 	if (!listed.some(c => c.uniqueId && netlist.identities.has(c.uniqueId))) return false;
-	if (netlist.identities.has(self.uniqueId)) return false;
 	const owner = listed.find(c => c.designator === self.designator && c.uniqueId && recordIds.has(c.uniqueId));
 	if (!owner) return self.kind === 'block_symbol';
 	if (self.kind !== 'part' || owner.kind !== 'part') return true;
