@@ -145,6 +145,9 @@ func TestSbGridWiresSecondLevelNodes(t *testing.T) {
 	if len(zl.Findings) > 0 {
 		t.Errorf("findings: %v", zl.Findings)
 	}
+	if !strings.Contains(zl.Variant, "-node") {
+		t.Errorf("kept %s: the node wiring is not the drawing kept", zl.Variant)
+	}
 	if strings.HasPrefix(zl.Variant, "legacy") {
 		t.Errorf("kept %s: no compact variant drew the zone clean", zl.Variant)
 	}

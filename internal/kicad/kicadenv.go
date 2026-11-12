@@ -101,8 +101,13 @@ func SchCLICommand(cli string, args ...string) (*exec.Cmd, context.CancelFunc) {
 	cmd := exec.CommandContext(ctx, cli, args...)
 	cmd.Env = SchCLIEnv()
 	cmd.Cancel = func() error {
-		schCLITimedOut.Store(cmd, true)
-		return cmd.Process.Kill()
+		// recorded only when the kill landed: a process that ended on its
+		// own at the deadline keeps its real failure
+		err := cmd.Process.Kill()
+		if err == nil {
+			schCLITimedOut.Store(cmd, true)
+		}
+		return err
 	}
 	return cmd, func() { cancel(); schCLITimedOut.Delete(cmd) }
 }

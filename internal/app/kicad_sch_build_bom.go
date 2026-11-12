@@ -302,7 +302,7 @@ func sbBomCustomReq(p *sbRPart) bool {
 }
 
 var (
-	sbBomQtyRE    = regexp.MustCompile(`\d\s*:\s*\d|\d\s*(?:[pnuµμmkM]?(?:H|F|V|A|W|Hz|Ω)|[kM]?ohm|[munµμ]H|Vrms|kV|mm)\b`)
+	sbBomQtyRE    = regexp.MustCompile(`\d\s*:\s*\d|\d\s*(?:[pnuµμmkM]?(?:H|F|V|A|W|Hz|Ω|VAC|VDC|Vac|Vdc)|[kM]?ohm|[munµμ]H|Vrms|kV|mm)(?:[^A-Za-z0-9]|$)`)
 	sbBomRefKeyRE = regexp.MustCompile(`(?i)drawing|dwg|mating|mates|图纸|图号|对插`)
 )
 

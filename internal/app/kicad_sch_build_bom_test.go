@@ -701,3 +701,18 @@ func TestSbBomCatalogMismatchAndOffline(t *testing.T) {
 		t.Fatalf("--bom-catalog --offline must say nothing was fetched: %q", w)
 	}
 }
+
+// A quantity ends at a separator or the end of the text, not at an ASCII
+// word boundary: "50 Ω" and "3 kVAC" are requirements.
+func TestSbBomQuantityUnits(t *testing.T) {
+	for _, s := range []string{"50 Ω", "4.7 kΩ, 1 %", "50Ω", "3 kVAC", "24 VDC", "10 uH", "1:1.2", "100 mm"} {
+		if !sbBomQtyRE.MatchString(s) {
+			t.Errorf("%q is not read as a quantity", s)
+		}
+	}
+	for _, s := range []string{"EE16 custom", "custom flyback", "2 windings"} {
+		if sbBomQtyRE.MatchString(s) {
+			t.Errorf("%q is read as a quantity", s)
+		}
+	}
+}
