@@ -126,6 +126,8 @@ func signoffGate(so signoffOpts, waivers []gateWaiver, stderr io.Writer) gateRes
 		if !x.Pass {
 			g.Items = append(g.Items, x.Gate+": "+x.Detail)
 		}
+		// a waived sub-gate makes the sign-off waived, never a clean pass
+		g.Waived = append(g.Waived, x.Waived...)
 	}
 	return g
 }
@@ -235,7 +237,8 @@ func runSignoff(o signoffOpts, waivers []gateWaiver, stderr io.Writer) (*signoff
 		var rec reviewRecord
 		b, err := os.ReadFile(o.review)
 		if err != nil || json.Unmarshal(b, &rec) != nil {
-			add(gateResult{Gate: "signoff-review", Detail: fmt.Sprintf("review.json unreadable: %v", err)})
+			add(gateResult{Gate: "signoff-review", Detail: fmt.Sprintf("review.json unreadable: %v", err),
+				Items: []string{"review.json unreadable (no design review record)"}})
 		} else {
 			g := gateResult{Gate: "signoff-review", Pass: rec.Stage == "design" && rec.Gate.Pass,
 				Detail: fmt.Sprintf("stage %s, %s", rec.Stage, rec.Gate.Detail), Items: rec.Gate.Items, Waived: rec.Gate.Waived}

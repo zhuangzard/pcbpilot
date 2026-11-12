@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/zhuangzard/pcbpilot/internal/kicad"
@@ -142,7 +143,39 @@ func newSbPageBases(d *sbDesign, zis []*sbZoneIn, rootFile string) *sbPageBases 
 	for _, z := range d.Zones {
 		b.zoneBase[z.ID] = b.pageBase[z.Page]
 	}
+	// a rebuild keeps the previous split: a zone that was on fragment k of
+	// its base page starts there (fragments only grow, so it can still move
+	// further when its new drawing no longer fits; it never merges back)
+	for zid, prev := range d.PriorZonePage {
+		if k := sbFragmentOf(prev, b.zoneBase[zid]); k > 0 {
+			b.frag[zid] = k
+		}
+	}
 	return b
+}
+
+// sbFragmentOf is the fragment index of page id pg of base page base: 0 for
+// the base page itself, k-1 for "<base>-k" (and the "<base>-k_n" form
+// pageID uses on a clash), -1 when pg is not a page of base.
+func sbFragmentOf(pg, base string) int {
+	if base == "" {
+		return -1
+	}
+	if pg == base {
+		return 0
+	}
+	rest, ok := strings.CutPrefix(pg, base+"-")
+	if !ok {
+		return -1
+	}
+	if i := strings.IndexByte(rest, '_'); i >= 0 {
+		rest = rest[:i]
+	}
+	k, err := strconv.Atoi(rest)
+	if err != nil || k < 2 {
+		return -1
+	}
+	return k - 1
 }
 
 // pageID allocates the id of fragment k (2, 3…) of base page base: unique

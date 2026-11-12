@@ -16,19 +16,23 @@ import (
 // GateRecord is one gate as the registry sees it.
 type GateRecord struct {
 	ID        string      `json:"id"`                  // stable, e.g. "kicad-drc"
-	Status    gate.Status `json:"status"`              // pass | fail | cannot-check
+	Status    gate.Status `json:"status"`              // pass | fail | cannot-check | waived | skip (not run)
 	Reason    string      `json:"reason"`              // human-readable detail
 	Items     []string    `json:"items,omitempty"`     // per-item failures
 	Unchecked []string    `json:"unchecked,omitempty"` // those of Items that could not be judged
 	Waived    []string    `json:"waived,omitempty"`    // waived items
-	Info      []string    `json:"info,omitempty"`      // passing notes
-	Evidence  []string    `json:"evidence,omitempty"`  // file paths
-	BoardSHA  string      `json:"boardSha,omitempty"`  // sha256 of the board this gate checked
-	Scope     string      `json:"scope,omitempty"`     // "board" | "session" | "report" | ""
-	DurationS float64     `json:"durationS,omitempty"`
+	WaivedBy  []string    `json:"waivedBy,omitempty"`  // who signed the waivers that accepted them
+	// Advisory: a gate that did not run (status skip) without failing the
+	// run; the run is still not complete (see runCompleteness).
+	Advisory  bool     `json:"advisory,omitempty"`
+	Info      []string `json:"info,omitempty"`     // passing notes
+	Evidence  []string `json:"evidence,omitempty"` // file paths
+	BoardSHA  string   `json:"boardSha,omitempty"` // sha256 of the board this gate checked
+	Scope     string   `json:"scope,omitempty"`    // "board" | "session" | "report" | ""
+	DurationS float64  `json:"durationS,omitempty"`
 	// Legacy fields for backward-compatible summary.json consumers.
 	Gate   string `json:"gate"`   // == ID
-	Pass   bool   `json:"pass"`   // == Status.OK()
+	Pass   bool   `json:"pass"`   // == Status.OK(): false for a waived gate
 	Detail string `json:"detail"` // == Reason
 }
 
@@ -63,6 +67,13 @@ func (reg *gateRegistry) Add(g GateRecord) {
 		g.Status = gate.CannotCheck
 	case g.Status == gate.CannotCheck && !legacy.Pass:
 		g.Status = gate.Fail
+	}
+	// A gate that passes only by a waiver is waived, never pass.
+	if g.Status == gate.Pass && len(g.Waived) > 0 {
+		g.Status = gate.Waived
+	}
+	if len(g.Waived) > 0 {
+		g.WaivedBy = waiverSigners(g.Waived, reg.waivers)
 	}
 	// Fill legacy fields.
 	g.Gate, g.Pass, g.Detail = g.ID, g.Status.OK(), g.Reason
@@ -110,7 +121,7 @@ func (reg *gateRegistry) Aggregate() gate.Status {
 	}
 	var rs []gate.Result
 	for _, g := range reg.records {
-		rs = append(rs, gate.Result{Name: g.ID, Status: g.Status})
+		rs = append(rs, gate.Result{Name: g.ID, Status: g.Status, Advisory: g.Advisory})
 	}
 	return gate.Aggregate(rs...)
 }
@@ -120,8 +131,10 @@ func (reg *gateRegistry) Aggregate() gate.Status {
 // preempts this.
 func (reg *gateRegistry) ExitCode() int { return reg.Aggregate().ExitCode() }
 
-// Passed returns true only when every gate passed.
-func (reg *gateRegistry) Passed() bool { return reg.Aggregate().OK() }
+// Passed returns true when no gate failed or could not be checked: every
+// gate passed or was accepted by a signed waiver (exit 0). It does not say
+// the run is complete: see runCompleteness.
+func (reg *gateRegistry) Passed() bool { return reg.Aggregate().Accepted() }
 
 // statusMark is the human-readable status word for stderr.
 func statusMark(s gate.Status) string {
@@ -135,18 +148,23 @@ func statusMark(s gate.Status) string {
 	case gate.Warn:
 		return "WARN"
 	case gate.Skip:
-		return "SKIP"
+		return "NOT-RUN"
+	case gate.Waived:
+		return "WAIVED"
 	default:
 		return string(s)
 	}
 }
 
 // toRecord converts a legacy gateResult to a GateRecord. The caller provides
-// evidence paths, scope, and duration; status is Pass when g passed, else
-// CannotCheck when g says it could not judge, else Fail.
+// evidence paths, scope, and duration; status is Skip (advisory) when g did
+// not run, Pass when g passed, else CannotCheck when g says it could not
+// judge, else Fail.
 func toRecord(g gateResult, evidence []string, scope string, dur time.Duration) GateRecord {
 	st := gate.Fail
 	switch {
+	case g.NotRun:
+		st = gate.Skip
 	case g.Pass:
 		st = gate.Pass
 	case g.CannotCheck:
@@ -155,7 +173,7 @@ func toRecord(g gateResult, evidence []string, scope string, dur time.Duration) 
 	return GateRecord{
 		ID: g.Gate, Status: st, Reason: g.Detail,
 		Items: g.Items, Unchecked: g.Unchecked, Waived: g.Waived, Info: g.Info,
-		Evidence: evidence, Scope: scope,
+		Evidence: evidence, Scope: scope, Advisory: g.NotRun,
 		DurationS: dur.Seconds(),
 	}
 }

@@ -154,6 +154,53 @@ func TestToolPaths(t *testing.T) {
 	}
 }
 
+// The Windows default install is the newest version under the machine-wide
+// root or the per-user one (%LOCALAPPDATA%\Programs\KiCad).
+func TestNewestWindowsApp(t *testing.T) {
+	machine, user := filepath.Join(t.TempDir(), "KiCad"), filepath.Join(t.TempDir(), "Programs", "KiCad")
+	install := func(root, version string, withCLI bool) string {
+		dir := filepath.Join(root, version)
+		if err := os.MkdirAll(filepath.Join(dir, "bin"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if withCLI {
+			if err := os.WriteFile(filepath.Join(dir, "bin", "kicad-cli.exe"), nil, 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return dir
+	}
+	roots := []string{machine, user}
+	if got := newestWindowsApp(roots); got != "" {
+		t.Fatalf("no install: %q", got)
+	}
+	user9 := install(user, "9.0", true)
+	if got := newestWindowsApp(roots); got != user9 {
+		t.Fatalf("per-user only: %q, want %q", got, user9)
+	}
+	// numeric, not lexical: 10.0 is newer than 9.0
+	user10 := install(user, "10.0", true)
+	if got := newestWindowsApp(roots); got != user10 {
+		t.Fatalf("per-user newest: %q, want %q", got, user10)
+	}
+	// an older machine-wide install does not hide the newer per-user one
+	install(machine, "8.0", true)
+	if got := newestWindowsApp(roots); got != user10 {
+		t.Fatalf("mixed roots: %q, want %q", got, user10)
+	}
+	// equal version: the machine-wide root wins
+	machine10 := install(machine, "10.0", true)
+	if got := newestWindowsApp(roots); got != machine10 {
+		t.Fatalf("equal version: %q, want %q", got, machine10)
+	}
+	// a leftover directory without kicad-cli and a non-version name lose
+	install(machine, "11.0", false)
+	install(user, "nightly", true)
+	if got := newestWindowsApp(roots); got != machine10 {
+		t.Fatalf("leftover/non-version: %q, want %q", got, machine10)
+	}
+}
+
 func TestArcAngleInBridge(t *testing.T) {
 	// The bridge is embedded; make sure what ships is the file in the tree.
 	src, err := os.ReadFile("bridge.py")

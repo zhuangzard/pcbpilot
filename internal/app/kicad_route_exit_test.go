@@ -133,7 +133,9 @@ func TestKicadRouteExitCodes(t *testing.T) {
 		{"everything waived", `[{"gate":"via-audit","match":" via ","reason":"reviewed","by":"test"}]`, func(r *kicadRun) error {
 			r.add(audit(spanless, ring))
 			return nil
-		}, want{0, true, map[string]gate.Status{"via-audit": gate.Pass}, []string{"PASS"}}},
+			// A waiver accepts the gate for the exit code only: the gate is
+			// waived, never pass, and the run is not release-ready.
+		}, want{0, true, map[string]gate.Status{"via-audit": gate.Waived}, []string{"WAIVED", "NOT release-ready", "via-audit waived"}}},
 		{"no gate at all", "[]", func(r *kicadRun) error { return nil }, want{5, false, nil, nil}},
 	} {
 		t.Run(c.name, func(t *testing.T) {

@@ -4,7 +4,7 @@ description: "用 pcbpilot 离线绘制、修改与检查 KiCad 原理图：写�
 license: MIT
 metadata:
   author: "zhuangzard (pcbpilot); original easyeda-agent by zhoushoujianwork"
-  version: "0.12.8"
+  version: "0.12.9"
   homepage: "https://github.com/zhuangzard/pcbpilot"
 ---
 
@@ -32,6 +32,10 @@ spec 字段、门禁细节与 delta 语法以 [kicad-sch-build.md](../pcbpilot/r
 5. **先认工程来源和基线**：`sch-edit` 只用于 sch-build 生成的工程（有 `.pcbpilot/sch-build/spec.json`），且每次写前确认文件
    与最新检查点一致；不一致（用户在 GUI 改过）→ 停，先并入新基线。手画或导入的工程默认只读 + `sch-check`，修改由用户在
    KiCad GUI 里做。判据、哈希比对命令与仅有的原地修复见 [kicad-file-safety.md §1 第 4 条](../pcbpilot/references/kicad-file-safety.md#1-四条规则)。
+6. **完成定义**：报告的 `ok: true` 只表示构建成功。只有 `complete: true`（每个门禁都是 `pass`，没有 `skip` / `waived` /
+   `warn`）才说原理图“完成”；否则报“**未完成**”并照抄 `incomplete[]`（stderr 末行 `sch-build: built, but NOT complete — …`），
+   不写“通过”。`--no-review` 的 `design-review` 状态是 `waived`，不是 `pass`；Agent 不写、不签、不代签 waiver。整板的完成
+   条件见 [pcbpilot 的完成定义](../pcbpilot/SKILL.md#完成定义硬规则)。
 
 ## 工作流
 

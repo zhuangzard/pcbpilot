@@ -174,6 +174,7 @@ fastroute is never downloaded: see 'pcb autoroute --help'.
 			if err := checkReviewOpts(rv, waivers); err != nil {
 				return err
 			}
+			waivers = withSkipWaivers(waivers, noManual, rv.noReview)
 			internal := o.routerCmd == "internal"
 			if internal && candDir != "" {
 				return fmt.Errorf("--candidates trial-routes with fastroute; it does not apply to --router internal")
@@ -188,11 +189,20 @@ fastroute is never downloaded: see 'pcb autoroute --help'.
 				if err != nil {
 					summary["error"] = err.Error()
 				}
+				// complete / incomplete: pass says no gate failed, not that
+				// the board is finished (a waived or not-run gate is neither).
+				runGates, _ := summary["gates"].([]gateResult)
+				done := gatesCompleteness(runGates, waivers, err)
+				for i := range runGates {
+					runGates[i].Status = string(legacyGateStatus(runGates[i]))
+				}
+				done.write(summary)
 				if f, ferr := os.Create(filepath.Join(outDir, "summary.json")); ferr == nil {
 					_ = writeJSON(f, summary)
 					f.Close()
 				}
 				_ = writeJSON(stdout, summary)
+				done.print(stderr, "pcb auto route")
 				return err
 			}
 
@@ -201,7 +211,7 @@ fastroute is never downloaded: see 'pcb autoroute --help'.
 			// for the same inputs is reused.
 			ev := append([]string{o.intentPath, simPath}, schFiles...)
 			reviewDesign := designReviewGate("design", rv, ev, waivers, summary, stderr)
-			fmt.Fprintf(stderr, "gate %-16s %v  %s\n", reviewDesign.Gate, map[bool]string{true: "PASS", false: "FAIL"}[reviewDesign.Pass], reviewDesign.Detail)
+			fmt.Fprintf(stderr, "gate %-16s %v  %s\n", reviewDesign.Gate, gateMark(reviewDesign), reviewDesign.Detail)
 			if !reviewDesign.Pass {
 				summary["gates"], summary["pass"] = []gateResult{reviewDesign}, false
 				return finish(fmt.Errorf("design review failed: routing not started"))
@@ -468,10 +478,13 @@ fastroute is never downloaded: see 'pcb autoroute --help'.
 			gates := append([]gateResult{reviewDesign}, summary["gates"].([]gateResult)...)
 			addGate := func(g gateResult) {
 				applyWaivers(&g, waivers)
-				fmt.Fprintf(stderr, "gate %-16s %v  %s\n", g.Gate, map[bool]string{true: "PASS", false: "FAIL"}[g.Pass], g.Detail)
+				fmt.Fprintf(stderr, "gate %-16s %v  %s\n", g.Gate, gateMark(g), g.Detail)
 				gates = append(gates, g)
 				pass = pass && g.Pass
 			}
+			// Analog coverage: the intent's own analog summary (intent derive).
+			runIntent, _ := loadDesignIntent(o.intentPath)
+			addGate(analogSimGate(runIntent, ""))
 			addGate(autoRouteDesignReport(outDir, o.intentPath, simPath, projectConfig, summary, stderr))
 			summary["gates"] = gates
 			_ = writeJSONFile(filepath.Join(outDir, "summary.json"), summary)
@@ -868,7 +881,6 @@ func autoRouteDesignReport(outDir, intent, sim, projectConfig string, summary ma
 		return g
 	}
 	summary["report"] = map[string]any{"dir": dir, "html": filepath.Join(dir, "report.html"), "json": filepath.Join(dir, "report.json"), "verdict": rep.Verdict.Status, "version": rep.VersionLabel}
-	g.Pass = ro.post != "" && ro.manual != ""
 	g.Detail = fmt.Sprintf("%s published in %s (report verdict %s)", rep.VersionLabel, dir, rep.Verdict.Status)
 	if ro.post == "" {
 		g.Items = append(g.Items, "report input missing: post.json")
@@ -876,5 +888,8 @@ func autoRouteDesignReport(outDir, intent, sim, projectConfig string, summary ma
 	if ro.manual == "" {
 		g.Items = append(g.Items, "report input missing: manual")
 	}
+	// A report whose own verdict is FAIL is not a passed gate.
+	g.Items = append(g.Items, reportVerdictItems(rep.Verdict.Status, rep.Verdict.Reasons)...)
+	g.Pass = len(g.Items) == 0
 	return g
 }

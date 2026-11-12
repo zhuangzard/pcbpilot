@@ -47,8 +47,9 @@
 - **缺证据或证据矛盾 → `INCOMPLETE`，永远不是 `PASS`。** “没报错”只有在检查确实覆盖了该对象时才算数；
   空列表要先确认是 known-empty（完整读取后真的为空）而不是 unknown（没读到）。
 - 退出码 0 不等于 `PASS`：`sch check`、`pcb check` 默认有发现也退出 0（见第 4 节），要读发现列表或加 `--strict`。
-- 签名 waiver（`{gate, match, reason, by}`）放行的项写 `PASS（waived）`，在报告里保留原始失败项、理由和签名人；
-  waiver 只来自用户，Agent 不自己写。
+- 签名 waiver（`{gate, match, reason, by}`）放行的项写 `WAIVED`，**不是 `PASS`**：在报告里保留原始失败项、理由和
+  签名人，整体结论按“未完成”报（`summary.json` 的 `complete: false`、`incomplete[]`）。waiver 只来自用户，Agent 不自己
+  写、不代签；`by` 是 Agent 的 waiver 不算评审。
 - `UNSUPPORTED` 与 `BLOCKED` 的区别：前者换环境也做不到，后者修好环境就能跑。
 
 ## 3. 证据强弱排序与冲突规则
@@ -86,7 +87,7 @@
 | `pcb drc` | violations；`--timeout` | violations > 0 → FAIL；超时 → BLOCKED（把窗口切到前台**跑一次**，不循环重试） |
 | `pcb check` | ERROR / WARN / INFO；默认退出 0 | ERROR → FAIL；WARN → WARN；INFO 单列 |
 | `pcb layout-lint` | overlap / off-board / tight / crossings + 分数 | overlap、off-board → FAIL；tight、crossings → WARN；分数不是结论 |
-| `pcb gate` / `pcb auto route` | `gates[]`：`{gate, pass, items, waived, info}` | 逐门禁 pass → PASS，否则 FAIL；`waived` 非空 → PASS（waived） |
+| `pcb gate` / `pcb auto route` | `gates[]`：`{gate, pass, items, waived, info}` | 逐门禁 `status: pass` → PASS，fail → FAIL；`waived`（`waived` 非空）→ WAIVED，不是 PASS；`skip`（NOT-RUN）/ `cannot-check` → INCOMPLETE；顶层 `complete: false` → 整体未完成，照抄 `incomplete[]` |
 | `pcb module-check` | `status`: pass / fail / incomplete | 直接对应 |
 | `pcb poured-list` | 完整 inventory | 完整读取的 `[]` → known-empty；任一字段缺测 → INCOMPLETE |
 | `kicad sch-check` | `ok`、ERC、质量发现 | `ok:false` → FAIL；ERC 只有警告 → WARN |
@@ -104,7 +105,8 @@
 ## 5. 汇总与措辞
 
 - 汇总取最差：`FAIL` > `BLOCKED` > `INCOMPLETE` > `UNSUPPORTED`（必需项）> `WARN` > `PASS`。整体只有在
-  **每个必需项**都是 `PASS`（含 waived）时才能写“通过”，并写明范围（哪些页、哪块板、哪个文件版本）。
+  **每个必需项**都是 `PASS` 时才能写“通过”，并写明范围（哪些页、哪块板、哪个文件版本）；有 `WAIVED` 项时写
+  “未完成（N 项 waived）”并列出每项的签名人，不写“通过”。
 - 每条结论配：命令（完整参数）、输入文件及其时间/哈希、验证状态、发现数，FAIL/WARN/INCOMPLETE 附对象 ID 与修法。
 - 允许的说法：“`pcb drc` PASS（live-verified，save→reload 后）；`pcb check` WARN（2 条 acute-angle）；
   制造可行性 INCOMPLETE（未出 Gerber）”。禁止的说法：“基本通过”“应该没问题”“检查都过了”（不列范围）。

@@ -35,6 +35,9 @@ type designIntent struct {
 	Edge *intentEdge `json:"edge,omitempty"`
 	// Copper is the producer's copper block (weights, allowed rise).
 	Copper *intentCopper `json:"copper,omitempty"`
+	// Analog is the summary of the analog SPICE step intent derive ran on
+	// the schematic (nil: not run; see analogSimGate).
+	Analog *intentAnalog `json:"analog,omitempty"`
 
 	// sha256 of the raw file bytes; provenance for reports and annotations.
 	sourceSHA string

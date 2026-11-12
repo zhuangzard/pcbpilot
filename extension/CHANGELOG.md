@@ -1,5 +1,42 @@
 # Changelog
 
+## [0.12.9] — 2026-11-12
+
+**CLI, daemon, Skills, MCP and the connector move to 0.12.9. The connector runtime is unchanged from 0.12.8; import the
+0.12.9 `pcbpilot-connector.eext` so the versions match.**
+
+Summary: a field run on a seven-board project showed two failures of 0.12.7/0.12.8: `kicad sch-build` handed over sparse
+schematics joined by net labels as a success, and a route run with waived or missing stages was reported as passed. Both are
+closed here. **Schematics are denser and wired, but power stages are still partly joined by labels and many pages keep about a
+third blank; routing completion on large boards is unchanged.**
+
+**Schematic layout (`kicad sch-build`)**
+- Zones are drawn by a compact grid with real wires: a passive sits at the pin it serves, the third part of a node joins the
+  wire with a T tap, and zones are packed in two dimensions so pages drop one or two paper sizes.
+- **Layout watchdog — new gate `layout-quality`.** Each zone, page and board is measured (share of signals joined by labels,
+  share of small parts attached to a pin, longest wire, page fill). A drawing that misses a limit after the bounded retries
+  fails the build: `ok:false`, `error.code = LAYOUT_QUALITY`, the issues name zone, value, limit and fix, `--out` is untouched.
+  `--layout-quality advisory` only reports and needs a signed waiver. `--zone-timeout` bounds one zone and the report names
+  slow zones.
+- The grid draws first and the planner is the fallback for a zone the grid cannot draw clean. With the planner first, three
+  of the seven field boards failed their page gates and one took ten minutes; all seven now build in 6–40 s.
+- Rebuilding into an existing output with a newer engine redraws the zones in place and keeps symbol UUIDs.
+
+**Route flow (`kicad route`, `pcb auto route`)**
+- **A waived gate is `waived`, never `pass`.** `summary.json` carries `pass`, `complete`, `incomplete[]` and `waivers[]`; a run
+  with a waived, skipped or not-run gate exits 0 with `complete:false` and its last line says NOT release-ready. A waiver whose
+  signer looks like an AI agent is flagged.
+- **New mandatory gate `analog-sim`**: a design with analog blocks needs an ngspice simulation (`--analog` or the intent's
+  analog summary); none at all is reported as not run and counts as incomplete.
+- The `design-report` gate fails when the report's own verdict is FAIL. `gate-set` names every gate that did not pass.
+- A signed `--no-manual` / `--no-review` waiver now also covers what that skip leaves missing in the report and sign-off;
+  before, such a run could never exit 0. A waived sign-off sub-gate makes the sign-off waived.
+- `sch-build` reports `complete` / `incomplete[]` too. The Skills define "done" as `complete:true` and forbid an agent from
+  signing a waiver for the owner.
+
+**Not verified:** an unwaived `kicad route` run end to end on this build (the reviewer login had expired); the `--analog`
+pass case (the test board has no analog block). EasyEDA paths are unchanged and were not re-run.
+
 ## [0.12.8] — 2026-11-11
 
 **CLI, daemon, Skills, MCP and the connector move to 0.12.8. The connector runtime CHANGED: import the 0.12.8

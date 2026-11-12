@@ -149,14 +149,18 @@ func TestGateRegistryWaivers(t *testing.T) {
 		Items: []string{"clearance: 10 mil"},
 	})
 	rec := reg.Records()[0]
-	if rec.Status != gate.Pass {
-		t.Errorf("waived gate status = %q, want pass", rec.Status)
+	// A waiver accepts the gate for the exit code; it is never a pass.
+	if rec.Status != gate.Waived || rec.Pass || reg.ExitCode() != 0 {
+		t.Errorf("waived gate status = %q pass %v exit %d, want waived, false, 0", rec.Status, rec.Pass, reg.ExitCode())
+	}
+	if len(rec.WaivedBy) != 1 || rec.WaivedBy[0] != "test" {
+		t.Errorf("waivedBy = %v", rec.WaivedBy)
 	}
 	if len(rec.Waived) == 0 {
 		t.Error("expected waived items")
 	}
-	if !strings.Contains(buf.String(), "PASS") {
-		t.Error("stderr should show PASS after waiver")
+	if !strings.Contains(buf.String(), "WAIVED") || strings.Contains(buf.String(), "PASS") {
+		t.Errorf("stderr should show WAIVED, not PASS, after a waiver: %s", buf.String())
 	}
 }
 
@@ -385,7 +389,7 @@ func TestGateRegistryPartialWaiver(t *testing.T) {
 		{"cannot-check, one of two waived", GateRecord{ID: "via-audit", Status: gate.CannotCheck, Reason: "unknown", Items: []string{"via 2", "via 3"}, Unchecked: []string{"via 2", "via 3"}},
 			[]gateWaiver{w("via 2")}, gate.CannotCheck, 5, []string{"via 3"}, []string{"via 3"}, 1, "CANNOT-CHECK"},
 		{"all waived", GateRecord{ID: "via-audit", Status: gate.Fail, Reason: "mixed", Items: []string{bad, unk}, Unchecked: []string{unk}},
-			[]gateWaiver{w("via ")}, gate.Pass, 0, nil, nil, 2, "PASS"},
+			[]gateWaiver{w("via ")}, gate.Waived, 0, nil, nil, 2, "WAIVED"},
 		{"nothing waived", GateRecord{ID: "via-audit", Status: gate.Fail, Reason: "mixed", Items: []string{bad, unk}, Unchecked: []string{unk}},
 			nil, gate.Fail, 6, []string{bad, unk}, []string{unk}, 0, "FAIL"},
 		{"cannot-check without typed items stays as it was", GateRecord{ID: "via-audit", Status: gate.CannotCheck, Reason: "unknown", Items: []string{"via 2", "via 3"}},
@@ -404,7 +408,7 @@ func TestGateRegistryPartialWaiver(t *testing.T) {
 		if !strings.Contains(stderr.String(), c.mark) || rec.Detail != rec.Reason {
 			t.Errorf("%s: stderr %q, %+v", c.name, stderr.String(), rec)
 		}
-		if c.waived > 0 && c.status != gate.Pass && !strings.Contains(stderr.String(), "waived") {
+		if c.waived > 0 && !c.status.Accepted() && !strings.Contains(stderr.String(), "waived") {
 			t.Errorf("%s: stderr %q", c.name, stderr.String())
 		}
 	}

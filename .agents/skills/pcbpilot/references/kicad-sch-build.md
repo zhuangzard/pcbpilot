@@ -31,9 +31,23 @@ pcbpilot kicad sch-checkpoint list --project build/                     # 回退
 ```
 
 门禁（全部硬性）：KiCad 网表 == spec、ERC 无错误、`kicad sch-check` 质量检查、工程级规则（电源朝上/地朝下、
-去耦 ≤ 25.4 mm、无交叉、无四通结点、无悬空标签、无自动网名、层次一致、标题栏齐全）、连接 IR、intent derive；
+去耦 ≤ 25.4 mm、无交叉、无四通结点、无悬空标签、无自动网名、层次一致、标题栏齐全）、布局看门狗（下节）、连接 IR、intent derive；
 给了 `--requirements` 还有 review-panel 设计评审（跳过要签名豁免）。产物：工程文件、`connectivity.json`、
 `intent.json`、`erc.json`、`sch-review.json`、报告里每阶段计时。
+
+### 布局看门狗 `layout-quality`（v0.12.9 起，默认严格）
+
+图画得“对”但没法看（区内全靠网络标签、阻容不挨着所服务的引脚、整页大片空白）时构建**失败**，`--out` 不动：
+`ok:false`、`error.code = LAYOUT_QUALITY`、`error.issues[]` 逐区 / 逐页 / 整板给出 `metric`、`value`、`limit`、`fix`。
+指标与阈值（`docs/kicad/sch-build.md` 有来源）：区内信号连接 ≥ 8 时靠标签的比例 ≥ 0.90、信号小件 ≥ 8 时挂接比例
+< 0.20、单段导线 > 100 mm、A3 及以上且有 ≥ 2 个区的页填充率 < 0.33、整板靠标签比例 > 0.55 或挂接比例 < 0.60。
+
+收到 `LAYOUT_QUALITY` 时：**改 spec 再构建**——按 `fix` 给点名的阻容加 `"near": "U1:PA0"`（建议里已写好
+`REF near IC:PIN`），把点名的区按 IC 簇拆成多个区，把空白页上的区挪到相邻页（`zones[].page`）。不要用
+`--layout-quality advisory` 绕过：它只报告，必须在 `--waivers` 里有签名豁免
+`{"gate":"layout-quality","match":"--layout-quality advisory","reason":…,"by":…}`，否则 `LAYOUT_QUALITY_WAIVER_REQUIRED`。
+`--zone-timeout`（默认 60 s）限制每区布局时间；超时的区在门禁明细和 `data.slowZones` 里点名（用时、保留的画法、
+没试的画法数）。
 
 ### 设计评审门禁 `sch-review`（v0.12 起）
 

@@ -520,13 +520,13 @@ func TestViaAuditPartialWaiver(t *testing.T) {
 		{"every failure waived, unknown span left", []gateWaiver{w("break"), w("ring"), w("short"), w(short12("ring"))}, gate.CannotCheck, 5, 1},
 		{"unknown span waived, failures left", []gateWaiver{w("via span unknown")}, gate.Fail, 6, 2},
 		{"one of two failures waived", []gateWaiver{w("annular ring")}, gate.Fail, 6, 2},
-		{"all waived", []gateWaiver{w(" via ")}, gate.Pass, 0, 0},
+		{"all waived", []gateWaiver{w(" via ")}, gate.Waived, 0, 0},
 	} {
 		r, g := run(c.ws...)
 		if got := statusOf(t, r.reg, "via-audit"); got != c.status || r.reg.ExitCode() != c.exit {
 			t.Errorf("%s: status %s exit %d %+v", c.name, got, r.reg.ExitCode(), g)
 		}
-		if c.status != gate.Pass && len(g.Items) != c.left {
+		if !c.status.Accepted() && len(g.Items) != c.left {
 			t.Errorf("%s: left %v", c.name, g.Items)
 		}
 		if g.CannotCheck != (c.status == gate.CannotCheck) {

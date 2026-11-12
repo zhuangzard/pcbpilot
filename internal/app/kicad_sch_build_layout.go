@@ -51,6 +51,14 @@ type sbZoneLayout struct {
 	Notes      []string            `json:"notes,omitempty"`
 	Ms         float64             `json:"ms"`
 	Findings   []string            `json:"findings,omitempty"` // sch-check quality findings of the zone alone
+	Variant    string              `json:"variant,omitempty"`  // the grid variant that drew it (sbGridVariant.name)
+	// TimedOut: the zone ran past --zone-timeout; the best drawing so far
+	// was kept and Skipped grid variants were not tried
+	TimedOut bool `json:"timedOut,omitempty"`
+	// Alts: other clean drawings of the zone (another shape), for the page
+	// packer; not saved in the build state
+	Alts    []*sbZoneLayout `json:"-"`
+	Skipped int             `json:"skippedVariants,omitempty"`
 }
 
 // sbZoneFindings renders one zone alone on a scratch sheet and runs the
@@ -74,11 +82,25 @@ func sbZoneFindings(d *sbDesign, zi *sbZoneIn, zl *sbZoneLayout) []string {
 	for _, f := range kicad.CheckSchematic(text, kicad.CheckOptions{}) {
 		out = append(out, f.Kind+": "+f.Message)
 	}
-	if pg, ok := sbEGPageOf("zone", text, d, nil); ok { // the engineer-grade hard rules too
+	// the engineer-grade hard rules too; a net the spec itself names (VC_N1)
+	// is no automatic name (EG-20), as on the full sheet (sbEngineerGrade):
+	// with nil names every drawing of such a zone was "dirty" and the zone
+	// went to whichever variant had the fewest findings
+	specNames := map[string]bool{}
+	for _, n := range d.Spec.Nets {
+		specNames[n.Name] = true
+	}
+	if pg, ok := sbEGPageOf("zone", text, d, specNames); ok {
 		for _, h := range pg.Hard {
 			if !strings.HasPrefix(h, "EG-06") {
 				out = append(out, h)
 			}
+		}
+		if pg.Crossings == 1 {
+			// EG-08 allows one crossing per PAGE: a zone's one crossing is
+			// a finding here, or several such zones on one page failed the
+			// gate (field board D with the planner: 2 and 4 crossings)
+			out = append(out, "EG-08 1 wire crossing in the zone")
 		}
 		for _, c := range pg.Decoupling { // one finding per far cap, weighted
 			out = append(out, "EG-06 "+c, "EG-06 "+c)
@@ -386,11 +408,22 @@ func refLessSB(a, b string) bool {
 	return sbPinLess(strings.TrimPrefix(a, pa), strings.TrimPrefix(b, pb))
 }
 
+// sbLayoutEngineVersion is part of every zone's layout cache key. Bump it
+// whenever a change to the zone drawing (planner, grid, compact variants,
+// T taps, blocks) would draw an unchanged zone differently: a rebuild into an
+// existing --out then redraws every zone with the new engine while the symbol
+// UUIDs (kept in state.json separately) stay, so the PCB keeps its links.
+// Without the bump a rebuild silently reuses the old drawings (field report
+// 2026-11-12: the field boards rebuilt in place after the compact-layout change kept the
+// 0.12.x zones and 6 of 7 boards failed the layout-quality watchdog).
+const sbLayoutEngineVersion = "v2"
+
 // hash covers what shapes the zone: parts, symbols, pin connectivity (nets
-// numbered canonically, so a rename keeps the hash), policies, NC pins.
+// numbered canonically, so a rename keeps the hash), policies, NC pins, and
+// the layout engine version.
 func (zi *sbZoneIn) hash(d *sbDesign, method string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "v1|%s|", method)
+	fmt.Fprintf(&b, "%s|%s|", sbLayoutEngineVersion, method)
 	canon := map[string]int{}
 	for _, p := range zi.Parts {
 		fmt.Fprintf(&b, "%s=%s|", p.Ref, sbShortHash(p.SymText))
@@ -768,9 +801,18 @@ func sbSnap(v float64) float64 { return math.Round(v/sbGrid) * sbGrid }
 // connects every pin with the autoconnect planner (power/ground symbols and
 // labels on short stubs). Pins the planner cannot land get a plain stub.
 func gridZone(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant) (*sbZoneLayout, error) {
+	return gridZoneEx(d, zi, m, v, nil)
+}
+
+// gridZoneEx is gridZone with parts that must not attach (placed loose)
+// from the start.
+func gridZoneEx(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, exclude0 map[string]bool) (*sbZoneLayout, error) {
 	// a part whose attach wire leaves another pin no clean stub is placed
 	// without attaching, and the zone is redrawn (a few rounds)
 	exclude := map[string]bool{}
+	for r := range exclude0 {
+		exclude[r] = true
+	}
 	var last error
 	for round := 0; round < 5; round++ {
 		zl, bad, err := gridZoneOnce(d, zi, m, v, exclude)
@@ -811,14 +853,30 @@ func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, excl
 			}
 		}
 	}
-	room := sbSnap((maxLabel + 10) * v.Room) // stub + label on a side with pins
+	room := sbSnap((maxLabel + 10) * v.Room) // the zone's longest label: stub + label
+	// roomOf is the stub + label room of one pin's own net: a pin on a short
+	// net no longer reserves the room of the zone's longest name (every side
+	// of every part used to, and attach found no spot within its search)
+	roomOf := func(n string) float64 {
+		if v.Legacy && n != "" {
+			return room
+		}
+		if n == "" {
+			return 2.54
+		}
+		w := sbTextW(n)
+		if len(d.NetPages[n]) > 1 {
+			w += 2.54 // drawn as a hierarchical label (arrow shape)
+		}
+		return sbSnap((w + 10) * v.Room)
+	}
 	// per-side room: only sides with pins need space for stubs + labels
 	foot := func(s kicad.SceneSymbol, ref string) kicad.Box {
 		sides := map[string]float64{}
 		for _, q := range s.Pins {
 			need := 2.54 // NC pin: just its flag
 			if n, ok := d.PinNet[sbPinKey(ref, q.Number)]; ok {
-				need = room
+				need = roomOf(n)
 				if k := d.NetKind[n]; k == "power" || k == "ground" {
 					need = 7.62 // a supply / ground symbol on a short stub
 				}
@@ -836,6 +894,17 @@ func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, excl
 		return kicad.Box{MinX: b.MinX - r("left"), MinY: b.MinY - r("up") - 2.54, MaxX: b.MaxX + r("right"), MaxY: b.MaxY + r("down") + 2.54}
 	}
 	core := foot(items[0].s, items[0].p.Ref)
+	// bodyBox is what a placed part keeps others off: its body + 2.54 mm and
+	// (compact variants) its reference / value texts — the compact rooms
+	// no longer hid a neighbour's value text on its body
+	bodyBox := func(it unitRef, pose sbPose) kicad.Box {
+		b := sbGrow(sbXformBox(it.s.Box, pose), 2.54)
+		if !v.Legacy {
+			fl := sbFields(it.s, pose, it.p.Ref, it.p.Value)
+			b = sbBoxUnion(b, sbBoxUnion(fl.RefBox, fl.VBox))
+		}
+		return b
+	}
 	zl.Parts[items[0].p.Ref] = append(zl.Parts[items[0].p.Ref], sbPose{At: kicad.Pt{}, Unit: items[0].unit})
 	placed := []kicad.Box{sbGrow(items[0].s.Box, 2.54)} // the core's body; its labels are re-checked after
 	owner := []string{items[0].p.Ref}
@@ -890,8 +959,13 @@ func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, excl
 	type attachWire struct {
 		ref string
 		w   []kicad.Pt
+		net string
 	}
 	var attachWires []attachWire
+	// roomX: the right edge of the stub + label room of the attached and
+	// seeded parts (placed holds their bodies only, so a part can attach in
+	// the room a now-wired pin had reserved); the far columns start right of it
+	roomX := math.Inf(-1)
 	isDecap := func(p *sbRPart) bool {
 		if sbRefPrefix(p.Ref) != "C" || len(p.LPins) != 2 {
 			return false
@@ -921,6 +995,12 @@ func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, excl
 				}
 				var ks []string
 				for k, pa := range pins {
+					// on a supply / ground net a part attaches to an IC pin
+					// only (its decoupling); two small parts joined by a
+					// ground wire read as a signal path (C29 —GND— C30)
+					if pass != "signal" && !v.Legacy && len(d.ByRef[pa.ref].LPins) <= 3 {
+						continue
+					}
 					if d.PinNet[k] == n && !direct[k] && pa.ref != it.p.Ref {
 						ks = append(ks, k)
 					}
@@ -935,12 +1015,83 @@ func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, excl
 				targets = append(targets, ks...)
 			}
 		}
+		// T taps: a part on a signal net whose pins are all wired already
+		// joins a wire of that net in its middle (KiCad draws the junction):
+		// the third part of a node (a key's pull-up + series resistor wired,
+		// the switch) used to get a label instead (field board F, round 2)
+		type tap struct {
+			pin pinAt
+			net string
+		}
+		taps := map[string]tap{}
+		if !v.Legacy {
+			seenNet := map[string]bool{}
+			for _, q := range it.s.Pins {
+				n, ok := d.PinNet[sbPinKey(it.p.Ref, q.Number)]
+				if !ok || seenNet[n] || d.NetKind[n] == "power" || d.NetKind[n] == "ground" {
+					continue
+				}
+				seenNet[n] = true
+				for wi, aw := range attachWires {
+					if aw.net != n {
+						continue
+					}
+					for si := 0; si+1 < len(aw.w); si++ {
+						a, b := aw.w[si], aw.w[si+1]
+						l := math.Hypot(b.X-a.X, b.Y-a.Y)
+						if l < 4*2.54 {
+							continue
+						}
+						u := kicad.Pt{X: (b.X - a.X) / l, Y: (b.Y - a.Y) / l}
+						dirs := []string{"up", "down"}
+						if math.Abs(a.X-b.X) < 1e-6 {
+							dirs = []string{"right", "left"}
+						}
+						var ss []float64
+						for st := 2 * 2.54; st <= l-2*2.54+1e-6; st += 2.54 {
+							ss = append(ss, st)
+						}
+						sort.SliceStable(ss, func(i, j int) bool { return math.Abs(ss[i]-l/2) < math.Abs(ss[j]-l/2) })
+						for k, st := range ss {
+							if k >= 6 {
+								break
+							}
+							at := sbRoundPt(kicad.Pt{X: a.X + u.X*st, Y: a.Y + u.Y*st})
+							busy := false
+							for _, pa := range pins {
+								busy = busy || sbRoundPt(pa.at) == at
+							}
+							for _, w := range zl.Wires { // one branch per point (EG-09: no four-way junction)
+								for _, e := range []kicad.Pt{w[0], w[len(w)-1]} {
+									busy = busy || math.Abs(e.X-at.X) < 2.6 && math.Abs(e.Y-at.Y) < 2.6 && !(e == a || e == b)
+								}
+							}
+							if busy {
+								continue
+							}
+							for _, dd := range dirs {
+								key := fmt.Sprintf("~T%d.%d.%d.%s", wi, si, k, dd)
+								taps[key] = tap{pinAt{at: at, dir: dd}, n}
+								targets = append(targets, key)
+							}
+						}
+					}
+				}
+			}
+		}
 		for _, tk := range targets {
 			t := pins[tk]
+			tp, isTap := taps[tk]
+			if isTap {
+				t = tp.pin
+			}
 			if t.dir == "" {
 				continue
 			}
 			n := d.PinNet[tk]
+			if isTap {
+				n = tp.net
+			}
 			for _, q := range it.s.Pins {
 				qk := sbPinKey(it.p.Ref, q.Number)
 				if d.PinNet[qk] != n {
@@ -968,21 +1119,22 @@ func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, excl
 							if isDecap(it.p) && sbBoxPointDist(sbXformBox(it.s.Box, pose), t.at) > 22.86 {
 								continue // decoupling stays within reach of its pin (EG-06)
 							}
-							fb := sbGrow(sbXformBox(it.s.Box, pose), 2.54)
+							fb := bodyBox(it, pose)
 							// label room on the sides with other pins
 							for _, o := range it.s.Pins {
 								if o.Number == q.Number {
 									continue
 								}
+								orm := roomOf(d.PinNet[sbPinKey(it.p.Ref, o.Number)])
 								switch sbOutwardDir(math.Mod(o.Outward+rot+360, 360)) {
 								case "left":
-									fb.MinX -= room
+									fb.MinX = math.Min(fb.MinX, sbXformBox(it.s.Box, pose).MinX-2.54-orm)
 								case "right":
-									fb.MaxX += room
+									fb.MaxX = math.Max(fb.MaxX, sbXformBox(it.s.Box, pose).MaxX+2.54+orm)
 								case "up":
-									fb.MinY -= room
+									fb.MinY = math.Min(fb.MinY, sbXformBox(it.s.Box, pose).MinY-2.54-orm)
 								case "down":
-									fb.MaxY += room
+									fb.MaxY = math.Max(fb.MaxY, sbXformBox(it.s.Box, pose).MaxY+2.54+orm)
 								}
 							}
 							ok := true
@@ -1026,12 +1178,16 @@ func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, excl
 								}
 							}
 							body := sbGrow(sbXformBox(it.s.Box, pose), 0.6)
+							if !v.Legacy { // its texts stay out of that room too
+								fl := sbFields(it.s, pose, it.p.Ref, it.p.Value)
+								body = sbBoxUnion(body, sbBoxUnion(fl.RefBox, fl.VBox))
+							}
 							for k, pa := range pins { // the body stays out of other pins' stub + label room
 								nn, hasNet := d.PinNet[k]
 								if !clear || !hasNet || k == tk || direct[k] || pa.dir == "" {
 									continue
 								}
-								if sbOverlap(body, sbPinRoom(pa.at, pa.dir, nn, d.NetKind[nn], room)) {
+								if sbOverlap(body, sbPinRoom(pa.at, pa.dir, nn, d.NetKind[nn], roomOf(nn))) {
 									clear = false
 								}
 							}
@@ -1063,7 +1219,32 @@ func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, excl
 							}
 							var tee []kicad.Pt
 							var mk sbMarker
-							switch d.NetKind[n] {
+							kind := d.NetKind[n]
+							if isTap {
+								kind = "~tap"
+							}
+							switch kind {
+							case "~tap":
+								// the net is named on its wire already: no marker; the new
+								// wire stays off every label and symbol
+								// (a label on the tapped wire itself only bars its reading
+								// side: text above a horizontal wire, left of a vertical one)
+								hit := false
+								for _, o := range zl.Markers {
+									ob := sbGrow(sbMarkerBox(o), 0.2)
+									if o.OnWire && sbOverlap(ob, kicad.Box{MinX: t.at.X, MinY: t.at.Y, MaxX: t.at.X, MaxY: t.at.Y}) {
+										if t.dir == "up" || t.dir == "left" {
+											hit = true
+										}
+										continue
+									}
+									for i := 0; i+1 < len(wire) && !hit; i++ {
+										hit = sbOverlap(ob, kicad.Box{MinX: math.Min(wire[i].X, wire[i+1].X), MinY: math.Min(wire[i].Y, wire[i+1].Y), MaxX: math.Max(wire[i].X, wire[i+1].X), MaxY: math.Max(wire[i].Y, wire[i+1].Y)})
+									}
+								}
+								if hit {
+									continue
+								}
 							case "power", "ground":
 								dir := "up"
 								if d.NetKind[n] == "ground" {
@@ -1135,14 +1316,21 @@ func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, excl
 							}
 							zl.Parts[it.p.Ref] = append(zl.Parts[it.p.Ref], pose)
 							zl.Wires = append(zl.Wires, wire)
-							attachWires = append(attachWires, attachWire{it.p.Ref, wire})
+							attachWires = append(attachWires, attachWire{it.p.Ref, wire, n})
 							direct[qk], direct[tk] = true, true
 							wiredAt[ptKey(t.at)], wiredAt[ptKey(wire[0])], wiredAt[ptKey(wire[len(wire)-1])] = true, true, true
 							if tee != nil {
 								zl.Wires = append(zl.Wires, tee)
 							}
-							zl.Markers = append(zl.Markers, mk)
-							placed, owner = append(placed, fb), append(owner, it.p.Ref)
+							if !isTap {
+								zl.Markers = append(zl.Markers, mk)
+							}
+							if v.Legacy {
+								placed, owner = append(placed, fb), append(owner, it.p.Ref)
+							} else {
+								placed, owner = append(placed, bodyBox(it, pose)), append(owner, it.p.Ref)
+							}
+							roomX = math.Max(roomX, fb.MaxX)
 							addPins(it, pose)
 							return true
 						}
@@ -1253,6 +1441,10 @@ func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, excl
 			side = "right"
 		}
 		fb0 := sbXformBox(foot(sbRotScene(it.s, rot), it.p.Ref), sbPose{})
+		if !v.Legacy { // the reference / value texts beside the body too
+			fl := sbFields(it.s, sbPose{Rot: rot}, it.p.Ref, it.p.Value)
+			fb0 = sbBoxUnion(fb0, sbBoxUnion(fl.RefBox, fl.VBox))
+		}
 		cb := sbGrow(items[0].s.Box, 0)
 		if ap := d.ByRef[anchor.ref]; ap != nil && ap.Multi {
 			// beside the unit that carries the pin: an op-amp's or a gate's
@@ -1310,7 +1502,7 @@ func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, excl
 				if !ok || !hasNet || direct[k] || pa.dir == "" {
 					continue
 				}
-				if sbOverlap(f, sbPinRoom(pa.at, pa.dir, n, d.NetKind[n], room)) {
+				if sbOverlap(f, sbPinRoom(pa.at, pa.dir, n, d.NetKind[n], roomOf(n))) {
 					ok = false
 				}
 			}
@@ -1406,17 +1598,360 @@ func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, excl
 		rest = append(rest, it)
 	}
 	todo := others
-	for progress := true; progress && len(todo) > 0; {
-		progress = false
-		var next []unitRef
-		for _, it := range todo {
-			if !v.NoAttach && !exclude[it.p.Ref] && !it.p.Multi && attach(it) {
-				progress = true
-			} else {
-				next = append(next, it)
+	// A sub-circuit no placed pin reaches (a key's pull-up, switch, series
+	// resistor and filter cap) is started from a seed part in a column right
+	// of what is placed and grown by attach like the core's own circuit.
+	// Such parts used to go to the far columns, each pin on its own stub and
+	// label, no wire between them (field boards 2026-11).
+	// obstacles is everything drawn so far that a new part must keep clear
+	// of — bodies, the stub + label room of every pin still to connect,
+	// wires, supply symbols and labels, field texts — and its extent
+	obstacles := func() ([]kicad.Box, kicad.Box) {
+		var obst []kicad.Box
+		obst = append(obst, placed...)
+		pk := make([]string, 0, len(pins))
+		for k := range pins {
+			pk = append(pk, k)
+		}
+		sort.Strings(pk)
+		for _, k := range pk {
+			pa := pins[k]
+			if n, ok := d.PinNet[k]; ok && !direct[k] && pa.dir != "" {
+				obst = append(obst, sbPinRoom(pa.at, pa.dir, n, d.NetKind[n], roomOf(n)))
 			}
 		}
-		todo = next
+		for _, w := range zl.Wires {
+			for i := 0; i+1 < len(w); i++ {
+				obst = append(obst, sbGrow(kicad.Box{MinX: math.Min(w[i].X, w[i+1].X), MinY: math.Min(w[i].Y, w[i+1].Y), MaxX: math.Max(w[i].X, w[i+1].X), MaxY: math.Max(w[i].Y, w[i+1].Y)}, 1.27))
+			}
+		}
+		for _, mk := range zl.Markers {
+			obst = append(obst, sbGrow(sbMarkerBox(mk), 0.6))
+		}
+		for _, p := range zi.Parts {
+			for _, ps := range zl.Parts[p.Ref] {
+				if s, err := m.get(p, max(ps.Unit, 1)); err == nil {
+					fl := sbFields(s, ps, p.Ref, p.Value)
+					obst = append(obst, fl.RefBox, fl.VBox)
+				}
+			}
+		}
+		ext := kicad.Box{MinX: math.Inf(1), MinY: math.Inf(1), MaxX: math.Inf(-1), MaxY: math.Inf(-1)}
+		for _, b := range obst {
+			ext = sbBoxUnion(ext, b)
+		}
+		return obst, ext
+	}
+	// placeSubBlocks draws each sub-circuit of the parts left (joined by
+	// signal nets, two parts or more) as a block of its own — the hub part
+	// as its core, the rest attached by wire — and puts the block into free
+	// room of the zone (a hole inside what is drawn, else right of or under
+	// it, whichever keeps the zone closer to a landscape sheet). Returns the
+	// parts no block took.
+	placeSubBlocks := func(todo []unitRef) []unitRef {
+		parent := make([]int, len(todo))
+		for i := range parent {
+			parent[i] = i
+		}
+		var find func(int) int
+		find = func(i int) int {
+			for parent[i] != i {
+				parent[i] = parent[parent[i]]
+				i = parent[i]
+			}
+			return i
+		}
+		netOwner := map[string]int{}
+		for i, it := range todo {
+			if it.p.Multi || exclude[it.p.Ref] {
+				continue
+			}
+			for _, q := range it.p.LPins {
+				n, ok := d.PinNet[sbPinKey(it.p.Ref, q.Number)]
+				if !ok || d.NetKind[n] == "power" || d.NetKind[n] == "ground" {
+					continue
+				}
+				if j, ok := netOwner[n]; ok {
+					parent[find(i)] = find(j)
+				} else {
+					netOwner[n] = i
+				}
+			}
+		}
+		groups := map[int][]int{}
+		var roots []int
+		for i, it := range todo {
+			if it.p.Multi || exclude[it.p.Ref] {
+				continue
+			}
+			r := find(i)
+			if _, ok := groups[r]; !ok {
+				roots = append(roots, r)
+			}
+			groups[r] = append(groups[r], i)
+		}
+		type block struct {
+			zl  *sbZoneLayout
+			idx []int
+		}
+		var blocks []block
+		taken := map[int]bool{}
+		for _, r := range roots {
+			g := groups[r]
+			if len(g) < 2 {
+				continue
+			}
+			// the hub: most other parts of the group on its signal nets,
+			// then most pins, then ref order
+			hub, hubScore := g[0], -1
+			for _, i := range g {
+				own := map[string]bool{}
+				for _, q := range todo[i].p.LPins {
+					if n, ok := d.PinNet[sbPinKey(todo[i].p.Ref, q.Number)]; ok && d.NetKind[n] != "power" && d.NetKind[n] != "ground" {
+						own[n] = true
+					}
+				}
+				score := 0
+				for _, j := range g {
+					if j == i {
+						continue
+					}
+					for _, q := range todo[j].p.LPins {
+						if own[d.PinNet[sbPinKey(todo[j].p.Ref, q.Number)]] {
+							score++
+							break
+						}
+					}
+				}
+				if score > hubScore || (score == hubScore && len(todo[i].s.Pins) > len(todo[hub].s.Pins)) {
+					hub, hubScore = i, score
+				}
+			}
+			sub := &sbZoneIn{Zone: zi.Zone, Policy: zi.Policy}
+			sub.Zone.Title, sub.Zone.Core = "", todo[hub].p.Ref
+			sub.Parts = append(sub.Parts, todo[hub].p)
+			for _, i := range g {
+				if i != hub {
+					sub.Parts = append(sub.Parts, todo[i].p)
+				}
+			}
+			sv := v
+			sv.Sub = true
+			bz, err := gridZone(d, sub, m, sv)
+			if err != nil {
+				continue // its parts are seeded / placed as before
+			}
+			for _, i := range g {
+				taken[i] = true
+			}
+			blocks = append(blocks, block{bz, g})
+		}
+		sort.SliceStable(blocks, func(i, j int) bool {
+			return blocks[i].zl.Box.W()*blocks[i].zl.Box.H() > blocks[j].zl.Box.W()*blocks[j].zl.Box.H()
+		})
+		for _, b := range blocks {
+			obst, ext := obstacles()
+			bb := sbGrow(b.zl.Box, 2.54)
+			clear := func(t kicad.Pt) bool {
+				x := kicad.Box{MinX: bb.MinX + t.X, MinY: bb.MinY + t.Y, MaxX: bb.MaxX + t.X, MaxY: bb.MaxY + t.Y}
+				for _, o := range obst {
+					if sbOverlap(x, o) {
+						return false
+					}
+				}
+				return true
+			}
+			var t kicad.Pt
+			found := false
+			if !math.IsInf(ext.MinX, 1) && bb.W() <= ext.W() && bb.H() <= ext.H() {
+				for yy := sbSnap(ext.MinY); yy+bb.H() <= ext.MaxY+1e-6 && !found; yy += 2 * sbGrid {
+					for xx := sbSnap(ext.MinX); xx+bb.W() <= ext.MaxX+1e-6; xx += 2 * sbGrid {
+						c := kicad.Pt{X: sbSnap(xx - bb.MinX), Y: sbSnap(yy - bb.MinY)}
+						if clear(c) {
+							t, found = c, true
+							break
+						}
+					}
+				}
+			}
+			if !found {
+				if math.IsInf(ext.MinX, 1) {
+					ext = core
+				}
+				right := kicad.Pt{X: sbSnap(ext.MaxX + 2.54 - bb.MinX), Y: sbSnap(ext.MinY - bb.MinY)}
+				below := kicad.Pt{X: sbSnap(ext.MinX - bb.MinX), Y: sbSnap(ext.MaxY + 2.54 - bb.MinY)}
+				aspect := func(t kicad.Pt) float64 {
+					u := sbBoxUnion(ext, kicad.Box{MinX: bb.MinX + t.X, MinY: bb.MinY + t.Y, MaxX: bb.MaxX + t.X, MaxY: bb.MaxY + t.Y})
+					return math.Max(u.W()/math.Sqrt2, u.H())
+				}
+				t = right
+				if aspect(below) < aspect(right)-1e-6 {
+					t = below
+				}
+				// skyline corners: right of / under every drawn thing; the
+				// one that keeps the zone closest to a landscape sheet wins
+				// (blocks used to go in one row right of the core and leave
+				// the room under that row empty)
+				bestA, bestArea := math.Inf(1), math.Inf(1)
+				if clear(t) {
+					u := sbBoxUnion(ext, kicad.Box{MinX: bb.MinX + t.X, MinY: bb.MinY + t.Y, MaxX: bb.MaxX + t.X, MaxY: bb.MaxY + t.Y})
+					bestA, bestArea = aspect(t), u.W()*u.H()
+				}
+				var cs []kicad.Pt
+				for _, o := range obst {
+					cs = append(cs, kicad.Pt{X: o.MaxX + 2.54, Y: o.MinY}, kicad.Pt{X: o.MinX, Y: o.MaxY + 2.54}, kicad.Pt{X: o.MaxX + 2.54, Y: ext.MinY}, kicad.Pt{X: ext.MinX, Y: o.MaxY + 2.54})
+				}
+				for _, c := range cs {
+					ct := kicad.Pt{X: sbSnap(c.X - bb.MinX), Y: sbSnap(c.Y - bb.MinY)}
+					if !clear(ct) {
+						continue
+					}
+					u := sbBoxUnion(ext, kicad.Box{MinX: bb.MinX + ct.X, MinY: bb.MinY + ct.Y, MaxX: bb.MaxX + ct.X, MaxY: bb.MaxY + ct.Y})
+					a, ar := aspect(ct), u.W()*u.H()
+					if a < bestA-1e-6 || (a <= bestA+1e-6 && ar < bestArea-1e-6) {
+						t, bestA, bestArea = ct, a, ar
+					}
+				}
+				for !clear(t) { // never on anything: slide down
+					t.Y += sbGrid
+				}
+			}
+			mv := func(p kicad.Pt) kicad.Pt { return kicad.Pt{X: p.X + t.X, Y: p.Y + t.Y} }
+			for _, i := range b.idx {
+				it := todo[i]
+				for _, ps := range b.zl.Parts[it.p.Ref] {
+					ps.At = mv(ps.At)
+					zl.Parts[it.p.Ref] = append(zl.Parts[it.p.Ref], ps)
+					placed, owner = append(placed, bodyBox(it, ps)), append(owner, it.p.Ref)
+					addPins(it, ps)
+					for _, q := range it.s.Pins {
+						k := sbPinKey(it.p.Ref, q.Number)
+						if _, ok := d.PinNet[k]; ok {
+							direct[k] = true // the block connects it
+							wiredAt[ptKey(sbXform(q.At, ps))] = true
+						}
+					}
+				}
+			}
+			for _, w := range b.zl.Wires {
+				var nw []kicad.Pt
+				for _, p := range w {
+					nw = append(nw, mv(p))
+				}
+				zl.Wires = append(zl.Wires, nw)
+			}
+			for _, mk := range b.zl.Markers {
+				mk.At = mv(mk.At)
+				zl.Markers = append(zl.Markers, mk)
+			}
+			roomX = math.Max(roomX, b.zl.Box.MaxX+t.X)
+		}
+		var left []unitRef
+		for i, it := range todo {
+			if !taken[i] {
+				left = append(left, it)
+			}
+		}
+		return left
+	}
+	seedX, seedY := math.Inf(-1), core.MinY
+	seedColH := math.Max(core.H(), 90)
+	blocksDone := v.Legacy || v.Sub || v.NoAttach
+	for {
+		for progress := true; progress && len(todo) > 0; {
+			progress = false
+			var next []unitRef
+			for _, it := range todo {
+				if !v.NoAttach && !exclude[it.p.Ref] && !it.p.Multi && attach(it) {
+					progress = true
+				} else {
+					next = append(next, it)
+				}
+			}
+			todo = next
+		}
+		if v.NoAttach || v.Legacy || len(todo) < 2 {
+			break
+		}
+		if !blocksDone {
+			blocksDone = true
+			todo = placeSubBlocks(todo)
+			continue
+		}
+		// the seed: the part sharing signal nets with the most other parts
+		// left (then the most pins, then ref order)
+		si, bestScore := -1, 0
+		for i, it := range todo {
+			if it.p.Multi || exclude[it.p.Ref] {
+				continue
+			}
+			own := map[string]bool{}
+			for _, q := range it.p.LPins {
+				if n, ok := d.PinNet[sbPinKey(it.p.Ref, q.Number)]; ok && d.NetKind[n] != "power" && d.NetKind[n] != "ground" {
+					own[n] = true
+				}
+			}
+			score := 0
+			for j, o := range todo {
+				if j == i {
+					continue
+				}
+				for _, q := range o.p.LPins {
+					if own[d.PinNet[sbPinKey(o.p.Ref, q.Number)]] {
+						score++
+						break
+					}
+				}
+			}
+			if score > bestScore || (score == bestScore && score > 0 && len(it.s.Pins) > len(todo[si].s.Pins)) {
+				si, bestScore = i, score
+			}
+		}
+		if si < 0 {
+			break
+		}
+		it := todo[si]
+		rot := sbTwoPinRot(d, it.p, it.s)
+		sf := foot(sbRotScene(it.s, rot), it.p.Ref)
+		fl := sbFields(it.s, sbPose{Rot: rot}, it.p.Ref, it.p.Value)
+		sf = sbBoxUnion(sf, sbBoxUnion(fl.RefBox, fl.VBox))
+		maxX := math.Max(core.MaxX, roomX)
+		for _, pb := range placed {
+			maxX = math.Max(maxX, pb.MaxX)
+		}
+		if math.IsInf(seedX, -1) {
+			seedX = maxX + 5.08
+		} else {
+			// under what is placed in this column, else a new column
+			y := core.MinY
+			for _, pb := range placed {
+				if pb.MaxX > seedX && pb.MinX < seedX+sf.W() {
+					y = math.Max(y, pb.MaxY+2.54)
+				}
+			}
+			seedY = y
+			if seedY+sf.H() > core.MinY+seedColH {
+				seedX, seedY = maxX+5.08, core.MinY
+			}
+		}
+		pose := sbPose{At: kicad.Pt{X: sbSnap(seedX - sf.MinX), Y: sbSnap(seedY - sf.MinY)}, Rot: rot, Unit: it.unit}
+		fb := kicad.Box{MinX: sf.MinX + pose.At.X, MinY: sf.MinY + pose.At.Y, MaxX: sf.MaxX + pose.At.X, MaxY: sf.MaxY + pose.At.Y}
+		for moved := true; moved; { // never on a placed part: below it
+			moved = false
+			for _, pb := range placed {
+				if sbOverlap(fb, pb) {
+					dy := sbSnap(pb.MaxY-fb.MinY) + 2.54
+					pose.At.Y += dy
+					fb.MinY, fb.MaxY = fb.MinY+dy, fb.MaxY+dy
+					moved = true
+				}
+			}
+		}
+		zl.Parts[it.p.Ref] = append(zl.Parts[it.p.Ref], pose)
+		placed, owner = append(placed, bodyBox(it, pose)), append(owner, it.p.Ref)
+		roomX = math.Max(roomX, fb.MaxX)
+		addPins(it, pose)
+		todo = append(todo[:si:si], todo[si+1:]...)
 	}
 	for _, it := range append(rest, todo...) {
 		if v.NoAttach || it.p.Multi || exclude[it.p.Ref] || !sidePlace(it) {
@@ -1424,11 +1959,45 @@ func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, excl
 		}
 	}
 	colH := math.Max(core.H(), 90)
-	maxX := core.MaxX
+	maxX := math.Max(core.MaxX, roomX)
 	for _, pb := range placed {
 		maxX = math.Max(maxX, pb.MaxX)
 	}
 	x, y, colW := maxX+2.54, core.MinY, 0.0
+	// Holes first: a part that attaches nowhere goes into free room inside
+	// what is drawn already (clear of bodies, stub + label rooms, wires and
+	// symbols), top-left first; only what finds no hole opens columns on the
+	// right. The columns alone left whole zones half empty (a wide chain on
+	// top, three loose parts in a column far right of it).
+	var obst []kicad.Box
+	ext := kicad.Box{MinX: math.Inf(1), MinY: math.Inf(1), MaxX: math.Inf(-1), MaxY: math.Inf(-1)}
+	if !v.Legacy && len(far) > 0 {
+		obst, ext = obstacles()
+	}
+	hole := func(f kicad.Box) (kicad.Pt, bool) {
+		if len(obst) == 0 || f.W() > ext.W() || f.H() > ext.H() {
+			return kicad.Pt{}, false
+		}
+		for yy := sbSnap(ext.MinY); yy+f.H() <= ext.MaxY+1e-6; yy += sbGrid {
+			for xx := sbSnap(ext.MinX); xx+f.W() <= ext.MaxX+1e-6; xx += sbGrid {
+				at := kicad.Pt{X: sbSnap(xx - f.MinX), Y: sbSnap(yy - f.MinY)}
+				// 1.27 mm clear of everything: the supply symbols autoconnect
+				// adds later may sit a step off their pin's reserved room
+				b := sbGrow(kicad.Box{MinX: f.MinX + at.X, MinY: f.MinY + at.Y, MaxX: f.MaxX + at.X, MaxY: f.MaxY + at.Y}, 1.27)
+				ok := true
+				for _, o := range obst {
+					if sbOverlap(b, o) {
+						ok = false
+						break
+					}
+				}
+				if ok {
+					return at, true
+				}
+			}
+		}
+		return kicad.Pt{}, false
+	}
 	for _, it := range far {
 		rot := sbTwoPinRot(d, it.p, it.s)
 		f := foot(sbRotScene(it.s, rot), it.p.Ref)
@@ -1437,6 +2006,15 @@ func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, excl
 		// (text-over-symbol on every cap of a decoupling-only zone)
 		fl := sbFields(it.s, sbPose{Rot: rot}, it.p.Ref, it.p.Value)
 		f = sbBoxUnion(f, sbBoxUnion(fl.RefBox, fl.VBox))
+		if at, ok := hole(f); ok {
+			pose := sbPose{At: at, Rot: rot, Unit: it.unit}
+			zl.Parts[it.p.Ref] = append(zl.Parts[it.p.Ref], pose)
+			obst = append(obst, kicad.Box{MinX: f.MinX + at.X, MinY: f.MinY + at.Y, MaxX: f.MaxX + at.X, MaxY: f.MaxY + at.Y})
+			if isDecap(it.p) && !it.p.Multi {
+				uprightMarkers(it, pose)
+			}
+			continue
+		}
 		if y > core.MinY && y+f.H() > core.MinY+colH {
 			x, y, colW = x+colW+2.54, core.MinY, 0
 		}
@@ -2167,9 +2745,69 @@ func sbRotScene(s kicad.SceneSymbol, rot float64) kicad.SceneSymbol {
 type sbGridVariant struct {
 	Room, OffsetMin float64
 	NoAttach        bool // plain columns (no part faces its partner pin)
+	// Legacy is the v0.12.8 grid: every pin reserves the zone's longest
+	// label, an attached part keeps that room around it, no seeded
+	// sub-circuits. Kept as fallback candidates: a zone the compact
+	// variants cannot draw clean is drawn as before.
+	Legacy bool
+	// Sub draws a sub-circuit block of a zone (gridZoneSub): no blocks of
+	// its own (sub-circuits it cannot reach are seeded)
+	Sub bool
 }
 
-var sbGridVariants = []sbGridVariant{{1, 0, false}, {1.5, 0, false}, {1, 30, false}, {1.8, 30, false}, {1.5, 0, true}, {2.4, 40, true}, {1, 0, true}}
+var sbGridVariants = []sbGridVariant{
+	{Room: 1}, {Room: 1.5}, {Room: 1, OffsetMin: 30}, {Room: 1.8, OffsetMin: 30},
+	{Room: 1, Legacy: true}, {Room: 1.5, Legacy: true}, {Room: 1, OffsetMin: 30, Legacy: true}, {Room: 1.8, OffsetMin: 30, Legacy: true},
+	{Room: 1.5, NoAttach: true, Legacy: true}, {Room: 2.4, OffsetMin: 40, NoAttach: true, Legacy: true}, {Room: 1, NoAttach: true, Legacy: true},
+}
+
+// sbFindingRefs are the zone parts (not the core) a quality finding names.
+// A net named in a finding (a label that overlaps something) names the
+// zone's parts on that net.
+func sbFindingRefs(findings []string, zi *sbZoneIn, d *sbDesign) []string {
+	own := map[string]bool{}
+	byNet := map[string][]string{}
+	for _, p := range zi.Parts[1:] {
+		own[p.Ref] = true
+		for _, q := range p.LPins {
+			if n, ok := d.PinNet[sbPinKey(p.Ref, q.Number)]; ok {
+				byNet[n] = append(byNet[n], p.Ref)
+			}
+		}
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, f := range findings {
+		for _, tok := range strings.FieldsFunc(f, func(r rune) bool {
+			return !(unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_')
+		}) {
+			if own[tok] && !seen[tok] {
+				seen[tok] = true
+				out = append(out, tok)
+			}
+			for _, r := range byNet[tok] {
+				if !seen[r] {
+					seen[r] = true
+					out = append(out, r)
+				}
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// name is the variant's short tag in reports ("compact r1 o0").
+func (v sbGridVariant) name() string {
+	kind := "compact"
+	if v.Legacy {
+		kind = "legacy"
+	}
+	if v.NoAttach {
+		kind += "-columns"
+	}
+	return fmt.Sprintf("%s r%g o%g", kind, v.Room, v.OffsetMin)
+}
 
 func sbOutwardDir(deg float64) string {
 	switch int(math.Round(math.Mod(deg+360, 360)/90)) % 4 {
@@ -2196,6 +2834,10 @@ type sbLayoutOpts struct {
 	// layoutZones call (tests, callers without a build).
 	Deadline time.Time
 	Stats    *sbLayoutStats // nil = not collected
+	// ZoneTimeout bounds one zone's layout (planner run aside, which has
+	// its own budget): past it no further grid variant starts and the best
+	// drawing so far is kept (reported by the layout-quality gate). 0 = none.
+	ZoneTimeout time.Duration
 }
 
 // sbLayoutStats is what the planner did in one build's layout stage: what
@@ -2271,55 +2913,195 @@ func layoutZones(d *sbDesign, zis []*sbZoneIn, reuse map[string]*sbZoneLayout, o
 			sem <- struct{}{}
 			defer func() { <-sem }()
 			t0 := time.Now()
-			var cands []*sbZoneLayout
+			// The grid is drawn first: it is cheap (well under a second a
+			// zone) and its drawings pass the page gates. The planner is the
+			// fallback, for a zone no compact grid variant draws clean or
+			// within the layout watchdog's zone limits; its drawing then
+			// competes on the same ranking. (Planner first cost minutes a
+			// board, and a planner drawing clean inside its zone still
+			// failed page gates on boards the grid alone built.)
 			var perr error
-			if !o.NoPlanner {
-				var zp *sbZoneLayout
-				var started bool
-				zp, started, perr = planZoneBounded(d, zi, m, o.Budget, deadline)
+			var zl *sbZoneLayout
+			var clean []*sbZoneLayout
+			plannerRan := false
+			runPlanner := func() {
+				if o.NoPlanner || plannerRan {
+					return
+				}
+				plannerRan = true
+				tp := time.Now()
+				zp, started, err := planZoneBounded(d, zi, m, o.Budget, deadline)
+				perr = err
 				if started {
-					o.Stats.ran(zi.Zone.ID, time.Since(t0))
+					o.Stats.ran(zi.Zone.ID, time.Since(tp))
 				} else {
 					o.Stats.skipped()
 				}
-				if zp != nil {
-					zp.Hash = hp
-					cands = append(cands, zp)
+				if zp == nil {
+					return
 				}
-			}
-			// the quality checks of kicad sch-check pick the cleaner drawing:
-			// the planner's, else the first clean grid variant
-			var zl *sbZoneLayout
-			for _, c := range cands {
-				c.Findings = sbZoneFindings(d, zi, c)
-				if sbHasShort(c.Findings) {
-					perr = fmt.Errorf("planner drawing rejected: %s", c.Findings[0])
-					continue
+				zp.Hash = hp
+				zp.Findings = sbZoneFindings(d, zi, zp)
+				if sbHasShort(zp.Findings) {
+					perr = fmt.Errorf("planner drawing rejected: %s", zp.Findings[0])
+					return
 				}
-				zl = c
+				if len(zp.Findings) == 0 {
+					clean = append(clean, zp)
+				}
+				if zl == nil || len(zp.Findings) < len(zl.Findings) {
+					zl = zp
+				}
 			}
 			var gerr error
-			for _, v := range sbGridVariants {
-				if zl != nil && len(zl.Findings) == 0 {
-					break
-				}
+			// every compact grid variant is drawn; among the clean ones the
+			// best wired, most compact wins (sbZoneCost). The legacy variants
+			// run only when no compact one came out clean.
+			tried := map[int]bool{}
+			run := func(i int) {
+				v := sbGridVariants[i]
+				tried[i] = true
 				zg, err := gridZone(d, zi, m, v)
 				if err != nil {
 					gerr = err
-					continue
+					return
 				}
 				zg.Hash = hg
-				if perr != nil {
-					zg.Notes = append(zg.Notes, "planner: "+sbClip(perr.Error(), 900))
-				}
+				zg.Variant = v.name()
 				zg.Findings = sbZoneFindings(d, zi, zg)
+				// bounded retry: the parts a finding names are drawn loose
+				// (no attach) and the variant redrawn, at most four times,
+				// while the findings do not grow
+				if !v.Legacy && len(zg.Findings) > 0 && !sbHasShort(zg.Findings) {
+					ex := map[string]bool{}
+					for try := 0; try < 4 && len(zg.Findings) > 0; try++ {
+						added := false
+						for _, r := range sbFindingRefs(zg.Findings, zi, d) {
+							if !ex[r] {
+								ex[r], added = true, true
+							}
+						}
+						if !added {
+							break
+						}
+						z2, err := gridZoneEx(d, zi, m, v, ex)
+						if err != nil {
+							break
+						}
+						z2.Hash, z2.Variant = hg, v.name()
+						z2.Findings = sbZoneFindings(d, zi, z2)
+						if sbHasShort(z2.Findings) || len(z2.Findings) > len(zg.Findings) {
+							break
+						}
+						zg = z2
+					}
+					if len(ex) > 0 && len(zg.Findings) == 0 {
+						var rs []string
+						for r := range ex {
+							rs = append(rs, r)
+						}
+						sort.Strings(rs)
+						zg.Notes = append(zg.Notes, "drawn without attaching "+strings.Join(rs, ", ")+" (their wires left a clash)")
+					}
+				}
 				if sbHasShort(zg.Findings) {
 					gerr = fmt.Errorf("grid drawing rejected: %s", zg.Findings[0])
-					continue
+					return
+				}
+				if len(zg.Findings) == 0 {
+					clean = append(clean, zg)
 				}
 				if zl == nil || len(zg.Findings) < len(zl.Findings) {
 					zl = zg
 				}
+			}
+			// time watchdog: past --zone-timeout (counted from here: a planner
+			// run has its own --planner-budget) no further variant starts —
+			// once a clean drawing exists; without one the remaining variants
+			// still run (a bounded list), or a drawing the gates reject ships
+			gridStart := time.Now()
+			overTime := func() bool {
+				return o.ZoneTimeout > 0 && len(clean) > 0 && time.Since(gridStart) > o.ZoneTimeout
+			}
+			timedOut := false
+			for i, v := range sbGridVariants {
+				if v.Legacy && len(clean) > 0 {
+					break
+				}
+				if overTime() {
+					timedOut = true
+					break
+				}
+				run(i)
+			}
+			lim := sbLayoutQualityLimits
+			pick := func() {
+				if len(clean) == 0 {
+					return
+				}
+				minArea := math.Inf(1)
+				qs := make([]sbZoneQuality, len(clean))
+				for i, c := range clean {
+					qs[i] = sbZoneQualityOf(d, zi, c, m)
+					minArea = math.Min(minArea, qs[i].AreaMM2)
+				}
+				// a drawing within the zone limits of the layout watchdog
+				// first, then the best wired, most compact
+				best := 0
+				for i := range clean {
+					ni, nb := len(sbZoneLQIssues(qs[i], lim)), len(sbZoneLQIssues(qs[best], lim))
+					if ni < nb || (ni == nb && sbZoneCost(qs[i], minArea) < sbZoneCost(qs[best], minArea)-1e-9) {
+						best = i
+					}
+				}
+				zl = clean[best]
+				// the other clean drawings within a small cost of the best
+				// are kept as alternative shapes for the page packer
+				// (sbPackFresh): a narrower or lower zone can bring a page
+				// down a paper size
+				zl.Alts = nil
+				cb := sbZoneCost(qs[best], minArea)
+				for i, c := range clean {
+					if i != best && len(sbZoneLQIssues(qs[i], lim)) == 0 && sbZoneCost(qs[i], minArea) <= cb+sbAltCostSlack {
+						zl.Alts = append(zl.Alts, c)
+					}
+				}
+			}
+			pick()
+			missesLimits := func() bool {
+				return zl == nil || len(zl.Findings) > 0 || len(sbZoneLQIssues(sbZoneQualityOf(d, zi, zl, m), lim)) > 0
+			}
+			// planner fallback: only where the grid left findings or missed
+			// a zone limit, and only inside the time limit
+			if missesLimits() && !timedOut && !overTime() {
+				runPlanner()
+				pick()
+			}
+			// layout watchdog retry: a drawing that misses a zone limit has
+			// the remaining variants tried too, within the time limit
+			if zl != nil && len(zl.Findings) == 0 && !timedOut && len(sbZoneLQIssues(sbZoneQualityOf(d, zi, zl, m), lim)) > 0 {
+				for i := range sbGridVariants {
+					if tried[i] {
+						continue
+					}
+					if overTime() {
+						timedOut = true
+						break
+					}
+					run(i)
+				}
+				pick()
+			}
+			if zl != nil && timedOut {
+				zl.TimedOut = true
+				for i := range sbGridVariants {
+					if !tried[i] {
+						zl.Skipped++
+					}
+				}
+			}
+			if zl != nil && perr != nil && zl.Hash == hg {
+				zl.Notes = append(zl.Notes, "planner: "+sbClip(perr.Error(), 900))
 			}
 			if zl == nil {
 				mu.Lock()
@@ -2382,35 +3164,117 @@ const (
 // the width of the PWR_FLAG row renderSbPage draws under the zones
 // (sbFlagRowW): it must fit on the paper too.
 func sbPackFresh(ids []string, layouts map[string]*sbZoneLayout, flagW float64) map[string]kicad.Pt {
+	// the smallest paper that holds the frames: packed in two dimensions
+	// (kicad_sch_build_pack.go), else in rows (kicadPackZones)
+	var items []sbPackItem
 	var zs []SchematicZoneResult
 	for _, id := range ids {
+		items = append(items, sbPackItem{ID: id, Box: layouts[id].Box})
 		fp := sbFootprint(layouts[id].Box, kicad.Pt{})
 		zs = append(zs, SchematicZoneResult{ID: id, Title: id, Frame: schFrameSpec{ID: id, Rect: boxToEE(fp)}})
 	}
+	alts := sbAltShapes(ids, layouts)
 	for _, p := range kicad.Papers {
-		page := kicad.Box{MinX: 10, MinY: 10, MaxX: p.W - 10, MaxY: p.H - 10}
-		title := kicad.Box{MinX: p.W - 10 - 112, MinY: p.H - 10 - 34, MaxX: p.W - 10, MaxY: p.H - 10}
-		frames, ok := kicadPackZones(zs, page, title, nil)
-		if !ok {
-			continue
+		if out, _, ok := sbPack2D(items, p.W, p.H, flagW); ok {
+			return out
 		}
-		if flagW > 0 {
-			var rects []kicad.Box
-			for _, f := range frames {
-				rects = append(rects, f.Rect)
+		if out := sbPackRows(zs, p.W, p.H, flagW); out != nil {
+			return out
+		}
+		// the zones' other clean drawings (narrowest / lowest / smallest
+		// shapes): a page whose content is just past a paper size fits it
+		// with one of them; the chosen drawings replace the zones' layouts
+		for _, set := range alts {
+			var it2 []sbPackItem
+			for _, id := range ids {
+				it2 = append(it2, sbPackItem{ID: id, Box: set[id].Box})
 			}
-			if !sbFlagRowFits(rects, flagW, p.W, p.H) {
-				continue
+			if out, _, ok := sbPack2D(it2, p.W, p.H, flagW); ok {
+				for _, id := range ids {
+					if set[id] != layouts[id] {
+						set[id].Alts = sbSwapAlts(layouts[id], set[id])
+						layouts[id] = set[id]
+					}
+				}
+				return out
 			}
 		}
-		out := map[string]kicad.Pt{}
-		for _, f := range frames {
-			// the frame's zone origin, snapped to the 2.54 mm grid
-			out[f.ID] = kicad.Pt{X: sbSnap(f.core.X), Y: sbSnap(f.core.Y)}
-		}
-		return out
 	}
 	return nil
+}
+
+// sbAltCostSlack is how much worse (sbZoneCost) an alternative drawing of a
+// zone may be and still be used to bring a page down a paper size.
+const sbAltCostSlack = 0.25
+
+// sbAltShapes are whole-page choices of the zones' drawings: each zone's
+// narrowest, lowest and smallest clean drawing (nil when no zone has one).
+func sbAltShapes(ids []string, layouts map[string]*sbZoneLayout) []map[string]*sbZoneLayout {
+	any := false
+	for _, id := range ids {
+		any = any || len(layouts[id].Alts) > 0
+	}
+	if !any {
+		return nil
+	}
+	var out []map[string]*sbZoneLayout
+	for _, key := range []func(b kicad.Box) float64{
+		func(b kicad.Box) float64 { return b.W() },
+		func(b kicad.Box) float64 { return b.H() },
+		func(b kicad.Box) float64 { return b.W() * b.H() },
+	} {
+		set := map[string]*sbZoneLayout{}
+		for _, id := range ids {
+			best := layouts[id]
+			for _, a := range layouts[id].Alts {
+				if key(a.Box) < key(best.Box)-1e-6 {
+					best = a
+				}
+			}
+			set[id] = best
+		}
+		out = append(out, set)
+	}
+	return out
+}
+
+// sbSwapAlts is the alternatives of a newly chosen drawing: the old choice
+// and the old alternatives but itself.
+func sbSwapAlts(old, chosen *sbZoneLayout) []*sbZoneLayout {
+	out := []*sbZoneLayout{old}
+	for _, a := range old.Alts {
+		if a != chosen {
+			out = append(out, a)
+		}
+	}
+	old.Alts = nil
+	return out
+}
+
+// sbPackRows is the row packer (kicadPackZones: reading order, left to
+// right in rows) on one pw × ph paper; nil when the frames do not fit.
+func sbPackRows(zs []SchematicZoneResult, pw, ph, flagW float64) map[string]kicad.Pt {
+	page := kicad.Box{MinX: 10, MinY: 10, MaxX: pw - 10, MaxY: ph - 10}
+	title := kicad.Box{MinX: pw - 10 - 112, MinY: ph - 10 - 34, MaxX: pw - 10, MaxY: ph - 10}
+	frames, ok := kicadPackZones(zs, page, title, nil)
+	if !ok {
+		return nil
+	}
+	if flagW > 0 {
+		var rects []kicad.Box
+		for _, f := range frames {
+			rects = append(rects, f.Rect)
+		}
+		if !sbFlagRowFits(rects, flagW, pw, ph) {
+			return nil
+		}
+	}
+	out := map[string]kicad.Pt{}
+	for _, f := range frames {
+		// the frame's zone origin, snapped to the 2.54 mm grid
+		out[f.ID] = kicad.Pt{X: sbSnap(f.core.X), Y: sbSnap(f.core.Y)}
+	}
+	return out
 }
 
 // sbFlagRowW is the width of a page's PWR_FLAG row (renderSbPage): its
@@ -2446,16 +3310,34 @@ func sbFlagRowFits(frames []kicad.Box, w, pw, ph float64) bool {
 	if w <= 0 {
 		return true
 	}
-	bottom := sbPageOrigin
-	for _, f := range frames {
-		bottom = math.Max(bottom, f.MaxY)
-	}
+	bottom := sbFlagRowBottom(frames, w)
 	r := sbFlagRowBox(bottom+1.27, w) // + the frames' grid snap at render
+	for _, f := range frames {
+		if sbOverlap(sbGrow(r, 1.27), f) {
+			return false
+		}
+	}
 	const border, gap = 10.0, 5.0
 	if r.MaxX > pw-border-gap || r.MaxY > ph-border-gap {
 		return false
 	}
 	return !(r.MaxX > pw-border-112-gap && r.MaxY > ph-border-34-gap)
+}
+
+// sbFlagRowBottom is the frame edge the PWR_FLAG row of width w is drawn
+// under: the lowest frame above the row's own width (its x span from the
+// page origin), not the lowest frame of the page. The row used to go under
+// every frame, so one tall zone anywhere on the page pushed it — and the
+// paper — down (field boards 2026-11).
+func sbFlagRowBottom(frames []kicad.Box, w float64) float64 {
+	bottom := sbPageOrigin
+	x0, x1 := sbPageOrigin-1-sbZoneGap, sbPageOrigin+w+sbZoneGap
+	for _, f := range frames {
+		if f.MaxX > x0 && f.MinX < x1 {
+			bottom = math.Max(bottom, f.MaxY)
+		}
+	}
+	return bottom
 }
 
 // sbFootprint is the zone's frame (content box + margin + title band) at
@@ -2543,6 +3425,15 @@ func packZones(ids []string, layouts map[string]*sbZoneLayout, keep map[string]k
 		x += w + sbZoneGap
 		rowH = math.Max(rowH, h)
 	}
+	if !fresh && sbKeptPageBlank(placed) {
+		// layout watchdog: the kept positions plus the new zones leave the
+		// sheet mostly blank (an edit added a zone beside the old ones on
+		// a paper size up): repack the page — its zones move, reported as
+		// moved — rather than ship a page the layout-quality gate fails
+		if f := sbPackFresh(ids, layouts, flagW); f != nil {
+			return f
+		}
+	}
 	if !fresh && (!sbFitsLargestPaper(placed) || !sbFlagRowFits(placed, flagW, kicad.Papers[len(kicad.Papers)-1].W, kicad.Papers[len(kicad.Papers)-1].H)) {
 		// incremental placement overflowed the largest sheet: repack the
 		// page from scratch rather than ship content that cannot fit
@@ -2551,6 +3442,30 @@ func packZones(ids []string, layouts map[string]*sbZoneLayout, keep map[string]k
 		}
 	}
 	return out
+}
+
+// sbKeptPageBlank reports whether zone frames would sit on a paper above A4
+// with less than the layout watchdog's fill (sbLayoutQualityLimits.PageFillMin):
+// the union of the frames over the drawing area of the smallest paper that
+// holds it.
+func sbKeptPageBlank(frames []kicad.Box) bool {
+	if len(frames) == 0 {
+		return false
+	}
+	u := frames[0]
+	for _, b := range frames[1:] {
+		u = sbBoxUnion(u, b)
+	}
+	for i, p := range kicad.Papers {
+		if u.MaxX <= p.W-10 && u.MaxY <= p.H-10 {
+			if i == 0 {
+				return false
+			}
+			fill := (u.MaxX - math.Min(u.MinX, sbPageOrigin)) * (u.MaxY - math.Min(u.MinY, sbPageOrigin)) / ((p.W - 20) * (p.H - 20))
+			return fill < sbLayoutQualityLimits.PageFillMin
+		}
+	}
+	return false
 }
 
 // sbFitsLargestPaper reports whether zone frames fit inside the drawing area

@@ -584,7 +584,7 @@
 
 | 命令 | 说明 | 文档 |
 |---|---|---|
-| `sim` | Circuit simulations computed from the schematic (DC power tree, analog SPICE) | [analog-sim.md](analog-sim.md), [design-flow.md](design-flow.md), [environment-setup.md](environment-setup.md), [pcb-auto.md](pcb-auto.md) +6 |
+| `sim` | Circuit simulations computed from the schematic (DC power tree, analog SPICE) | [SKILL.md](../SKILL.md), [analog-sim.md](analog-sim.md), [design-flow.md](design-flow.md), [environment-setup.md](environment-setup.md) +7 |
 | `sim analog` | SPICE (ngspice) simulation of the schematic's analog circuits + value optimisation plan | [SKILL.md](../SKILL.md), [analog-sim.md](analog-sim.md), [design-flow.md](design-flow.md), [design-intent.md](design-intent.md) +3 |
 | `sim analog compile-plan` | Compile an analog value-change plan into a pcbpilot apply playbook (after the user confirmed it) | [analog-sim.md](analog-sim.md), [design-flow.md](design-flow.md) |
 | `sim post-layout` | Post-layout (设计后) verification on the real copper: IR drop, via currents, current density, thermal maps, part temperatures | [SKILL.md](../SKILL.md), [board-manual.md](board-manual.md), [design-flow.md](design-flow.md), [design-report.md](design-report.md) +9 |

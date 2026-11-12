@@ -172,7 +172,7 @@ func TestSchBuildSmall(t *testing.T) {
 	}
 	sch, _ := os.ReadFile(filepath.Join(out, "small.kicad_sch"))
 	if !strings.Contains(string(sch), `"LED_ANODE"`) || !strings.Contains(string(sch), `(reference "R3")`) {
-		t.Error("edit not in the sheet")
+		t.Errorf("edit not in the sheet: ok=%v %+v", er.OK, er.Error)
 	}
 	// restore checkpoint 1
 	if _, err := restoreSbCheckpoint(out, 1); err != nil {
@@ -1055,7 +1055,9 @@ func TestSbPaginateSettlesWhenRelayoutShrinks(t *testing.T) {
 		case id == "q":
 			return box(100, 100)
 		}
-		return box(300, 300)
+		// big enough that no two-dimensional arrangement (sbPack2D) holds
+		// z1 at 700 × 500 and both of these on A0
+		return box(420, 420)
 	}
 	layouts := map[string]*sbZoneLayout{}
 	for _, z := range d.Zones {
@@ -1404,5 +1406,86 @@ func TestLoadSbSpecLibDirsRelativeToSpec(t *testing.T) {
 	want := []string{filepath.Join(root, "design", "lib"), filepath.Join(specDir, "mylib.pretty"), abs}
 	if strings.Join(s.LibDirs, "|") != strings.Join(want, "|") {
 		t.Fatalf("libDirs %v, want %v", s.LibDirs, want)
+	}
+}
+
+// TestSchBuildOlderEngineStateRepacksKeepsUUIDs: a rebuild into an --out whose
+// state.json was written by an older layout engine (no layoutEngine field)
+// keeps every symbol uuid (the PCB links) but does not keep the old zone
+// positions — the redrawn zones are packed again instead of being placed at
+// the old corners (field report 2026-11-12: in place 0.32 page fill vs 0.78
+// fresh, and the layout-quality watchdog rejected the build).
+func TestSchBuildOlderEngineStateRepacksKeepsUUIDs(t *testing.T) {
+	sbNeedKicad(t)
+	t.Setenv(kicad.EnvCacheDir, t.TempDir())
+	out := filepath.Join(t.TempDir(), "small")
+	spec, err := loadSbSpec("testdata/sch-build/small.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := sbOptions{OutDir: out, Jobs: 4, PlannerBudget: 20000, NoIntent: true}
+	res, err := runSchBuild(spec, opts, nil)
+	if err != nil || !res.OK {
+		t.Fatalf("first build: %v %+v", err, res.Error)
+	}
+	st, _ := loadSbState(out)
+	if st == nil || st.LayoutEngine != sbLayoutEngineVersion {
+		t.Fatalf("state layoutEngine = %q, want %q", st.LayoutEngine, sbLayoutEngineVersion)
+	}
+	uuids := map[string]string{}
+	for k, v := range st.SymUUIDs {
+		uuids[k] = v
+	}
+	// pretend an older engine wrote it: no version, zones parked far away
+	path := filepath.Join(sbMetaDir(out), "state.json")
+	var raw map[string]any
+	b, _ := os.ReadFile(path)
+	if err := json.Unmarshal(b, &raw); err != nil {
+		t.Fatal(err)
+	}
+	delete(raw, "layoutEngine")
+	for _, z := range raw["zones"].(map[string]any) {
+		z.(map[string]any)["t"] = map[string]any{"X": 609.6, "Y": 406.4} // on the 2.54 mm grid
+	}
+	nb, _ := json.Marshal(raw)
+	if err := os.WriteFile(path, nb, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if old, _ := loadSbState(out); old.LayoutEngine != "" {
+		t.Fatalf("a state without the field must load as the old engine, got %q", old.LayoutEngine)
+	}
+	res2, err := runSchBuild(spec, sbOptions{OutDir: out, Jobs: 4, PlannerBudget: 20000, NoIntent: true}, nil)
+	if err != nil || !res2.OK {
+		t.Fatalf("rebuild: %v %+v", err, res2.Error)
+	}
+	for _, z := range res2.Zones {
+		if len(z.Box) == 4 && z.Box[0] > 500 {
+			t.Errorf("zone %s kept the old engine's position (box %v); it must be packed again", z.ID, z.Box)
+		}
+	}
+	st2, _ := loadSbState(out)
+	if st2.LayoutEngine != sbLayoutEngineVersion {
+		t.Errorf("rebuilt state layoutEngine = %q", st2.LayoutEngine)
+	}
+	for k, v := range uuids {
+		if st2.SymUUIDs[k] != v {
+			t.Errorf("symbol %s uuid changed %s -> %s: the PCB link would break", k, v, st2.SymUUIDs[k])
+		}
+	}
+}
+
+// TestSbFragmentOf: the page id of a previous build maps back to its fragment
+// of the base page, so a rebuild starts pagination from the old split.
+func TestSbFragmentOf(t *testing.T) {
+	for _, c := range []struct {
+		pg, base string
+		want     int
+	}{
+		{"adc", "adc", 0}, {"adc-2", "adc", 1}, {"adc-3", "adc", 2}, {"adc-2_2", "adc", 1},
+		{"adc2", "adc", -1}, {"adc-x", "adc", -1}, {"adc-1", "adc", -1}, {"mon", "adc", -1}, {"adc", "", -1},
+	} {
+		if got := sbFragmentOf(c.pg, c.base); got != c.want {
+			t.Errorf("sbFragmentOf(%q, %q) = %d, want %d", c.pg, c.base, got, c.want)
+		}
 	}
 }
