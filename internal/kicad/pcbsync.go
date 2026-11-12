@@ -751,7 +751,7 @@ func BuildSyncPlan(in SyncInput) (*SyncPlan, error) {
 				}
 			}
 			for _, name := range sortedKeys(f.Fields) {
-				if _, ok := want[name]; ok || opts.FieldsIgnore[name] || mandatoryFPField(name) {
+				if _, ok := want[name]; ok || opts.FieldsIgnore[name] || mandatoryFPField(name) || strings.EqualFold(name, SymPackageField) {
 					continue
 				}
 				plan.Ops = append(plan.Ops, with(SyncOp{Op: "removeField", Field: name, From: f.Fields[name], Reason: "the symbol has no such field"}))
@@ -931,12 +931,18 @@ func mandatoryFPField(name string) bool {
 	return false
 }
 
+// SymPackageField is the schematic-only field sch-build shows beside a
+// symbol's value: the package read from its footprint. The footprint is the
+// package, so the field is neither copied to the board nor removed from it;
+// a schematic that gains it leaves a routed board in sync.
+const SymPackageField = "Package"
+
 // syncWantFields are the footprint fields a symbol gives: its fields but
 // Reference, Value and Footprint (the footprint itself), minus ignored ones.
 func syncWantFields(c *SyncComp, ignore map[string]bool) map[string]string {
 	out := map[string]string{}
 	for k, v := range c.Fields {
-		if k == "Reference" || k == "Value" || k == "Footprint" || ignore[k] {
+		if k == "Reference" || k == "Value" || k == "Footprint" || strings.EqualFold(k, SymPackageField) || ignore[k] {
 			continue
 		}
 		out[k] = v

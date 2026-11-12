@@ -17,7 +17,17 @@
    只放部分单元时在件上写 `"units": [1, 3]`（未列出的单元不画，其脚不能进网）；sch-read 只对**部分放置**的件
    输出 `units`，回读再构建不会多出单元。`set_value` / `set_field` / `remove_part` 作用于该位号的全部单元。
    公共（unit 0）电源脚的件不能只放部分单元：KiCad ERC 报 `missing_power_pin`（错误）。
-5. 一次构建失败时读 `error.code` / `error.fix`；spec 问题是一次全部列出的（例如 `PIN_NOT_ON_SYMBOL` 会给出
+5. **封装文字与 BOM 页（v0.12.9 起默认开）。** 每个符号旁显示封装（0603、0805、SOT-23、SOIC-8 …，由封装名推出，
+   `fields.Package` 覆盖）；每个原理图页后面有一张 BOM 图纸（Refs / Qty / Value / Package / MPN / LCSC /
+   Spec / requirements / Sourcing）。因此每个**不是普通阻容**的件**必须**写：
+   - `fields.Description`：这是什么（“Flyback transformer, custom wound”“LDO 3.3 V 600 mA”）；
+   - 关键额定值：`Power`、`Voltage`、`Current`、`Tolerance`；磁性件 `Inductance`、`TurnsRatio`、`Isat`、
+     `Isolation`、`Core`；其余字段原样以 `键: 值` 进规格列；
+   - `fields.Sourcing`：`LCSC`、指定厂家，或 `custom / self-sourced`（定制 / 自备件写清性能参数）。
+   阻容至少要有封装和值，功率、耐压、介质有要求时也写上。报告的 `bom.missing[]` 交付前**必须为空**（每条有 `fix`）。
+   导出：`pcbpilot kicad sch-pdf --project build/ --out build/schematic.pdf`（页、它的 BOM、下一页 …）。
+   关闭开关 `--no-package-text` / `--no-bom-pages` 只在用户要求时用。
+6. 一次构建失败时读 `error.code` / `error.fix`；spec 问题是一次全部列出的（例如 `PIN_NOT_ON_SYMBOL` 会给出
    符号真实的脚号脚名），一轮改完再跑。门禁失败时 `--out` 不会被改动。
 
 ## 流程
@@ -28,12 +38,27 @@ pcbpilot kicad sch-build --spec design.json --out build/ --requirements 需求.m
 pcbpilot kicad sch-read --project build/                                # 紧凑 JSON（含每件 bbox），代替读 .kicad_sch
 pcbpilot kicad sch-edit --project build/ --spec delta.json              # 之后的每个修改：一次调用一个增量
 pcbpilot kicad sch-checkpoint list --project build/                     # 回退：sch-checkpoint restore N
+pcbpilot kicad sch-pdf --project build/ --out build/schematic.pdf       # 交付 PDF：每页后面跟它的 BOM 页
 ```
 
 门禁（全部硬性）：KiCad 网表 == spec、ERC 无错误、`kicad sch-check` 质量检查、工程级规则（电源朝上/地朝下、
-去耦 ≤ 25.4 mm、无交叉、无四通结点、无悬空标签、无自动网名、层次一致、标题栏齐全）、连接 IR、intent derive；
+去耦 ≤ 25.4 mm、无交叉、无四通结点、无悬空标签、无自动网名、层次一致、标题栏齐全）、布局看门狗（下节）、连接 IR、intent derive；
 给了 `--requirements` 还有 review-panel 设计评审（跳过要签名豁免）。产物：工程文件、`connectivity.json`、
 `intent.json`、`erc.json`、`sch-review.json`、报告里每阶段计时。
+
+### 布局看门狗 `layout-quality`（v0.12.9 起，默认严格）
+
+图画得“对”但没法看（区内全靠网络标签、阻容不挨着所服务的引脚、整页大片空白）时构建**失败**，`--out` 不动：
+`ok:false`、`error.code = LAYOUT_QUALITY`、`error.issues[]` 逐区 / 逐页 / 整板给出 `metric`、`value`、`limit`、`fix`。
+指标与阈值（`docs/kicad/sch-build.md` 有来源）：区内信号连接 ≥ 8 时靠标签的比例 ≥ 0.90、信号小件 ≥ 8 时挂接比例
+< 0.20、单段导线 > 100 mm、A3 及以上且有 ≥ 2 个区的页填充率 < 0.33、整板靠标签比例 > 0.55 或挂接比例 < 0.60。
+
+收到 `LAYOUT_QUALITY` 时：**改 spec 再构建**——按 `fix` 给点名的阻容加 `"near": "U1:PA0"`（建议里已写好
+`REF near IC:PIN`），把点名的区按 IC 簇拆成多个区，把空白页上的区挪到相邻页（`zones[].page`）。不要用
+`--layout-quality advisory` 绕过：它只报告，必须在 `--waivers` 里有签名豁免
+`{"gate":"layout-quality","match":"--layout-quality advisory","reason":…,"by":…}`，否则 `LAYOUT_QUALITY_WAIVER_REQUIRED`。
+`--zone-timeout`（默认 60 s）限制每区布局时间；超时的区在门禁明细和 `data.slowZones` 里点名（用时、保留的画法、
+没试的画法数）。
 
 ### 设计评审门禁 `sch-review`（v0.12 起）
 

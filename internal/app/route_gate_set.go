@@ -30,6 +30,7 @@ var mandatoryRouteGates = []routeGateCategory{
 	{"via-current", []string{"via-current"}},
 	{"pour-layer-mismatch", []string{"pour-layer-mismatch"}},
 	{"post-layout-sim", []string{"post-layout-sim"}},
+	{"analog-sim", []string{"analog-sim"}},
 	{"route-complete", []string{"route-complete"}},
 	{"silkscreen", []string{"silkscreen"}},
 	{"board-manual", []string{"board-manual"}},
@@ -66,7 +67,8 @@ func missingGatesOf(set []routeGateCategory, gates []gateResult) []string {
 	return miss
 }
 
-// gateSetGate fails when any mandatory gate did not run on this path.
+// gateSetGate fails when any mandatory gate did not run on this path. Its
+// detail also names the gates that ran and did not pass.
 func gateSetGate(gates []gateResult) gateResult {
 	return gateSetGateOf(mandatoryRouteGates, gates)
 }
@@ -85,6 +87,25 @@ func gateSetGateOf(set []routeGateCategory, gates []gateResult) gateResult {
 	}
 	if len(miss) > 0 {
 		g.Detail += " — missing: " + strings.Join(miss, ", ")
+	}
+	// "ran" is all this gate judges; say what the gates that ran concluded,
+	// so the line cannot be read as "every mandatory gate passed".
+	var bad []string
+	for _, x := range gates {
+		switch {
+		case x.NotRun:
+			bad = append(bad, x.Gate+" (not run)")
+		case !x.Pass:
+			bad = append(bad, x.Gate+" (fail)")
+		case len(x.Waived) > 0:
+			bad = append(bad, x.Gate+" (waived)")
+		}
+	}
+	if len(bad) > 0 {
+		g.Detail += fmt.Sprintf("; %d did NOT pass: %s", len(bad), strings.Join(bad, ", "))
+		g.Info = append(g.Info, "gate-set only checks that every mandatory gate ran; see each gate for its result")
+	} else {
+		g.Detail += ", all passed"
 	}
 	return g
 }

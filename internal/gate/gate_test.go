@@ -3,7 +3,7 @@ package gate
 import "testing"
 
 func TestStatusOKOnlyPass(t *testing.T) {
-	for _, s := range []Status{Fail, CannotCheck, Warn, Skip, "", "PASS ", "bogus"} {
+	for _, s := range []Status{Fail, CannotCheck, Warn, Skip, Waived, "", "PASS ", "bogus"} {
 		if s.OK() {
 			t.Errorf("%q.OK() = true", s)
 		}
@@ -15,7 +15,7 @@ func TestStatusOKOnlyPass(t *testing.T) {
 
 func TestParse(t *testing.T) {
 	cases := map[string]Status{"pass": Pass, " FAIL ": Fail, "cannot-check": CannotCheck, "warn": Warn,
-		"skip": Skip, "": CannotCheck, "ok": CannotCheck, "passed": CannotCheck}
+		"skip": Skip, "waived": Waived, "": CannotCheck, "ok": CannotCheck, "passed": CannotCheck}
 	for in, want := range cases {
 		if got := Parse(in); got != want {
 			t.Errorf("Parse(%q) = %q, want %q", in, got, want)
@@ -44,6 +44,9 @@ func TestAggregateTruthTable(t *testing.T) {
 		{"advisory skip passes", []Result{req(Pass), adv(Skip)}, Pass},
 		{"cannot-check beats skip", []Result{req(Skip), req(CannotCheck)}, CannotCheck},
 		{"unknown status", []Result{req(Pass), req("maybe")}, CannotCheck},
+		{"waived is never pass", []Result{req(Pass), req(Waived)}, Waived},
+		{"skip beats waived", []Result{req(Waived), req(Skip)}, Skip},
+		{"fail beats waived", []Result{req(Waived), req(Fail)}, Fail},
 	}
 	for _, c := range cases {
 		got := Aggregate(c.in...)
@@ -57,7 +60,7 @@ func TestAggregateTruthTable(t *testing.T) {
 }
 
 func TestExitCode(t *testing.T) {
-	cases := map[Status]int{Pass: 0, Fail: 6, CannotCheck: 5, Skip: 5, Warn: 5, "x": 5}
+	cases := map[Status]int{Pass: 0, Waived: 0, Fail: 6, CannotCheck: 5, Skip: 5, Warn: 5, "x": 5}
 	for s, want := range cases {
 		if got := s.ExitCode(); got != want {
 			t.Errorf("%q.ExitCode() = %d, want %d", s, got, want)

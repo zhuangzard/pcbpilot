@@ -4,7 +4,7 @@ description: "通过本地 pcbpilot CLI、daemon 与连接器做数据驱动电�
 license: MIT
 metadata:
   author: "zhuangzard (pcbpilot); original easyeda-agent by zhoushoujianwork"
-  version: "0.12.8"
+  version: "0.12.9"
   homepage: "https://github.com/zhuangzard/pcbpilot"
 ---
 
@@ -91,6 +91,22 @@ kicad-cli/pcbnew）。找到相近样例，理解其电气或机械理由，替�
 | 设计意图；布线后真实铜皮仿真；设计报告 / 板卡说明书 | `intent derive`；`pcb dump --include-copper` → `sim post-layout`；`report design` / `report manual` | [design-intent.md](references/design-intent.md)、[post-layout-sim.md](references/post-layout-sim.md)、[design-report.md](references/design-report.md)、[board-manual.md](references/board-manual.md)；聚焦 Skill `pcbpilot-sim-report` |
 | 选型、标准电路、库器件与建库；`block-apply` 首个 place 就 “connector did not respond” | `blocks search`、[`parts-select.py`](scripts/parts-select.py)、[`bom-enrich.py`](scripts/bom-enrich.py)、[`blocks-pin-audit.py`](scripts/blocks-pin-audit.py)；[`parts-relocalize.py`](scripts/parts-relocalize.py) 重解析 `deviceUuid` | [part-selection.md](references/part-selection.md#站点差异deviceuuid-必须按当前版本重解析)、[library-authoring.md](references/library-authoring.md)、[standard-parts.json](references/standard-parts.json)；聚焦 Skill `pcbpilot-library` |
 | action 或队列字段、未知官方接口；离线读 `.eprj3`、上游 API 变化；工程打开/导出/导入、MCP `project.create` | `actions` / `api search`；`project inspect-eprj3` / `api upstream-diff`；`project find` / `project import` | [actions.md](references/actions.md)、[offline-format-api-watch.md](references/offline-format-api-watch.md)、[project-import.md](references/project-import.md) |
+
+## 完成定义（硬规则）
+
+一块板只有同时满足下列各条才可以说“完成 / 通过 / 可交付”；缺任何一条都报“**未完成**”并逐条列出缺项，不写“通过”：
+
+1. 每个必需门禁的 `status` 都是 `pass`：`kicad route` / `pcb auto route` 的 `summary.json` 里 `complete: true`、
+   `incomplete[]` 为空，末行是 `COMPLETE`。`waived`、`skip`（NOT-RUN）、`cannot-check`、`fail` 都不是通过；
+   `pass: true` 或退出码 0 只表示没有门禁失败，`gate-set` 通过只表示门禁都跑了，都不等于完成。
+2. `signoff` 通过。
+3. `sim power`、`sim post-layout` 在**同一设计版本**上跑过；检出模拟模块时 `sim analog`（ngspice）也要跑过——
+   `analog-sim` 门禁为 NOT-RUN、或报 ngspice 未安装（先 `pcbpilot sim tools check`）都算缺项。
+4. 设计报告的 verdict 不是 `FAIL`。
+5. **Agent 绝不自己写或签 waiver**，也不“代用户”签（`by` 写成 Agent 的 waiver 不是评审，工具会警告）；waiver 只来自
+   用户本人。需要豁免时停下，把缺项报给用户，等用户决定。
+
+`kicad sch-build` 同理：`ok: true` 只表示构建成功，`complete: false` 时把 `incomplete[]` 原样报给用户。
 
 ## 不可省略的事实
 

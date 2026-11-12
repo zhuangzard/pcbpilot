@@ -58,7 +58,7 @@ func TestRouteGateSetContract(t *testing.T) {
 		gates = append(gates, tailGates(snap, boardPath, "", qo, "contract", "", map[string]any{}, io.Discard)...)
 		// The host / run gates every path adds around them (checked in the
 		// sources below).
-		for _, n := range []string{"design-review", "native-drc", "pad-net-diff", "intent-rules", "design-report", "signoff"} {
+		for _, n := range []string{"design-review", "native-drc", "pad-net-diff", "intent-rules", "analog-sim", "design-report", "signoff"} {
 			gates = append(gates, gateResult{Gate: n})
 		}
 		if miss := missingRouteGates(gates); len(miss) != 0 {
@@ -77,8 +77,8 @@ func TestRouteGateSetContract(t *testing.T) {
 
 	// 3. Each route command wires the run gates and ends with gate-set.
 	for file, want := range map[string][]string{
-		"cmd_kicad_route.go":    {`r.review("design"`, `r.review("layout"`, "kicadDRCGate(", "padNetDiffGate(", "kicadIntentRulesGate(", "snapshotIntentGates(", "tailGates(", "r.designReport(", "signoffGate(", "kicadGateSetGate(r.gates)"},
-		"cmd_pcb_auto_route.go": {`designReviewGate("design"`, `designReviewGate("layout"`, "runQualityGates(", "autoRouteDesignReport(", "signoffGate(", "gateSetGate(gates)", `o.routerCmd == "internal"`},
+		"cmd_kicad_route.go":    {`r.review("design"`, `r.review("layout"`, "kicadDRCGate(", "padNetDiffGate(", "kicadIntentRulesGate(", "snapshotIntentGates(", "tailGates(", "analogSimGate(", "r.designReport(", "signoffGate(", "kicadGateSetGate(r.gates)"},
+		"cmd_pcb_auto_route.go": {`designReviewGate("design"`, `designReviewGate("layout"`, "runQualityGates(", "analogSimGate(", "autoRouteDesignReport(", "signoffGate(", "gateSetGate(gates)", `o.routerCmd == "internal"`},
 		"pcb_route_gates.go":    {`Gate: "native-drc"`, `Gate: "pad-net-diff"`, `Gate: "intent-rules"`, "postRouteGates(", "tailGates(", "boardRouteCompleteGate("},
 	} {
 		src, err := os.ReadFile(file)

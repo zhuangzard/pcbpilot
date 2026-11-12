@@ -35,6 +35,8 @@ import (
 
 type kicadRouteOpts struct {
 	pcb, intent, sim, sch, outDir, waivers, fastrouteBin, widthBasis string
+	// analog: a sim analog document (analog-sim gate, report section).
+	analog string
 	// router: fastroute | tracemaker | freerouting | both | all (see kicad_route_backends.go).
 	router      string
 	tm          tracemakerOpts
@@ -122,12 +124,22 @@ calculations and gates as 'pcb auto route' + 'pcb gate':
     board-manual) fails, planWidenIR + re-gate, at most 2 rounds; a sim
     open on a net KiCad's DRC shows connected is marked SIM/KICAD MISMATCH
     (summary.simKicadMismatch; the gate still fails) and does not stop it;
- 7. report design → <out-dir>/report (gate design-report);
+ 7. analog-sim: a design with analog blocks needs an ngspice simulation of
+    them — the intent's analog summary (intent derive) or --analog
+    analog.json; blocks found with ngspice missing (pcbpilot sim tools
+    check), nothing simulated or status FAIL fail it; no analog evidence
+    at all is reported as not run;
+    report design → <out-dir>/report (gate design-report; a report whose
+    own verdict is FAIL fails the gate);
  8. release review (review-panel, stage layout) with the report and
     summary.json added to the evidence.
 
-Exits non-zero when any gate fails; --waivers takes signed {gate,match,reason,by}
-(--no-manual and --no-review need one). The input board is never written.`,
+Exits non-zero when any gate fails; --waivers takes {gate,match,reason,by}
+signed by the user (--no-manual and --no-review need one). A waived gate has
+status waived, never pass: summary.json then has pass true (exit 0) and
+complete false with incomplete[] naming every waived or not-run gate, and
+the last stderr line says the run is NOT release-ready. A board is finished
+only when complete is true. The input board is never written.`,
 		Args: cobra.NoArgs,
 		Example: `  pcbpilot kicad route --pcb board-b-v5a.kicad_pcb --intent intent.json --sim sim.json \
       --requirements REQUIREMENTS.md --out-dir route/ --clearance-mil 5.98 --track-mil 10 --edge-mil 30`,
@@ -201,7 +213,8 @@ Exits non-zero when any gate fails; --waivers takes signed {gate,match,reason,by
 	f.StringVar(&o.sim, "sim", "", "sim.json (sim power): post-layout simulation (post-layout-sim gate, segment width basis, IR closure); missing = that gate fails")
 	f.StringVar(&o.sch, "sch", "", "root .kicad_sch: pad-net-diff gate against its netlist (kicad-cli sch export netlist) and the review evidence")
 	f.StringVar(&o.outDir, "out-dir", "kicad-route", "output directory (routed.kicad_pcb, board-final.json, summary.json, drc*.json, report/, manual/, review-*/)")
-	f.StringVar(&o.waivers, "waivers", "", "JSON list of signed waivers [{gate,match,reason,by}]")
+	f.StringVar(&o.waivers, "waivers", "", "JSON list of waivers the user signed [{gate,match,reason,by}]; a waived gate is reported as waived (not pass) and the run as not complete")
+	f.StringVar(&o.analog, "analog", "", "analog.json (sim analog) of this schematic: analog-sim gate and the report's analog section; default: the intent's own analog summary (intent derive)")
 	f.StringVar(&o.widthBasis, "width-basis", "", "intent-widths basis: segment (default with --sim) | net (default without)")
 	f.BoolVar(&o.ripUp, "rip-up", false, "remove unlocked tracks and vias before routing (route from scratch)")
 	f.StringVar(&o.router, "router", routerFastroute, "routing backend: fastroute | tracemaker | freerouting | both (fastroute + tracemaker) | all (the three). Several run at once; the first result that is complete with no new DRC error is gated first, a result that fails any gate hands over to the next — no gate is relaxed; the outputs describe the first result that passes every gate, else the best judged one, fewest unrouted")
@@ -372,6 +385,7 @@ func runKicadRoute(o kicadRouteOpts, stdout, stderr io.Writer) error {
 	if err := checkReviewOpts(reviewRunOpts{requirements: o.requirements, noReview: o.noReview}, waivers); err != nil {
 		return err
 	}
+	waivers = withSkipWaivers(waivers, o.noManual, o.noReview)
 	in, err := loadDesignIntent(o.intent)
 	if err != nil {
 		return fmt.Errorf("pre-route gate: %w", err)
@@ -399,6 +413,11 @@ func runKicadRoute(o kicadRouteOpts, stdout, stderr io.Writer) error {
 	pass := r.reg.Passed() && err == nil
 	r.summary["gates"] = r.reg.Records()
 	r.summary["pass"] = pass
+	// pass is the exit code's verdict (no gate failed; a signed waiver
+	// counts). complete is the release verdict: every gate ran and passed
+	// with no waiver.
+	done := recordsCompleteness(r.reg.Records(), waivers, err)
+	done.write(r.summary)
 	totalS := time.Since(start).Round(time.Second).Seconds()
 	r.summary["seconds"] = totalS
 	// D4: stage timing rollups.
@@ -408,6 +427,7 @@ func runKicadRoute(o kicadRouteOpts, stdout, stderr io.Writer) error {
 	}
 	_ = writeJSONFile(filepath.Join(o.outDir, "summary.json"), r.summary)
 	_ = writeJSON(stdout, r.summary)
+	done.print(stderr, "kicad route")
 	if err != nil {
 		return err
 	}
@@ -446,6 +466,27 @@ func timingRollup(times []stageTime, totalS float64) map[string]any {
 		"postProcessingSeconds": math.Round(postS*10) / 10,
 		"totalSeconds":          totalS,
 	}
+}
+
+// withSkipWaivers extends the signed waiver of a skipped stage (--no-manual,
+// --no-review) to what that skip necessarily leaves missing in the later
+// gates: the report's manual input, the sign-off's manual and review record.
+// Without it a waived skip still failed the run on its own consequences.
+// The derived entries carry the same reason and signer, so every gate they
+// touch is reported waived (never pass) and the run stays incomplete.
+func withSkipWaivers(ws []gateWaiver, noManual, noReview bool) []gateWaiver {
+	out := append([]gateWaiver(nil), ws...)
+	for _, w := range ws {
+		if noManual && w.Gate == "board-manual" && w.Match != "" && strings.Contains(noManualMatch, w.Match) {
+			out = append(out,
+				gateWaiver{Gate: "design-report", Match: "report input missing: manual", Reason: w.Reason, By: w.By},
+				gateWaiver{Gate: "signoff-artifacts", Match: "board manual HTML missing", Reason: w.Reason, By: w.By})
+		}
+		if noReview && w.Gate == "design-review" && w.Match != "" && strings.Contains(noReviewMatch, w.Match) {
+			out = append(out, gateWaiver{Gate: "signoff-review", Match: "review.json unreadable", Reason: w.Reason, By: w.By})
+		}
+	}
+	return out
 }
 
 func hasWaiver(ws []gateWaiver, gate, match string) bool {
@@ -765,7 +806,9 @@ func (r *kicadRun) run() error {
 			r.summary["routeInstrumentation"] = ri
 		}
 	}
-	// 7. Design report, 8. release review.
+	// 7. Analog simulation coverage, design report, 8. release review.
+	r.add(analogSimGate(r.in, o.analog))
+	pass = pass && r.gates[len(r.gates)-1].Pass
 	r.add(r.designReport(pass))
 	r.lap("design report")
 	r.summary["gates"] = r.gates
@@ -1692,7 +1735,7 @@ func (r *kicadRun) designReport(pass bool) gateResult {
 	g := gateResult{Gate: "design-report"}
 	ro := designReportOpts{outDir: filepath.Join(o.outDir, "report"), version: "auto", project: o.projectName, customer: o.customer,
 		host: "KiCad", intent: o.intent, sim: o.sim, board: filepath.Join(o.outDir, "board-final.json"),
-		drc: filepath.Join(o.outDir, "drc-flat.json"), maxImageBytes: 0, projectConfig: o.projectConfig}
+		drc: filepath.Join(o.outDir, "drc-flat.json"), maxImageBytes: 0, projectConfig: o.projectConfig, analog: o.analog}
 	if v, ok := r.summary["kicadVersion"].(string); ok {
 		ro.host += " " + v
 	}
@@ -1718,11 +1761,15 @@ func (r *kicadRun) designReport(pass bool) gateResult {
 		return g
 	}
 	r.summary["report"] = map[string]any{"dir": dir, "html": filepath.Join(dir, "report.html"), "json": filepath.Join(dir, "report.json"), "verdict": rep.Verdict.Status, "version": rep.VersionLabel}
-	g.Pass = len(missing) == 0
-	g.Detail = fmt.Sprintf("%s published in %s (report verdict %s, run gates %s)", rep.VersionLabel, dir, rep.Verdict.Status, map[bool]string{true: "pass", false: "fail"}[pass])
+	// The report is published before the release review and the sign-off
+	// (both read it), so it cannot wait for them; but its own verdict is
+	// known here, and a report that says FAIL is not a passed gate.
+	g.Detail = fmt.Sprintf("%s published in %s (report verdict %s; gates before the report: %s)", rep.VersionLabel, dir, rep.Verdict.Status, map[bool]string{true: "pass", false: "fail"}[pass])
 	for _, m := range missing {
 		g.Items = append(g.Items, "report input missing: "+m)
 	}
+	g.Items = append(g.Items, reportVerdictItems(rep.Verdict.Status, rep.Verdict.Reasons)...)
+	g.Pass = len(g.Items) == 0
 	return g
 }
 

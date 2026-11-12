@@ -4,7 +4,7 @@ description: "用 pcbpilot 离线完成 KiCad 板子的板级设置、布局、�
 license: MIT
 metadata:
   author: "zhuangzard (pcbpilot); original easyeda-agent by zhoushoujianwork"
-  version: "0.12.8"
+  version: "0.12.9"
   homepage: "https://github.com/zhuangzard/pcbpilot"
 ---
 
@@ -31,6 +31,10 @@ KiCad 板级工作（`.kicad_pcb`）：从已同步的板子到布好、过门�
 4. 不为过门禁放宽规则、压低 `--edge-mil`、加 KiCad exclusion；waiver 只来自用户签名，Agent 不替用户写。
 5. 结论用 [evidence-and-verdicts.md](../pcbpilot/references/evidence-and-verdicts.md) 的词汇：DRC 报告读不出来是
    `INCOMPLETE`（cannot check），永远不是 `PASS`。
+6. **完成定义**：只有 `summary.json` 的 `complete: true`（每个必需门禁 `status: pass`，没有 `waived` / NOT-RUN）、
+   `signoff` 通过、`sim power` + `sim post-layout`（有模拟模块时加 `sim analog`，即 `analog-sim` 门禁）在同一设计版本上
+   跑过、设计报告 verdict 不是 `FAIL`，才说“完成”。否则报“**未完成**”并照抄 `incomplete[]`，不写“通过”。Agent 不写、
+   不签、不代签 waiver；全文见 [pcbpilot 的完成定义](../pcbpilot/SKILL.md#完成定义硬规则)。
 
 ## 目前没有自动化、要用户在 KiCad 里做的事
 
@@ -144,7 +148,13 @@ post-layout 仿真 → 签核 → 保存（复制回工程）。板框、层叠�
 
 ## 读结果与报告
 
-- 每个门禁逐条报：`gate`、PASS/FAIL、`detail`、`info`；退出码 6 = 至少一个门禁失败，5 = 没有失败但有门禁 cannot-check（`status` 字段；via-audit、router-vias、kicad-drc 没跑成，或 `--silk auto` 因未布完推迟丝印）。`kicad-drc` 只计 error 级，
+- 先看 `summary.json` 顶层：`pass`（退出码的结论，没有门禁失败）与 `complete`（发布结论）是两回事。`complete: false` 时
+  `incomplete[]` 列出每个 waived / 未跑 / 未通过的门禁，stderr 末行是 `kicad route: NOT release-ready — …`；`waivers[]`
+  记下每条被用到的 waiver 及签名人（`agentSigned: true` = 签名人是 Agent，不算评审）。
+- `analog-sim` 门禁：intent 里有模拟模块（`intent derive` 的 `analog` 汇总，或 `--analog analog.json`）而 ngspice 未装、
+  一个都没仿、或状态 FAIL → 失败；没有任何模拟证据 → NOT-RUN（不改退出码，但计入 `incomplete[]`）。
+  `design-report` 门禁在报告自身 verdict 为 FAIL 时失败。
+- 每个门禁逐条报：`gate`、`status`（pass / waived / skip / cannot-check / fail，waived 不是 pass）、`detail`、`info`；退出码 6 = 至少一个门禁失败，5 = 没有失败但有门禁 cannot-check（`status` 字段；via-audit、router-vias、kicad-drc 没跑成，或 `--silk auto` 因未布完推迟丝印）。`kicad-drc` 只计 error 级，
   警告在 `summary.drc.warnings`，评审仍要列出；`info` 标出**输入板原本就有**的违规（布局/封装问题，不是布线造成的）。
   它看不到 KiCad 的排除项和设成 `ignore` 的规则：按 [§6.4](../pcbpilot/references/evidence-and-verdicts.md#64-drc-排除项与被关掉的规则) 另查，触及短路/间距/未连接即 FAIL。
 - `kicad-drc` 的 detail 以 `cannot check:` 开头（kicad-cli 没写报告、报告截断或格式不对），或 `summary.inputDrc.error`

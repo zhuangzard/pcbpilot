@@ -40,6 +40,14 @@ type gateResult struct {
 	// Unchecked: which Items could not be judged, the others being failures.
 	// A gate that sets it is waived per item: see applyWaivers.
 	Unchecked []string `json:"unchecked,omitempty"`
+	// NotRun: the check did not run and nothing says it had to fail (Pass is
+	// true so the run goes on). Never a verified pass: the gate is reported
+	// as not run and the run as not complete (runCompleteness).
+	NotRun bool `json:"notRun,omitempty"`
+	// Status is the registry status of the gate in a written summary
+	// (pass, fail, waived, skip, cannot-check): Pass alone is true for a
+	// waived or not-run gate, which is not a verified pass.
+	Status string `json:"status,omitempty"`
 }
 
 // gateWaiver is a human decision to accept one known failure: every failing

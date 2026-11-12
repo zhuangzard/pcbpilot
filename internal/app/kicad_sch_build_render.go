@@ -46,6 +46,15 @@ type sbState struct {
 	// Reports are the report files sch-build published into --out
 	// (erc.json, connectivity.json, intent.*, render/*.svg).
 	Reports []string `json:"reports,omitempty"`
+	// LayoutEngine is sbLayoutEngineVersion of the build that wrote the
+	// zone positions ("" = before the field existed = "v1"). A different
+	// engine draws the zones differently, so their old page positions are
+	// not kept (the pages are re-packed); uuids are kept regardless.
+	LayoutEngine string `json:"layoutEngine,omitempty"`
+	// NoPackageText / NoBomPages: the build's --no-package-text /
+	// --no-bom-pages, so kicad sch-edit keeps what the build chose.
+	NoPackageText bool `json:"noPackageText,omitempty"`
+	NoBomPages    bool `json:"noBomPages,omitempty"`
 }
 
 type sbZoneState struct {
@@ -56,7 +65,7 @@ type sbZoneState struct {
 
 func newSbState() *sbState {
 	return &sbState{Version: 1, PageUUIDs: map[string]string{}, SheetSymUUIDs: map[string]string{},
-		SymUUIDs: map[string]string{}, Zones: map[string]*sbZoneState{}}
+		SymUUIDs: map[string]string{}, Zones: map[string]*sbZoneState{}, LayoutEngine: sbLayoutEngineVersion}
 }
 
 func sbMetaDir(out string) string { return filepath.Join(out, ".pcbpilot", "sch-build") }
@@ -67,6 +76,7 @@ func loadSbState(out string) (*sbState, *sbSpec) {
 		return nil, nil
 	}
 	st := newSbState()
+	st.LayoutEngine = "" // a state written before the field existed is engine "v1", not the current one
 	if json.Unmarshal(b, st) != nil {
 		return nil, nil
 	}
@@ -101,7 +111,7 @@ func (st *sbState) uuid(m map[string]string, key string) string {
 
 type sbGate struct {
 	Name   string `json:"name"`
-	Status string `json:"status"` // pass | warn | fail | skip
+	Status string `json:"status"` // pass | warn | fail | skip | waived
 	Detail string `json:"detail,omitempty"`
 	Data   any    `json:"data,omitempty"`
 }
@@ -111,6 +121,7 @@ type sbZoneReport struct {
 	Page     string    `json:"page"`
 	Parts    []string  `json:"parts"`
 	Method   string    `json:"method"`
+	Variant  string    `json:"variant,omitempty"` // grid variant (compact | legacy …)
 	Reused   bool      `json:"reused,omitempty"`
 	Moved    bool      `json:"moved,omitempty"`
 	Box      []float64 `json:"boxMm"` // absolute minX,minY,maxX,maxY
@@ -120,7 +131,14 @@ type sbZoneReport struct {
 }
 
 type sbReport struct {
-	OK         bool              `json:"ok"`
+	// OK: the build succeeded and no gate failed. It does not say the
+	// schematic is finished: see Complete.
+	OK bool `json:"ok"`
+	// Complete: OK and every gate is pass — none skipped, waived or left
+	// at warn; Incomplete names the ones that are not ("<gate> <status>:
+	// <detail>"). Set by finishSbRun.
+	Complete   bool              `json:"complete"`
+	Incomplete []string          `json:"incomplete"`
 	Mode       string            `json:"mode"`
 	Name       string            `json:"name"`
 	Project    string            `json:"project,omitempty"`
@@ -143,9 +161,12 @@ type sbReport struct {
 	External   *sbExternalEdits  `json:"externalEdits,omitempty"`
 	Plan       *sbPlan           `json:"plan,omitempty"`
 	PartBoxes  map[string]sbBox  `json:"partBoxes,omitempty"`
-	Error      *sbFailure        `json:"error,omitempty"`
-	Undo       string            `json:"undo,omitempty"`
-	Next       []string          `json:"next,omitempty"`
+	// Bom: the BOM sheets after the schematic pages and what the BOM lacks
+	// (kicad_sch_build_bom.go); Bom.Missing must be empty before hand-over.
+	Bom   *sbBomReport `json:"bom,omitempty"`
+	Error *sbFailure   `json:"error,omitempty"`
+	Undo  string       `json:"undo,omitempty"`
+	Next  []string     `json:"next,omitempty"`
 }
 
 // sbBox is a part's drawn extent on its sheet (mm).
@@ -212,6 +233,9 @@ type sbFailure struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
 	Fix     string `json:"fix"`
+	// Issues: LAYOUT_QUALITY's missed limits, one per zone / page / board
+	// metric with its value, limit and fix
+	Issues []sbLQIssue `json:"issues,omitempty"`
 }
 
 // sbLock serializes writers of one project (O_EXCL lock file; a lock older
@@ -308,6 +332,13 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 			st.Files = loaded.Files // still owned: replaced or removed on commit
 		}
 	}
+	// zone positions of an older layout engine are not kept: the zones are
+	// redrawn (their cache key carries the engine version) and placing the
+	// new, usually smaller drawings at the old top-left corners left pages
+	// with the old paper size and a fill ratio the layout-quality watchdog
+	// rejects (field report 2026-11-12, field board B page 0.32 in place vs
+	// 0.78 fresh). The uuids (the PCB links) stay.
+	keepPositions := st.LayoutEngine == sbLayoutEngineVersion
 	if !o.DryRun {
 		unlock, err := sbLock(out)
 		if err != nil {
@@ -351,6 +382,12 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 	if _, err := reviewMode(o.SchReview); err != nil {
 		return rep, err
 	}
+	lqMode, lqErr := sbLayoutQualityMode(o.LayoutQuality, waivers)
+	if lqErr != nil {
+		rep.OK = false
+		rep.Error = lqErr
+		return rep, nil
+	}
 	if len(o.Requirements) > 0 && o.NoReview && !hasWaiver(waivers, "design-review", noReviewMatch) {
 		rep.OK = false
 		rep.Error = &sbFailure{Code: "REVIEW_WAIVER_REQUIRED", Message: "--no-review with --requirements skips the schematic design review",
@@ -358,13 +395,16 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 		return rep, nil
 	}
 
-	d, rs, err := buildDesign(spec, sbResolveOpts{OutDir: out, Offline: o.Offline, Jobs: o.Jobs, PartsPath: o.PartsPath})
+	d, rs, err := buildDesign(spec, sbResolveOpts{OutDir: out, Offline: o.Offline, Jobs: o.Jobs, PartsPath: o.PartsPath, NoPackageText: o.NoPackageText})
 	rep.Resolve = rs
 	if err != nil {
 		return rep, err
 	}
 	tm.mark("resolve")
 	rep.Warnings = append(rep.Warnings, d.Warnings...)
+	var bomWarn []string
+	rep.Bom, bomWarn = sbBomSummary(d, o)
+	rep.Warnings = append(rep.Warnings, bomWarn...)
 	// EG-22: a complete title block (defaults are reported)
 	var defs []string
 	if spec.Title.Title == "" {
@@ -413,7 +453,7 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 			reuse[id] = &l
 		}
 	}
-	lo := sbLayoutOpts{NoPlanner: o.NoPlanner, Budget: o.PlannerBudget, Jobs: o.Jobs, Timeout: o.PlannerTimeout, Stats: &sbLayoutStats{}}
+	lo := sbLayoutOpts{NoPlanner: o.NoPlanner, Budget: o.PlannerBudget, Jobs: o.Jobs, Timeout: o.PlannerTimeout, Stats: &sbLayoutStats{}, ZoneTimeout: o.ZoneTimeout}
 	layoutStart := time.Now()
 	if o.PlannerTimeout > 0 { // one cutoff for the whole layout stage, relayouts included
 		lo.Deadline = layoutStart.Add(o.PlannerTimeout)
@@ -439,6 +479,14 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 	// (kicad_sch_build_paginate.go); the hierarchy follows from NetPages
 	var pageNotes []string
 	var perr error
+	if !o.Fresh && loaded != nil {
+		d.PriorZonePage = map[string]string{}
+		for id, zs := range loaded.Zones {
+			if zs != nil && zs.Page != "" {
+				d.PriorZonePage[id] = zs.Page
+			}
+		}
+	}
 	zis, pageNotes, perr = sbPaginateAndRelayout(d, zis, layouts, reuse, lo, name+".kicad_sch")
 	rep.Warnings = append(rep.Warnings, pageNotes...)
 	if perr != nil {
@@ -472,7 +520,7 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 				continue
 			}
 			ids = append(ids, zi.Zone.ID)
-			if zs := st.Zones[zi.Zone.ID]; zs != nil && zs.Page == pg.ID && !o.Fresh {
+			if zs := st.Zones[zi.Zone.ID]; zs != nil && zs.Page == pg.ID && !o.Fresh && keepPositions {
 				keep[zi.Zone.ID] = zs.T
 			}
 			if at, ok := ec.zoneAt()[zi.Zone.ID]; ok { // sch-edit move_zone --at: frame top-left
@@ -496,7 +544,7 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 		for _, p := range zi.Parts {
 			refs = append(refs, p.Ref)
 		}
-		zr := sbZoneReport{ID: zi.Zone.ID, Page: zi.Zone.Page, Parts: refs, Method: zl.Method, Ms: zl.Ms, Notes: zl.Notes, Findings: zl.Findings,
+		zr := sbZoneReport{ID: zi.Zone.ID, Page: zi.Zone.Page, Parts: refs, Method: zl.Method, Variant: zl.Variant, Ms: zl.Ms, Notes: zl.Notes, Findings: zl.Findings,
 			Box:   []float64{sbRound2(zl.Box.MinX + t.X), sbRound2(zl.Box.MinY + t.Y), sbRound2(zl.Box.MaxX + t.X), sbRound2(zl.Box.MaxY + t.Y)},
 			Moved: moved[zi.Zone.ID]}
 		if r := reuse[zi.Zone.ID]; r != nil && r == zl {
@@ -507,6 +555,9 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 
 	if o.DryRun {
 		rep.Plan = sbMakePlan(d, zis, layouts, trans)
+		if !o.NoBomPages {
+			rep.Plan.Files = append(rep.Plan.Files, "<page>-bom.kicad_sch (one BOM sheet after every page)")
+		}
 		tm.mark("plan")
 		rep.Timings, rep.TotalMs = tm.Steps, tm.total()
 		return rep, nil
@@ -518,7 +569,11 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 		return rep, err
 	}
 	defer os.RemoveAll(stage)
-	files, sheetTexts, err := writeSbProject(stage, d, st, zis, layouts, trans)
+	var bomSheets *sbBomReport
+	if !o.NoBomPages {
+		bomSheets = rep.Bom
+	}
+	files, sheetTexts, err := writeSbProject(stage, d, st, zis, layouts, trans, bomSheets)
 	if err != nil {
 		return rep, err
 	}
@@ -646,6 +701,18 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 	rep.gate(lay.Name, lay.Status, lay.Detail, lay.Data)
 	eg := sbEngineerGrade(stage, files, d)
 	rep.gate(eg.Name, eg.Status, eg.Detail, eg.Data)
+	// the layout watchdog: zones labels-only / passives loose / long
+	// wires, mostly blank sheets, a label-heavy board (kicad_sch_build_watchdog.go)
+	var egPages []sbEGPage
+	if m, ok := eg.Data.(map[string]any); ok {
+		egPages, _ = m["pages"].([]sbEGPage)
+	}
+	papers := map[string]string{}
+	for f, r := range sheetTexts {
+		papers[f] = r.To
+	}
+	lq, lqIssues := sbLayoutQualityGate(d, zis, layouts, egPages, papers, lqMode, o.ZoneTimeout, sbLayoutQualityLimits)
+	rep.gate(lq.Name, lq.Status, lq.Detail, lq.Data)
 	if sbTestGateHook != nil {
 		sbTestGateHook(rep)
 	}
@@ -675,6 +742,13 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 		}
 		rep.Error = &sbFailure{Code: "GATE_FAILED", Message: strings.Join(bad, "; "),
 			Fix: fix + " — the failed project is in " + failed}
+		if len(bad) == 1 && len(lqIssues) > 0 && lq.Status == "fail" {
+			// only the layout watchdog stopped it: a drawing that is correct
+			// but not fit to read; the fix names zones, parts and pages
+			rep.Error = &sbFailure{Code: "LAYOUT_QUALITY", Message: "layout-quality: " + lq.Detail,
+				Fix:    "nothing was written; change the spec and rebuild: " + sbLQFix(lqIssues) + " — the failed project is in " + failed,
+				Issues: lqIssues}
+		}
 		return rep, nil
 	}
 	// reports (connectivity.json + intent, render/*.svg) are written into the
@@ -756,6 +830,8 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 	tm.mark("commit")
 
 	// state, spec, checkpoint
+	st.LayoutEngine = sbLayoutEngineVersion
+	st.NoPackageText, st.NoBomPages = o.NoPackageText, o.NoBomPages
 	for _, zi := range zis {
 		st.Zones[zi.Zone.ID] = &sbZoneState{Page: zi.Zone.Page, T: trans[zi.Zone.ID], Layout: layouts[zi.Zone.ID]}
 	}
@@ -808,7 +884,18 @@ func sbReviewGate(rep *sbReport, o sbOptions, out string, waivers []gateWaiver) 
 		return
 	}
 	if o.NoReview {
-		rep.gate("design-review", "pass", "skipped by --no-review under a signed waiver", nil)
+		// A waived review is not a passed review: its own status, the
+		// signer in the report, and a warning when the signer is an agent.
+		var by []string
+		for _, w := range waivers {
+			if w.Gate == "design-review" && strings.Contains(noReviewMatch, w.Match) {
+				by = append(by, w.By)
+				if agentSigned(w.By) {
+					rep.Warnings = append(rep.Warnings, fmt.Sprintf("the design-review waiver is signed by %q, which names an AI agent: an agent-signed waiver is not a review and not the user's decision — a waiver must come from the user", w.By))
+				}
+			}
+		}
+		rep.gate("design-review", "waived", "NOT reviewed: skipped by --no-review under a waiver signed by "+signerList(by), map[string]any{"waivedBy": by})
 		return
 	}
 	var ev []string
@@ -943,7 +1030,11 @@ func sbSafeJoin(base, rel string) (string, error) {
 
 // writeSbProject renders every sheet and writes the project into dir.
 // Returns the written files (relative) and each sheet's fit result.
-func writeSbProject(dir string, d *sbDesign, st *sbState, zis []*sbZoneIn, layouts map[string]*sbZoneLayout, trans map[string]kicad.Pt) ([]string, map[string]kicad.FitResult, error) {
+//
+// bom non-nil: every page is followed by its BOM sheet(s) (a table only,
+// kicad_sch_build_bom.go), listed in bom.Pages. They are not in the fit
+// results: the page gates measure schematic pages.
+func writeSbProject(dir string, d *sbDesign, st *sbState, zis []*sbZoneIn, layouts map[string]*sbZoneLayout, trans map[string]kicad.Pt, bom *sbBomReport) ([]string, map[string]kicad.FitResult, error) {
 	name := st.Name
 	multi := len(d.Pages) > 1
 	if st.RootUUID == "" {
@@ -973,6 +1064,82 @@ func writeSbProject(dir string, d *sbDesign, st *sbState, zis []*sbZoneIn, layou
 		no            int
 	}
 	var sheets []sheetRef
+	// BOM sheets: bomOf[page id] in sheet order
+	type bomRef struct {
+		file, name, symUUID string
+		no                  int
+	}
+	bomOf := map[string][]bomRef{}
+	pageFiles := map[string]bool{strings.ToLower(name + ".kicad_sch"): true}
+	for _, pg := range d.Pages {
+		pageFiles[strings.ToLower(sbSheetFile(pg.ID))] = true
+	}
+	writeBom := func(pg sbPage, pageFile string, tb kicad.TitleBlock) error {
+		if bom == nil {
+			return nil
+		}
+		var parts []*sbRPart
+		for _, zi := range zis {
+			if zi.Zone.Page == pg.ID {
+				parts = append(parts, zi.Parts...)
+			}
+		}
+		rows := sbBomRows(parts)
+		if len(rows) == 0 {
+			return nil
+		}
+		title := pg.Title
+		if title == "" && multi {
+			title = pg.ID
+		}
+		lay := sbBomLayout(rows)
+		for i, sh := range lay {
+			key := fmt.Sprintf("%s#bom#%d", pg.ID, i+1)
+			ref := bomRef{file: sbBomFile(pageFile, i+1, pageFiles), name: sbBomSheetName(title, i+1),
+				symUUID: st.uuid(st.SheetSymUUIDs, key), no: pageNo}
+			pageNo++
+			uuid := st.uuid(st.PageUUIDs, key)
+			btb := tb
+			btb.Title = tb.Title + " — BOM"
+			if len(lay) > 1 {
+				btb.Title = fmt.Sprintf("%s — BOM %d/%d", tb.Title, i+1, len(lay))
+			}
+			e, err := sbNewSheet(uuid, false, btb)
+			if err != nil {
+				return err
+			}
+			e.SetPaper(sh.Paper)
+			e.AddRaw(sbBomHeading(uuid, fmt.Sprintf("%s — %d part(s), %d line(s)", btb.Title, len(parts), len(rows))))
+			e.AddRaw(sbBomTable(sh, uuid))
+			text, err := e.Render()
+			if err != nil {
+				return fmt.Errorf("page %s BOM: %w", pg.ID, err)
+			}
+			if err := write(ref.file, []byte(text)); err != nil {
+				return err
+			}
+			bomOf[pg.ID] = append(bomOf[pg.ID], ref)
+			bom.Pages = append(bom.Pages, sbBomPage{Page: pg.ID, File: ref.file, Sheet: ref.name, Paper: sh.Paper, No: ref.no, Rows: sh.Rows})
+		}
+		bom.Rows += len(rows)
+		return nil
+	}
+	// bomSheetSym is the sheet symbol of a BOM sheet (no pins).
+	bomSheetSym := func(b bomRef, x, y float64) string {
+		w := sbBomSymW(b.name, b.file)
+		return fmt.Sprintf(`(sheet
+		(at %s %s)
+		(size %s %s)
+		(exclude_from_sim yes) (in_bom no) (on_board no) (dnp no)
+		(stroke (width 0.1524) (type solid))
+		(fill (color 0 0 0 0.0000))
+		(uuid %s)
+		(property "Sheetname" %s (at %s %s 0) (effects (font (size 1.27 1.27)) (justify left bottom)))
+		(property "Sheetfile" %s (at %s %s 0) (effects (font (size 1.27 1.27)) (justify left top)))
+		(instances (project %s (path %s (page %s))))
+	)`, kicad.F(x), kicad.F(y), kicad.F(w), kicad.F(sbBomSymH), kicad.Q(b.symUUID), kicad.Q(b.name), kicad.F(x), kicad.F(y-0.7),
+			kicad.Q(b.file), kicad.F(x), kicad.F(y+sbBomSymH+0.6), kicad.Q(name), kicad.Q("/"+st.RootUUID), kicad.Q(strconv.Itoa(b.no)))
+	}
 	for _, pg := range d.Pages {
 		file := name + ".kicad_sch"
 		uuid := st.RootUUID
@@ -1011,6 +1178,24 @@ func writeSbProject(dir string, d *sbDesign, st *sbState, zis []*sbZoneIn, layou
 		text, err := e.Render()
 		if err != nil {
 			return nil, nil, fmt.Errorf("page %s: %w", pg.ID, err)
+		}
+		if err := writeBom(pg, file, tb); err != nil {
+			return nil, nil, err
+		}
+		if bs := bomOf[pg.ID]; !multi && len(bs) > 0 {
+			// one schematic page: it is the root, so the BOM sheets hang
+			// off it — small sheet symbols next to the drawing
+			_, fr0, err := kicad.FitSheet(text)
+			if err != nil {
+				return nil, nil, err
+			}
+			x, y := sbBomSymSpot(fr0, bs[0].name, bs[0].file, len(bs))
+			for i, b := range bs {
+				e.AddRaw(bomSheetSym(b, x, y+float64(i)*sbBomSymPitch))
+			}
+			if text, err = e.Render(); err != nil {
+				return nil, nil, fmt.Errorf("page %s: %w", pg.ID, err)
+			}
 		}
 		flg = max(flg, kicad.MaxFlagRef(text)+1)
 		text, fr, err := kicad.FitSheet(text)
@@ -1089,6 +1274,9 @@ func writeSbProject(dir string, d *sbDesign, st *sbState, zis []*sbZoneIn, layou
 			// the symbol's left edge — Codex review)
 			sp[i].w = math.Max(50.8, sbSnap(math.Max(math.Max(sbTextW(sp[i].title), sbTextW(sheets[i].file)), lw+rw+10.16)))
 			sp[i].h = sbSnap(math.Max(15.24, float64(max(len(sp[i].left), len(sp[i].right))+1)*2.54+2.54))
+			for _, b := range bomOf[sheets[i].page.ID] { // its BOM sheet symbols sit under it
+				sp[i].w = math.Max(sp[i].w, sbBomSymW(b.name, b.file))
+			}
 			if len(sp[i].left) > 0 {
 				lroom[i] = sbSnap(lw + 7.62 + 2.54)
 			}
@@ -1100,7 +1288,11 @@ func writeSbProject(dir string, d *sbDesign, st *sbState, zis []*sbZoneIn, layou
 		// row reached x = 3383 mm). Reading order first; if those rows are too
 		// tall, shelves by decreasing height. Sheet numbers keep the order.
 		sy, rowOf, order := sbRootRows(len(sp), func(i int) (float64, float64, float64, float64) {
-			return lroom[i], sp[i].w, rroom[i], sp[i].h
+			h := sp[i].h
+			if n := len(bomOf[sheets[i].page.ID]); n > 0 {
+				h += sbBomSymGap + float64(n)*sbBomSymPitch - 5.08
+			}
+			return lroom[i], sp[i].w, rroom[i], h
 		}, func(i int, x float64) { sp[i].x = x })
 		next, prevOf := make([]int, len(sp)), make([]int, len(sp))
 		for i := range next {
@@ -1161,6 +1353,9 @@ func writeSbProject(dir string, d *sbDesign, st *sbState, zis []*sbZoneIn, layou
 		(instances (project %s (path %s (page %s))))
 	)`, kicad.F(sp[i].x), kicad.F(y), kicad.F(sp[i].w), kicad.F(sp[i].h), kicad.Q(s.symUUID), kicad.Q(sp[i].title), kicad.F(sp[i].x), kicad.F(y-0.7), kicad.Q(s.file), kicad.F(sp[i].x), kicad.F(y+sp[i].h+0.6),
 				pins.String(), kicad.Q(name), kicad.Q("/"+st.RootUUID), kicad.Q(strconv.Itoa(s.no))))
+			for k, b := range bomOf[s.page.ID] {
+				re.AddRaw(bomSheetSym(b, sp[i].x, y+sp[i].h+sbBomSymGap+float64(k)*sbBomSymPitch))
+			}
 		}
 		rt, err := re.Render()
 		if err != nil {
@@ -1178,11 +1373,19 @@ func writeSbProject(dir string, d *sbDesign, st *sbState, zis []*sbZoneIn, layou
 	// project file
 	pro := map[string]any{"meta": map[string]any{"filename": name + ".kicad_pro", "version": 3},
 		"schematic": map[string]any{"legacy_lib_dir": "", "legacy_lib_list": []any{}}}
-	if multi {
+	if multi || len(bomOf) > 0 {
 		var sh []any
 		sh = append(sh, []any{st.RootUUID, "Root"})
 		for _, s := range sheets {
 			sh = append(sh, []any{s.symUUID, s.page.ID})
+			for _, b := range bomOf[s.page.ID] {
+				sh = append(sh, []any{b.symUUID, b.name})
+			}
+		}
+		if !multi {
+			for _, b := range bomOf[d.Pages[0].ID] {
+				sh = append(sh, []any{b.symUUID, b.name})
+			}
 		}
 		pro["sheets"] = sh
 	}
@@ -1283,6 +1486,7 @@ func renderSbPage(e *kicad.SchEditor, d *sbDesign, st *sbState, pg sbPage, zis [
 	var segs [][2]kicad.Pt
 	pinPts := map[kicad.Pt]int{}
 	bottom := sbPageOrigin
+	var frames []kicad.Box // zone frames: the PWR_FLAG row goes under those above it
 	for _, zi := range zis {
 		if zi.Zone.Page != pg.ID {
 			continue
@@ -1300,14 +1504,20 @@ func renderSbPage(e *kicad.SchEditor, d *sbDesign, st *sbState, pg sbPage, zis [
 					return err
 				}
 				ap := sbPose{At: mv(pose.At), Rot: pose.Rot, Unit: unit}
-				f := sbFields(s, ap, p.Ref, p.Value)
+				f := sbFields(s, ap, p.Ref, p.Value, p.Pkg)
 				ang := 0.0
 				if math.Mod(pose.Rot, 180) == 90 {
 					ang = 90
 				}
 				fields := []kicad.Field{{Name: "Reference", Value: p.Ref, At: &f.Ref, Angle: ang}, {Name: "Value", Value: p.Value, At: &f.Val, Angle: ang}}
+				if p.Pkg != "" { // the package, readable on the print (kicad_sch_build_bom.go)
+					fields = append(fields, kicad.Field{Name: "Package", Value: p.Pkg, At: &f.Pkg, Angle: ang})
+				}
 				extra := map[string]string{}
 				for k, v := range p.Fields {
+					if p.Pkg != "" && strings.EqualFold(k, "Package") {
+						continue // drawn above
+					}
 					extra[k] = v
 				}
 				if p.LCSC != "" {
@@ -1397,7 +1607,9 @@ func renderSbPage(e *kicad.SchEditor, d *sbDesign, st *sbState, pg sbPage, zis [
 		title := zi.Zone.Title
 		e.AddText(title, kicad.Pt{X: sbSnapHalf(fp.MinX + 1.27), Y: sbSnapHalf(fp.MinY + sbZoneTitle - 1.27)}, 0, 1.778)
 		bottom = math.Max(bottom, fp.MaxY)
+		frames = append(frames, fp)
 	}
+	bottom = sbFlagRowBottom(frames, sbFlagRowW(flagNets))
 	// junctions: 3+ connections at a point, or a wire end on another wire
 	ends := map[kicad.Pt]int{}
 	for _, s := range segs {

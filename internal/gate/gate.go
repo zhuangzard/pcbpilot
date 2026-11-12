@@ -20,16 +20,25 @@ const (
 	// Skip: not run because the user asked so (or, for an Advisory gate, it
 	// does not apply). Never an overall pass for a required gate.
 	Skip Status = "skip"
+	// Waived: failed (or was skipped) and a signed waiver accepted it. Not a
+	// pass: OK is false and the run is not complete, but it does not change
+	// the exit code of an otherwise passing run.
+	Waived Status = "waived"
 )
 
 // OK is true only for Pass.
 func (s Status) OK() bool { return s == Pass }
 
-// ExitCode is the process exit code of an overall verdict: 0 pass, 6 fail,
-// 5 for anything not verified (cannot-check, skip, or an unknown status).
+// Accepted is true for Pass and for Waived (a signed waiver accepted the
+// failure): the verdicts that do not fail a run.
+func (s Status) Accepted() bool { return s == Pass || s == Waived }
+
+// ExitCode is the process exit code of an overall verdict: 0 pass (also when
+// only signed waivers stand between the run and a pass), 6 fail, 5 for
+// anything not verified (cannot-check, skip, or an unknown status).
 func (s Status) ExitCode() int {
 	switch s {
-	case Pass:
+	case Pass, Waived:
 		return 0
 	case Fail:
 		return 6
@@ -41,7 +50,7 @@ func (s Status) ExitCode() int {
 // CannotCheck.
 func Parse(s string) Status {
 	switch st := Status(strings.ToLower(strings.TrimSpace(s))); st {
-	case Pass, Fail, CannotCheck, Warn, Skip:
+	case Pass, Fail, CannotCheck, Warn, Skip, Waived:
 		return st
 	}
 	return CannotCheck
@@ -83,13 +92,14 @@ func (r Result) effective() Status {
 
 // Aggregate is the overall verdict: Fail if any gate fails (a warn of a
 // required gate counts as a failure); else CannotCheck if any gate could not
-// run; else Skip if a required gate was skipped; else Pass. No gates at all
-// is CannotCheck: nothing was verified.
+// run; else Skip if a required gate was skipped; else Waived if a gate was
+// accepted by a waiver; else Pass. No gates at all is CannotCheck: nothing
+// was verified.
 func Aggregate(rs ...Result) Status {
 	if len(rs) == 0 {
 		return CannotCheck
 	}
-	rank := map[Status]int{Pass: 0, Skip: 1, CannotCheck: 2, Fail: 3}
+	rank := map[Status]int{Pass: 0, Waived: 1, Skip: 2, CannotCheck: 3, Fail: 4}
 	out := Pass
 	for _, r := range rs {
 		if s := r.effective(); rank[s] > rank[out] {

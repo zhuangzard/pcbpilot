@@ -1140,3 +1140,33 @@ func TestSbRenderDesignFileIsNotAReport(t *testing.T) {
 }
 
 var sbProbeDefault = sbProbe
+
+// A git checkout that converted line ends (LF → CRLF) is not an external
+// edit: the content is the same. A real edit on top of it still is.
+func TestSbGuardToleratesConvertedLineEnds(t *testing.T) {
+	out := sbGuardBuild(t)
+	sheet := filepath.Join(out, "p.kicad_sch")
+	crlf := func() {
+		t.Helper()
+		b, err := os.ReadFile(sheet)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b = bytes.ReplaceAll(bytes.ReplaceAll(b, []byte{13, 10}, []byte{10}), []byte{10}, []byte{13, 10})
+		if err := os.WriteFile(sheet, b, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	crlf()
+	br, err := runSchBuild(sbGuardSpec(), sbOptions{OutDir: out, NoIntent: true, PlannerBudget: 20000}, nil)
+	if err != nil || !br.OK {
+		t.Fatalf("rebuild over converted line ends: %v %+v", err, br.Error)
+	}
+
+	sbGuardAppend(t, sheet)
+	crlf()
+	br, err = runSchBuild(sbGuardSpec(), sbOptions{OutDir: out, NoIntent: true, PlannerBudget: 20000}, nil)
+	if err != nil || br.Error == nil || br.Error.Code != "EXTERNAL_EDIT" {
+		t.Fatalf("an edit under converted line ends must still be refused: %v %+v", err, br.Error)
+	}
+}

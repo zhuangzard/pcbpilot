@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -63,16 +64,78 @@ func DefaultApp() string {
 	case "darwin":
 		return "/Applications/KiCad/KiCad.app"
 	case "windows":
-		// Newest "C:\Program Files\KiCad\<version>".
-		matches, _ := filepath.Glob(`C:\Program Files\KiCad\*`)
-		sort.Strings(matches)
-		if len(matches) > 0 {
-			return matches[len(matches)-1]
+		// Newest version under the machine-wide install root or the
+		// per-user one (%LOCALAPPDATA%\Programs\KiCad\<version>).
+		roots := []string{`C:\Program Files\KiCad`}
+		if local := os.Getenv("LOCALAPPDATA"); local != "" {
+			roots = append(roots, filepath.Join(local, "Programs", "KiCad"))
 		}
-		return `C:\Program Files\KiCad\10.0`
+		if app := newestWindowsApp(roots); app != "" {
+			return app
+		}
+		return `C:\Program Files\KiCad.0`
 	default:
 		return "/usr"
 	}
+}
+
+// newestWindowsApp picks the newest "<root>\<version>" install among the
+// roots: versions compare numerically (10.0 is newer than 9.0), an install
+// that has bin\kicad-cli.exe beats a leftover directory without it, and on
+// an equal version the earlier root wins. "" when no root holds a version.
+func newestWindowsApp(roots []string) string {
+	best, bestVer, bestCLI := "", []int(nil), false
+	for _, root := range roots {
+		entries, err := os.ReadDir(root)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			ver := versionParts(e.Name())
+			if ver == nil {
+				continue
+			}
+			dir := filepath.Join(root, e.Name())
+			_, err := os.Stat(filepath.Join(dir, "bin", "kicad-cli.exe"))
+			cli := err == nil
+			if best == "" || (cli && !bestCLI) || (cli == bestCLI && versionLess(bestVer, ver)) {
+				best, bestVer, bestCLI = dir, ver, cli
+			}
+		}
+	}
+	return best
+}
+
+// versionParts parses "10.0" / "9.0.1" into numbers (nil: not a version).
+func versionParts(name string) []int {
+	var out []int
+	for _, f := range strings.Split(name, ".") {
+		n, err := strconv.Atoi(f)
+		if err != nil || n < 0 {
+			return nil
+		}
+		out = append(out, n)
+	}
+	return out
+}
+
+func versionLess(a, b []int) bool {
+	for i := 0; i < len(a) || i < len(b); i++ {
+		x, y := 0, 0
+		if i < len(a) {
+			x = a[i]
+		}
+		if i < len(b) {
+			y = b[i]
+		}
+		if x != y {
+			return x < y
+		}
+	}
+	return false
 }
 
 // toolPaths returns the bridge Python and kicad-cli under an install root

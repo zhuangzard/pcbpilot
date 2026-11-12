@@ -22,6 +22,7 @@ package app
 // copies remains (KiCad offers no lock pcbpilot could take).
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -122,9 +123,19 @@ func sbProjectFile(name string) bool {
 // be told apart from settings a user changed.
 var sbProjectVolatile = map[string][]string{"pcbnew": {"last_paths"}, "board": {"viewports", "3dviewports"}}
 
-// sbContentHash hashes a project file; .kicad_pro as canonical JSON (key
-// order and whitespace do not count) without the volatile fields.
+// sbContentHash hashes a project file with its line ends normalised to LF:
+// KiCad on Windows writes some sections with CRLF, and a git checkout with
+// autocrlf rewrites every line end; neither is an edit of the project
+// (field report 2026-11: a project cloned on Windows could not be rebuilt
+// in place). .kicad_pro is hashed as canonical JSON (key order and
+// whitespace do not count) without the volatile fields.
 func sbContentHash(rel string, b []byte) string {
+	return sbRawHash(rel, bytes.ReplaceAll(b, []byte("\r\n"), []byte("\n")))
+}
+
+// sbRawHash is sbContentHash without the line-end normalisation: what a
+// manifest written before 0.12.9 holds.
+func sbRawHash(rel string, b []byte) string {
 	if strings.HasSuffix(sbFoldName(rel), ".kicad_pro") {
 		var v map[string]any
 		if json.Unmarshal(b, &v) == nil {
@@ -150,6 +161,9 @@ func sbContentHash(rel string, b []byte) string {
 // files found in --out.
 type sbSnapshot struct {
 	Files map[string]string
+	// Raw: the hash without line-end normalisation of a file that has CRLF
+	// line ends, to match a manifest written before 0.12.9.
+	Raw   map[string]string
 	Locks []string
 }
 
@@ -160,7 +174,7 @@ var sbSheetFileRe = regexp.MustCompile(`\(property\s+"Sheetfile"\s+"([^"]+)"`)
 // KiCad's .history) and KiCad's *-backups. Locks are also looked for beside
 // every sheet referenced from outside --out. Any read error fails closed.
 func sbTakeSnapshot(out string) (*sbSnapshot, error) {
-	s := &sbSnapshot{Files: map[string]string{}}
+	s := &sbSnapshot{Files: map[string]string{}, Raw: map[string]string{}}
 	if _, err := os.Stat(out); os.IsNotExist(err) {
 		return s, nil
 	}
@@ -201,6 +215,9 @@ func sbTakeSnapshot(out string) (*sbSnapshot, error) {
 				return fmt.Errorf("read %s: %w", filepath.Join(dir, n), err)
 			}
 			s.Files[r] = sbContentHash(r, b)
+			if bytes.Contains(b, []byte("\r\n")) {
+				s.Raw[r] = sbRawHash(r, b)
+			}
 			if sbTestScanFile != nil {
 				sbTestScanFile(r)
 			}
@@ -395,6 +412,7 @@ func sbDiff(snap *sbSnapshot, b *sbBasis, touch []string) *sbExternalEdits {
 	x := &sbExternalEdits{Basis: b.Name, Locks: snap.Locks}
 	cur, names := sbKeyed(snap.Files)
 	rec, _ := sbKeyed(b.Hashes)
+	raw, _ := sbKeyed(snap.Raw)
 	owned := map[string]bool{}
 	for _, f := range b.Owned {
 		owned[sbPathKey(f)] = true
@@ -424,7 +442,7 @@ func sbDiff(snap *sbSnapshot, b *sbBasis, touch []string) *sbExternalEdits {
 		switch {
 		case has && !owned[k]:
 			x.Overwrites = append(x.Overwrites, spell(k, f))
-		case has && inRec && c != r:
+		case has && inRec && c != r && raw[k] != r:
 			x.Changed = append(x.Changed, spell(k, f))
 		case has && !inRec && touched[k] && b.Name != "none":
 			x.Unrecorded = append(x.Unrecorded, spell(k, f))
@@ -580,7 +598,7 @@ func (g *sbGuard) beforeCommit(stage string, files, deletes []string, rep *sbRep
 	touch := append(append([]string(nil), files...), deletes...)
 	// every write/delete target on its own, whatever the project-file
 	// filter thinks of its name: an existing one joins the baseline
-	base := &sbSnapshot{Files: map[string]string{}, Locks: g.baseline.Locks}
+	base := &sbSnapshot{Files: map[string]string{}, Raw: g.baseline.Raw, Locks: g.baseline.Locks}
 	for f, h := range g.baseline.Files {
 		base.Files[f] = h
 	}

@@ -452,6 +452,7 @@ func runSchEdit(o sbOptions, ops []sbOp) (*sbReport, error) {
 	}
 	next.Zones = zs
 	o.Name = st.Name
+	o.NoPackageText, o.NoBomPages = st.NoPackageText, st.NoBomPages
 	ec.Summary = map[string]any{"ops": log}
 	return runSchBuild(&next, o, ec)
 }

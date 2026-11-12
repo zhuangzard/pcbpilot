@@ -111,7 +111,7 @@ func TestSilkDeferredGateKeepsFailures(t *testing.T) {
 		{"failures, no waiver", dirty, nil, gate.Fail, 6, len(dirty.Items) + 1},
 		{"failures, deferral waived", dirty, []gateWaiver{deferral}, gate.Fail, 6, len(dirty.Items)},
 		{"clean, no waiver", clean, nil, gate.CannotCheck, 5, 1},
-		{"clean, deferral waived", clean, []gateWaiver{deferral}, gate.Pass, 0, 1},
+		{"clean, deferral waived", clean, []gateWaiver{deferral}, gate.Waived, 0, 1},
 	} {
 		r, g := run(c.g, c.ws...)
 		if got := statusOf(t, r.reg, "silkscreen"); got != c.status || r.reg.ExitCode() != c.exit {
