@@ -307,13 +307,24 @@ func runLcscVerify(stdout, stderr io.Writer, pcb, sch string, asJSON bool) error
 	sort.Strings(numbers)
 	ctx, cancel := context.WithTimeout(context.Background(), lcscVerifyDeadline)
 	defer cancel()
+	var cacheMu sync.Mutex
+	var cacheErr error
 	catalog, err := lcscLookup(ctx, numbers, func(ctx context.Context, n string) (kicad.EasyEDAPart, bool, error) {
 		part, found, err := kicad.LookupEasyEDAPart(ctx, n)
-		if err == nil && found {
-			_ = kicad.CatalogStore(part) // for the BOM sheets; best-effort
+		if err == nil && found && part.LCSC == n { // for the BOM sheets
+			if serr := kicad.CatalogStore(part); serr != nil {
+				cacheMu.Lock()
+				if cacheErr == nil {
+					cacheErr = serr
+				}
+				cacheMu.Unlock()
+			}
 		}
 		return part, found, err
 	})
+	if cacheErr != nil {
+		warns = append(warns, "catalogue records could not be cached for the BOM sheets: "+cacheErr.Error())
+	}
 	if err != nil {
 		return fmt.Errorf("LCSC lookup failed (live, needs the network; nothing was judged): %w", err)
 	}

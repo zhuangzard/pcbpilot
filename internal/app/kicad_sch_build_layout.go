@@ -37,6 +37,64 @@ type sbMarker struct {
 	At     kicad.Pt `json:"at"`
 	Dir    string   `json:"dir"`
 	OnWire bool     `json:"onWire,omitempty"`
+	// JogLeft: the upright supply / ground symbol of a stub that arrives the
+	// other way sits 2.54 mm LEFT of the stub end instead of right (the right
+	// side is another pin's wire). Set by sbFixJogs.
+	JogLeft bool `json:"jogLeft,omitempty"`
+}
+
+// sbJogs reports whether the marker's symbol is drawn beside its stub end
+// (supply symbols point up, ground symbols down; a stub arriving the other
+// way jogs sideways first), and the signed X offset of the symbol.
+func (mk sbMarker) sbJogs() (float64, bool) {
+	if mk.OnWire || !((mk.Kind == "power" && mk.Dir == "down") || (mk.Kind == "ground" && mk.Dir == "up")) {
+		return 0, false
+	}
+	if mk.JogLeft {
+		return -2.54, true
+	}
+	return 2.54, true
+}
+
+// sbFixJogs picks the side of every jogged supply / ground symbol. The jog
+// used to go right unconditionally: beside a pin 2.54 mm to the right (a
+// potentiometer's lug next to its track pin, a pin header) it ended exactly
+// on that pin's wire and joined the two nets, the drawing was rejected as a
+// short, and the zone fell back to a much larger legacy drawing. A side is
+// free when the jog segment touches no wire, pin or other marker anchor.
+func sbFixJogs(zl *sbZoneLayout, pinNet map[kicad.Pt]string) {
+	wires := append([][]kicad.Pt(nil), zl.Wires...)
+	free := func(mi int, a, j kicad.Pt) bool {
+		if sbTouchesWires(a, j, wires, a) {
+			return false
+		}
+		seg := [2]kicad.Pt{a, j}
+		for p := range pinNet {
+			if p != a && (p == j || sbOnInterior(p, seg)) {
+				return false
+			}
+		}
+		for oi, o := range zl.Markers {
+			if oi != mi && (o.At == j || sbOnInterior(o.At, seg)) {
+				return false
+			}
+		}
+		return true
+	}
+	for mi := range zl.Markers {
+		mk := &zl.Markers[mi]
+		if _, ok := mk.sbJogs(); !ok {
+			continue
+		}
+		mk.JogLeft = false
+		r := sbRoundPt(kicad.Pt{X: mk.At.X + 2.54, Y: mk.At.Y})
+		l := sbRoundPt(kicad.Pt{X: mk.At.X - 2.54, Y: mk.At.Y})
+		j := r
+		if !free(mi, mk.At, r) && free(mi, mk.At, l) {
+			mk.JogLeft, j = true, l
+		}
+		wires = append(wires, []kicad.Pt{mk.At, j})
+	}
 }
 
 // sbZoneLayout is one zone drawn relative to its core.
@@ -469,7 +527,7 @@ func refLessSB(a, b string) bool {
 // 2026-11-12: the field boards rebuilt in place after the compact-layout change kept the
 // 0.12.x zones and 6 of 7 boards failed the layout-quality watchdog).
 // v3: package text next to the value (wider zone drawings).
-const sbLayoutEngineVersion = "v3"
+const sbLayoutEngineVersion = "v4"
 
 // hash covers what shapes the zone: parts, symbols, pin connectivity (nets
 // numbered canonically, so a rename keeps the hash), policies, NC pins, and
@@ -821,10 +879,10 @@ func sbMarkerBox(mk sbMarker) kicad.Box {
 	switch mk.Kind {
 	case "power", "ground":
 		// drawn upright (supply up, ground down; a stub arriving the other
-		// way jogs 2.54 mm right first): body + value text
+		// way jogs 2.54 mm sideways first): body + value text
 		half, reach := math.Max(1.9, sbTextW(mk.Net)/2+0.6), 5.6
-		if (mk.Kind == "power" && mk.Dir == "down") || (mk.Kind == "ground" && mk.Dir == "up") {
-			p.X += 2.54
+		if dx, ok := mk.sbJogs(); ok {
+			p.X += dx
 		}
 		if mk.Kind == "power" {
 			return kicad.Box{MinX: p.X - half, MinY: p.Y - reach, MaxX: p.X + half, MaxY: p.Y}
@@ -2288,7 +2346,9 @@ func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, excl
 			}
 		}
 	}
-	if bad := sbFixStubs(zl, pinNet, bodies, tied); len(bad) > 0 {
+	bad := sbFixStubs(zl, pinNet, bodies, tied)
+	sbFixJogs(zl, pinNet)
+	if len(bad) > 0 {
 		var refs, desc []string
 		for _, b := range bad {
 			desc = append(desc, b.Desc)

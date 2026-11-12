@@ -235,10 +235,16 @@ func sbBomCatalog(parts []*sbRPart, fetch bool) *sbBomCatalogStat {
 					st.Failed = append(st.Failed, n)
 				case !found:
 					st.Unknown = append(st.Unknown, n)
+				case c.LCSC != n:
+					// an answer about another number is no answer: it must
+					// neither describe this part nor be cached under either
+					st.Failed = append(st.Failed, n)
 				default:
 					recs[n] = c
 					st.Fetched++
-					_ = kicad.CatalogStore(c)
+					if err := kicad.CatalogStore(c); err != nil && st.CacheError == "" {
+						st.CacheError = err.Error()
+					}
 				}
 			}(n)
 		}
@@ -268,6 +274,22 @@ func sbBomLCSC(p *sbRPart) string {
 }
 
 var sbBomCustomRE = regexp.MustCompile(`(?i)\b(custom|self[- ]?wound|self[- ]?sourced)\b|定制|自制|自购|自绕`)
+
+// sbBomReqRE: text that states a requirement — a number (a ratio, a value, a
+// rating) or a pointer to a drawing / mating part.
+var sbBomReqRE = regexp.MustCompile(`\d|(?i:\b(drawing|dwg|mating|mates with)\b)|图纸|图号|对插`)
+
+// sbBomCustomReq: a custom part says what it must meet. Any field counts
+// (Description, Inductance, TurnsRatio, Isolation …) except the bookkeeping
+// ones; a description that only repeats "custom transformer" does not.
+func sbBomCustomReq(p *sbRPart) bool {
+	for k, v := range p.Fields {
+		if !sbBomSkipField(k) && sbBomReqRE.MatchString(v) {
+			return true
+		}
+	}
+	return false
+}
 
 // sbBomCustom: the part's own text says it is made or sourced by the owner.
 func sbBomCustom(p *sbRPart) bool {
@@ -482,9 +504,14 @@ func sbBomCheck(parts []*sbRPart) (noPackage, noSpec []string, missing []sbBomMi
 		if !described && sbBomSpec(p) == "" {
 			noSpec = append(noSpec, p.Ref)
 		}
-		if sbBomMPN(p) == "" && sbBomLCSC(p) == "" && !described && sbBomCustom(p) {
-			missing = append(missing, sbBomMissing{Ref: p.Ref, Reason: "a custom part with no requirements: nobody can make or buy it from this BOM",
-				Fix: fmt.Sprintf("add fields.Description to %s with what it must meet (a transformer or inductor: turns ratio, inductance, saturation current, isolation voltage, core; a connector or mechanical part: drawing or mating part)", p.Ref)})
+		if sbBomMPN(p) == "" && sbBomLCSC(p) == "" && sbBomCustom(p) {
+			// judged on what it says, not on whether a Description exists:
+			// "custom transformer" alone tells nobody what to wind, while
+			// Inductance / TurnsRatio fields without a Description do
+			if !sbBomCustomReq(p) {
+				missing = append(missing, sbBomMissing{Ref: p.Ref, Reason: "a custom part with no requirements: nobody can make or buy it from this BOM",
+					Fix: fmt.Sprintf("add fields.Description to %s with what it must meet, in numbers (a transformer or inductor: turns ratio, inductance, saturation current, isolation voltage, core; a connector or mechanical part: drawing or mating part)", p.Ref)})
+			}
 			continue
 		}
 		if sbBomMPN(p) == "" && sbBomLCSC(p) == "" && !described {
@@ -745,6 +772,9 @@ type sbBomCatalogStat struct {
 	Fetched int      `json:"fetched"`
 	Failed  []string `json:"failed"`
 	Unknown []string `json:"unknown"`
+	// CacheError: a fetched record could not be saved, so the next build
+	// without --bom-catalog will not have it.
+	CacheError string `json:"cacheError,omitempty"`
 }
 
 // sbBomFile is the file of a page's n-th BOM sheet (1 = first), next to the
@@ -833,8 +863,15 @@ func sbBomSummary(d *sbDesign, o sbOptions) (*sbBomReport, []string) {
 	if c := b.Catalog; len(c.Unknown) > 0 {
 		warn = append(warn, fmt.Sprintf("BOM: the LCSC catalogue has no record of %s — check the number (kicad lcsc --verify)", sbShortList(c.Unknown, 12)))
 	}
-	if c := b.Catalog; !o.BomCatalog && c.Numbers > c.Known {
-		warn = append(warn, fmt.Sprintf("BOM: %d of %d LCSC numbers have no cached catalogue record, so their MPN / description are not filled in — build with --bom-catalog (network) to fetch them", c.Numbers-c.Known, c.Numbers))
+	if c := b.Catalog; c.CacheError != "" {
+		warn = append(warn, "BOM: fetched catalogue records could not be cached, the next build without --bom-catalog will not have them: "+c.CacheError)
+	}
+	if c := b.Catalog; (!o.BomCatalog || o.Offline) && c.Numbers > c.Known {
+		how := "build with --bom-catalog (network) to fetch them"
+		if o.BomCatalog {
+			how = "--bom-catalog fetches nothing with --offline; build once without --offline"
+		}
+		warn = append(warn, fmt.Sprintf("BOM: %d of %d LCSC numbers have no cached catalogue record, so their MPN / description are not filled in — %s", c.Numbers-c.Known, c.Numbers, how))
 	}
 	if len(miss) > 0 {
 		refs := map[string]bool{}

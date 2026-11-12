@@ -137,7 +137,7 @@ uuid 由页和行内容确定，内容不变文件就不变。`--no-bom-pages` �
 报告的 `bom`：`sheets` / `packageText`（两个开关的实际状态）、`pages[]`（`page`、`file`、`sheet`、`paper`、
 `pageNumber`、`rows`）、`rows`、`parts`、`noPackage[]`、`noSpec[]`（不是普通阻容、规格格为空的件）和
 `missing[]`（`ref`、`reason`、`fix`）。**`bom.missing` 是警告而不是门禁失败**：列出读者认不出来的件——没有封装，
-或者既没有 MPN、也没有 C 号（含上面那些字段）、也没有 `Description`。值里写着 custom / 定制 的件单独一种原因
+或者既没有 MPN、也没有 C 号（含上面那些字段）、也没有 `Description`。值或说明里写着 custom / 定制 的件按内容判断（任一字段里有数字，或提到图纸 / 对插件，才算写了要求；只写“定制变压器”不算），单独一种原因
 （“a custom part with no requirements”）：`fix` 要求写出它必须满足的参数（变压器 / 电感：匝比、电感量、饱和电流、
 隔离电压、磁芯；连接器 / 结构件：图纸或对插件）。每条的 `fix` 是一句话的改法；交付前应为空。
 

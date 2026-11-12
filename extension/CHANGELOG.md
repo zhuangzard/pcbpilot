@@ -10,8 +10,24 @@
   puts `[LCSC catalogue] manufacturer, description` in the spec cell (not when the design has its own `Description`). Records
   are cached per user; a default build reads only the cache and never uses the network. `kicad lcsc --verify` fills the same
   cache. The report's `bom.catalog` counts the numbers and lists `unknown[]` — LCSC numbers the catalogue has no record of.
-- A custom part (value or description says custom / self-wound / 定制) with no requirements gets its own `bom.missing`
-  reason and a fix that names what to write; its sourcing column reads `custom / self-sourced`.
+- A custom part (value or description says custom / self-wound / 定制) that states no requirement gets its own `bom.missing`
+  reason and a fix that names what to write; its sourcing column reads `custom / self-sourced`. It is judged on content: a
+  number or a drawing / mating-part reference in any field counts (`Inductance`, `TurnsRatio` … without a `Description` is
+  fine), a description that only says "custom transformer" does not.
+- `--bom-catalog`: a catalogue answer about a different LCSC number is treated as a failed lookup (never attached, never
+  cached); a record that cannot be cached is a warning (`bom.catalog.cacheError`); `--bom-catalog --offline` says that
+  nothing was fetched.
+- **`kicad sch-build`: a ground / supply symbol no longer shorts the pin beside it.** A ground stub leaving upwards (or a
+  supply stub leaving downwards) is drawn with the symbol upright, 2.54 mm beside the stub end — always to the right. Next
+  to a pin on a 2.54 mm pitch (a potentiometer lug beside its track pin, a pin header) the jog ended on that pin's wire,
+  every compact drawing of the zone was rejected as a short, and the zone fell back to the old spread-out drawing (more
+  than twice the area on a field board, one paper size up for the page). The symbol now goes to the free side. Layout
+  engine `v4`: an in-place rebuild redraws every zone once.
+- Per-user Elmer unpack (`sim tools install`, `pcbpilot update` on Windows): each install stages in a folder of its own
+  and takes a per-destination lock, so two installs at once cannot delete each other's files; an existing install is moved
+  aside and put back if the new tree cannot take its place (it used to be deleted first); staging and moved-aside folders
+  are never taken for an install; archive entries Windows would resolve differently from their spelling (`.. `, `...`,
+  `NUL`, `COM1.txt`) are refused.
 - **Elmer FEM installs on Windows without administrator rights.** `pcbpilot sim tools install` and `pcbpilot update` used
   to run the official installer, which a standard account cannot finish ("requires elevation"), so Elmer stayed `missing`
   on every update. They now download the official `.zip` of the same release from the same mirror, check its SHA-256, and

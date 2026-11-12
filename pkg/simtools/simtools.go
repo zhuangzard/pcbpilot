@@ -302,6 +302,11 @@ func (e *Env) Locate(t Tool, bin string) (path string, onPath bool) {
 		dirs, _ := e.Glob(filepath.Join(root, "*", "bin"))
 		sort.Sort(sort.Reverse(sort.StringSlice(dirs)))
 		for _, dir := range dirs {
+			// a dot folder is an unpack in progress or an install moved
+			// aside (.stage-*, .old-*), never a finished install
+			if rel := filepath.Base(filepath.Dir(dir)); strings.HasPrefix(rel, ".") || strings.HasSuffix(rel, ".partial") {
+				continue
+			}
 			for _, n := range names {
 				if m, _ := e.Glob(filepath.Join(dir, n+".exe")); len(m) > 0 {
 					return m[0], false

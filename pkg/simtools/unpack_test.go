@@ -79,8 +79,8 @@ func TestUnpackZipStripsTopFolderAndSkips(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dest, "stripped_gfortran")); !os.IsNotExist(err) {
 		t.Fatalf("skipped folder was unpacked: %v", err)
 	}
-	if _, err := os.Stat(dest + ".partial"); !os.IsNotExist(err) {
-		t.Fatalf("staging folder left behind: %v", err)
+	if l := leftovers(t, dest); len(l) != 0 {
+		t.Fatalf("staging folder left behind: %v", l)
 	}
 	if got := ElmerHome(filepath.Join(dest, "bin", "ElmerSolver.exe")); got != dest {
 		t.Fatalf("ElmerHome = %q, want %q", got, dest)
@@ -128,7 +128,7 @@ func TestUnpackZipRefusesBadArchives(t *testing.T) {
 		if b, rerr := os.ReadFile(filepath.Join(dest, "bin", "ElmerSolver.exe")); rerr != nil || string(b) != "solver" {
 			t.Fatalf("%s: the existing install was damaged: %v %q", want, rerr, b)
 		}
-		if _, serr := os.Stat(dest + ".partial"); !os.IsNotExist(serr) {
+		if l := leftovers(t, dest); len(l) != 0 {
 			t.Fatalf("%s: staging folder left behind", want)
 		}
 	}

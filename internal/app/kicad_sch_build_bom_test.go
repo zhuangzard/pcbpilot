@@ -315,8 +315,8 @@ func TestSbBomCheck(t *testing.T) {
 			t.Errorf("missing entry without a fix naming the part: %+v", m)
 		}
 	}
-	if strings.Join(refs, ",") != "C1,T1,U2" {
-		t.Errorf("missing = %v, want C1 (no footprint), T1 and U2 (not identified)", refs)
+	if strings.Join(refs, ",") != "C1,T1,T2,U2" {
+		t.Errorf("missing = %v, want C1 (no footprint), T1 and U2 (not identified), T2 (custom, description without requirements)", refs)
 	}
 }
 
@@ -553,14 +553,20 @@ func TestSbBomIdentityFromFields(t *testing.T) {
 	u3 := sbTestPart("U3", "MCU", "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm", map[string]string{"LCSC": "not a number"})
 	t1 := sbTestPart("T1", "EE16 custom", "My:XFMR", nil)
 	t2 := sbTestPart("T2", "EE16 custom", "My:XFMR", map[string]string{"Description": "flyback, 1:2.5, 400 uH, 1.5 kV isolation"})
-	parts := []*sbRPart{u1, u2, u3, t1, t2}
+	// a description that only says "custom", and requirement fields without
+	// any description
+	t3 := sbTestPart("T3", "EE16", "My:XFMR", map[string]string{"Description": "self-wound transformer"})
+	t4 := sbTestPart("T4", "EE16 custom", "My:XFMR", map[string]string{"Inductance": "450 uH", "TurnsRatio": "1:2.5", "Sourcing": "custom"})
+	t5 := sbTestPart("T5", "EE16 custom", "My:XFMR", map[string]string{"Description": "per drawing in the project folder"})
+	t6 := sbTestPart("T6", "EE16 custom", "My:XFMR", map[string]string{"Sourcing": "vendor 2", "Datasheet": "t6-rev3.pdf"})
+	parts := []*sbRPart{u1, u2, u3, t1, t2, t3, t4, t5, t6}
 	_, _, missing := sbBomCheck(parts)
 	got := map[string]string{}
 	for _, m := range missing {
 		got[m.Ref] = m.Reason
 	}
-	if len(got) != 2 || !strings.Contains(got["T1"], "custom part") || !strings.Contains(got["U3"], "no MPN") {
-		t.Fatalf("missing = %v, want T1 (custom, no requirements) and U3 (invalid number)", got)
+	if len(got) != 4 || !strings.Contains(got["T1"], "custom part") || !strings.Contains(got["T3"], "custom part") || !strings.Contains(got["T6"], "custom part") || !strings.Contains(got["U3"], "no MPN") {
+		t.Fatalf("missing = %v, want T1, T3, T6 (custom, no requirements) and U3 (invalid number)", got)
 	}
 	rows := map[string]sbBomRow{}
 	for _, r := range sbBomRows(parts) {
@@ -661,5 +667,33 @@ func TestSbBomCatalog(t *testing.T) {
 	}
 	if _, ok := kicad.CatalogCached("../C100"); ok {
 		t.Error("an invalid number reached the cache")
+	}
+}
+
+// A record about another number is not attached and not cached; --offline
+// with --bom-catalog still says why the catalogue columns are empty.
+func TestSbBomCatalogMismatchAndOffline(t *testing.T) {
+	t.Setenv(kicad.EnvCacheDir, t.TempDir())
+	old := sbCatalogLookup
+	defer func() { sbCatalogLookup = old }()
+	sbCatalogLookup = func(ctx context.Context, n string) (kicad.EasyEDAPart, bool, error) {
+		return kicad.EasyEDAPart{LCSC: "C200", MPN: "OTHER-PART", Description: "something else"}, true, nil
+	}
+	u1 := sbTestPart("U1", "LDO", "Package_TO_SOT_SMD:SOT-23-5", nil)
+	u1.LCSC = "C100"
+	parts := []*sbRPart{u1}
+	st := sbBomCatalog(parts, true)
+	if st.Known != 0 || st.Fetched != 0 || strings.Join(st.Failed, ",") != "C100" || u1.cat != nil {
+		t.Fatalf("a record for another number was accepted: %+v cat %v", st, u1.cat)
+	}
+	if _, ok := kicad.CatalogCached("C200"); ok {
+		t.Fatal("the mismatched record was cached")
+	}
+	if _, ok := kicad.CatalogCached("C100"); ok {
+		t.Fatal("the mismatched record was cached under the asked number")
+	}
+	_, warn := sbBomSummary(&sbDesign{Parts: parts}, sbOptions{BomCatalog: true, Offline: true})
+	if w := strings.Join(warn, "\n"); !strings.Contains(w, "--offline") || !strings.Contains(w, "1 of 1 LCSC numbers") {
+		t.Fatalf("--bom-catalog --offline must say nothing was fetched: %q", w)
 	}
 }

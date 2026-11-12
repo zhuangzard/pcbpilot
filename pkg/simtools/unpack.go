@@ -43,10 +43,49 @@ func FileSHA256(p string) (string, error) {
 //   - Entries that would leave dest (absolute paths, "..", drive letters) and
 //     symbolic links are refused.
 //
-// The tree is built in a sibling "<dest>.partial" folder and renamed into
-// place at the end, so an interrupted unpack never leaves a half install that
-// looks complete; an existing dest is replaced only by a complete new tree.
+// The tree is built in a sibling staging folder of its own (".stage-<name>-*",
+// a dot folder that tool lookup ignores) and renamed into place at the end,
+// so an interrupted unpack never leaves a half install that looks complete.
+// An existing dest is moved aside first and put back when the new tree
+// cannot take its place. Installs into one dest run one at a time (a lock
+// file beside it).
 func UnpackZip(archive, dest string, skip, expect []string) error {
+	return unpackZip(archive, dest, skip, expect, os.Rename)
+}
+
+// unpackLockWait / unpackLockStale: how long a second install waits for the
+// first, and after how long a lock left by a killed process is taken over.
+var (
+	unpackLockWait  = 3 * time.Minute
+	unpackLockStale = 30 * time.Minute
+)
+
+// lockDest takes the per-destination install lock.
+func lockDest(dest string) (unlock func(), err error) {
+	lock := filepath.Join(filepath.Dir(dest), ".lock-"+filepath.Base(dest))
+	deadline := time.Now().Add(unpackLockWait)
+	for {
+		f, err := os.OpenFile(lock, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		if err == nil {
+			fmt.Fprintln(f, os.Getpid())
+			f.Close()
+			return func() { os.Remove(lock) }, nil
+		}
+		if !os.IsExist(err) {
+			return nil, err
+		}
+		if fi, serr := os.Stat(lock); serr == nil && time.Since(fi.ModTime()) > unpackLockStale {
+			os.Remove(lock)
+			continue
+		}
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("another install into %s is still running (lock %s)", dest, lock)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+}
+
+func unpackZip(archive, dest string, skip, expect []string, rename func(from, to string) error) error {
 	zr, err := zip.OpenReader(archive)
 	if err != nil {
 		return fmt.Errorf("not a readable .zip: %w", err)
@@ -63,11 +102,17 @@ func UnpackZip(archive, dest string, skip, expect []string) error {
 	}
 	strip := commonTopDir(names)
 
-	stage := dest + ".partial"
-	if err := os.RemoveAll(stage); err != nil {
+	parent, base := filepath.Dir(dest), filepath.Base(dest)
+	if err := os.MkdirAll(parent, 0o755); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(stage, 0o755); err != nil {
+	unlock, err := lockDest(dest)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	stage, err := os.MkdirTemp(parent, ".stage-"+base+"-")
+	if err != nil {
 		return err
 	}
 	done := false
@@ -114,21 +159,63 @@ func UnpackZip(archive, dest string, skip, expect []string) error {
 			return fmt.Errorf("the archive does not contain %s", e)
 		}
 	}
-	if err := os.RemoveAll(dest); err != nil {
-		return fmt.Errorf("cannot replace %s: %w", dest, err)
+	// The old install is moved aside, never deleted first: when the new tree
+	// cannot take its place the old one goes back.
+	backup := ""
+	if _, serr := os.Lstat(dest); serr == nil {
+		b, err := os.MkdirTemp(parent, ".old-"+base+"-")
+		if err != nil {
+			return err
+		}
+		backup = filepath.Join(b, base)
+		if err := rename(dest, backup); err != nil {
+			os.RemoveAll(b)
+			return fmt.Errorf("cannot replace %s (in use?): %w", dest, err)
+		}
 	}
 	// A virus scanner may still hold a freshly written file for a moment.
 	for try := 0; ; try++ {
-		if err = os.Rename(stage, dest); err == nil || try >= 5 {
+		if err = rename(stage, dest); err == nil || try >= 5 {
 			break
 		}
-		time.Sleep(time.Duration(try+1) * 300 * time.Millisecond)
+		time.Sleep(time.Duration(try+1) * unpackRetryStep)
 	}
 	if err != nil {
+		if backup != "" {
+			if rerr := rename(backup, dest); rerr != nil {
+				return fmt.Errorf("%w; the previous install is kept in %s (could not be put back: %v)", err, backup, rerr)
+			}
+			os.RemoveAll(filepath.Dir(backup))
+		}
 		return err
 	}
 	done = true
+	if backup != "" {
+		os.RemoveAll(filepath.Dir(backup)) // best-effort: a leftover dot folder is ignored by tool lookup
+	}
 	return nil
+}
+
+var unpackRetryStep = 300 * time.Millisecond
+
+// winReserved are the Win32 device names: a file called NUL, COM1.txt …
+// opens the device, not a file.
+var winReserved = map[string]bool{"CON": true, "PRN": true, "AUX": true, "NUL": true,
+	"COM1": true, "COM2": true, "COM3": true, "COM4": true, "COM5": true, "COM6": true, "COM7": true, "COM8": true, "COM9": true,
+	"LPT1": true, "LPT2": true, "LPT3": true, "LPT4": true, "LPT5": true, "LPT6": true, "LPT7": true, "LPT8": true, "LPT9": true}
+
+// unsafeSegment: a path component Windows would resolve to something else
+// than its spelling — ".." in disguise ("..  ", "..."; Win32 drops trailing
+// dots and spaces) or a device name.
+func unsafeSegment(seg string) bool {
+	if seg == ".." {
+		return true
+	}
+	if seg != "." && seg != strings.TrimRight(seg, ". ") {
+		return true
+	}
+	stem, _, _ := strings.Cut(seg, ".")
+	return winReserved[strings.ToUpper(strings.TrimSpace(stem))]
 }
 
 // cleanZipName returns the slash-separated, cleaned entry name, refusing any
@@ -139,7 +226,7 @@ func cleanZipName(name string) (string, error) {
 		return "", fmt.Errorf("unsafe path in archive: %q", name)
 	}
 	for _, seg := range strings.Split(n, "/") {
-		if seg == ".." {
+		if unsafeSegment(seg) {
 			return "", fmt.Errorf("unsafe path in archive: %q", name)
 		}
 	}
