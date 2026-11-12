@@ -423,11 +423,6 @@ func fillApplyReport(rep *updateReport, res applyResult) {
 	for _, s := range res.Skipped {
 		rep.Notes = append(rep.Notes, "skipped "+s)
 	}
-	for _, s := range res.Steps {
-		if strings.HasPrefix(s.Component, "tools:") && s.Status == "skipped" && s.Detail != "" {
-			rep.Notes = append(rep.Notes, s.Component+": "+s.Detail)
-		}
-	}
 	if hasString(res.Changed, compMCP) || hasString(res.Changed, compSkill) {
 		rep.Notes = append(rep.Notes, "restart your AI client (Claude Code / Codex / ZCode) so it loads the new Skill and MCP server")
 	}
@@ -873,7 +868,10 @@ func printApplyReport(w io.Writer, rep updateReport) {
 			mark = "·"
 		}
 		where := s.Where
-		if s.Detail != "" {
+		if strings.HasPrefix(s.Component, "tools:") && s.Status == "skipped" && s.Detail != "" {
+			// the reason is one of the "skipped tools:…" notes below — say it once
+			where = "see the note below"
+		} else if s.Detail != "" {
 			if where != "" {
 				where += "  "
 			}

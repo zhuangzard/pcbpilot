@@ -1,5 +1,16 @@
 # Changelog
 
+## [Unreleased]
+
+- **Elmer FEM installs on Windows without administrator rights.** `pcbpilot sim tools install` and `pcbpilot update` used
+  to run the official installer, which a standard account cannot finish ("requires elevation"), so Elmer stayed `missing`
+  on every update. They now download the official `.zip` of the same release from the same mirror, check its SHA-256, and
+  unpack it into `%USERPROFILE%\.pcbpilot\elmer\rel26.1` for the current user only: no installer, no elevation, PATH
+  unchanged. pcbpilot finds ElmerSolver and ElmerGrid there and sets `ELMER_HOME` for the solver run. The bundled gfortran
+  toolchain (about 340 MB, only for compiling your own solver code) is not unpacked.
+- When an optional simulator cannot be installed, `pcbpilot update` prints the reason and the manual step once (it was
+  printed twice) and still does not count it as an error.
+
 ## [0.12.9] — 2026-11-12
 
 **CLI, daemon, Skills, MCP and the connector move to 0.12.9. The connector runtime is unchanged from 0.12.8; import the

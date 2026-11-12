@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"os/exec"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -18,6 +19,9 @@ type fake struct {
 	failRun  map[string]bool // argv[0] (after sudo) that fails
 	installs map[string][]string
 	globs    map[string][]string
+	unpacked [][2]string // archive, dest
+	removed  []string
+	sha      string // digest the fake reports for any download
 }
 
 func newFake(goos string) (*Env, *fake) {
@@ -53,8 +57,15 @@ func newFake(goos string) (*Env, *fake) {
 			}
 			return nil
 		},
-		Download: func(url string) (string, error) { return `C:\Temp\elmer.exe`, nil },
-		Glob:     func(p string) ([]string, error) { return f.globs[p], nil },
+		Download: func(url string) (string, error) { return `C:\Temp\elmer.zip`, nil },
+		Home:     func() (string, error) { return `C:\Users\u`, nil },
+		SHA256:   func(string) (string, error) { return f.sha, nil },
+		Unpack: func(archive, dest string, skip, expect []string) error {
+			f.unpacked = append(f.unpacked, [2]string{archive, dest})
+			return nil
+		},
+		Remove: func(p string) error { f.removed = append(f.removed, p); return nil },
+		Glob:   func(p string) ([]string, error) { return f.globs[p], nil },
 		Getenv: func(k string) string {
 			return map[string]string{"ProgramFiles": `C:\Program Files`}[k]
 		},
@@ -226,11 +237,33 @@ func TestPlanPerPlatform(t *testing.T) {
 		t.Fatal(got)
 	}
 	p := e.Plan(el, false)
-	if len(p.Steps) != 1 || p.Steps[0].Download != ElmerWindowsURL || !reflect.DeepEqual(p.Steps[0].Argv, []string{"{file}", "/S"}) || !p.Steps[0].Admin {
+	// Elmer: the official .zip, pinned by SHA-256, unpacked under the user's
+	// own ~/.pcbpilot — never the installer, never elevation.
+	if len(p.Steps) != 1 {
 		t.Fatalf("%+v", p)
 	}
-	if !strings.Contains(p.Manual, "nic.funet.fi") {
-		t.Fatal("elmer windows needs a fallback message")
+	st := p.Steps[0]
+	wantDir := filepath.Join(`C:\Users\u`, ".pcbpilot", "elmer", "rel"+ElmerWindowsRelease)
+	if st.Download != ElmerWindowsURL || st.SHA256 != ElmerWindowsSHA256 || st.Unpack != wantDir || st.Admin || st.Sudo || len(st.Argv) != 0 {
+		t.Fatalf("%+v", st)
+	}
+	if !strings.HasPrefix(ElmerWindowsURL, "https://www.nic.funet.fi/pub/sci/physics/elmer/bin/windows/") || !strings.HasSuffix(ElmerWindowsURL, ".zip") {
+		t.Fatalf("Elmer must come from the official mirror as a .zip: %s", ElmerWindowsURL)
+	}
+	if len(ElmerWindowsSHA256) != 64 {
+		t.Fatal("the Elmer archive must be pinned by a full SHA-256")
+	}
+	line := st.String()
+	if strings.Contains(line, "/S") || strings.Contains(line, "administrator approval") || !strings.Contains(line, "no administrator rights") {
+		t.Fatal(line)
+	}
+	if !strings.Contains(p.Manual, "nic.funet.fi") || !strings.Contains(p.Manual, `.pcbpilot\elmer`) || p.Warning != "" {
+		t.Fatalf("elmer windows needs the exact manual step, no elevation warning: %+v", p)
+	}
+	// no home folder → the manual step only, nothing guessed
+	e.Home = func() (string, error) { return "", errors.New("no home") }
+	if p := e.Plan(el, false); len(p.Steps) != 0 || !strings.Contains(p.Manual, "nic.funet.fi") {
+		t.Fatalf("%+v", p)
 	}
 }
 
@@ -355,26 +388,86 @@ func TestInstallLinuxSudo(t *testing.T) {
 	}
 }
 
-func TestInstallWindowsElmerDownload(t *testing.T) {
+func TestInstallWindowsElmerUnpacksPerUser(t *testing.T) {
 	e, f := newFake("windows")
-	f.installs[`C:\Temp\elmer.exe /S`] = []string{"ElmerSolver", "ElmerGrid"}
+	f.sha = ElmerWindowsSHA256
+	dest := filepath.Join(`C:\Users\u`, ".pcbpilot", "elmer", "rel"+ElmerWindowsRelease)
+	e.Unpack = func(archive, d string, skip, expect []string) error {
+		f.unpacked = append(f.unpacked, [2]string{archive, d})
+		if !reflect.DeepEqual(skip, []string{"stripped_gfortran"}) || !reflect.DeepEqual(expect, []string{"bin/ElmerSolver.exe", "bin/ElmerGrid.exe"}) {
+			t.Errorf("skip=%v expect=%v", skip, expect)
+		}
+		// the unpacked tree is what Locate finds — PATH stays untouched
+		bin := filepath.Join(d, "bin")
+		f.globs[filepath.Join(filepath.Dir(d), "*", "bin")] = []string{bin}
+		for _, b := range []string{"ElmerSolver", "ElmerGrid"} {
+			f.globs[filepath.Join(bin, b+".exe")] = []string{filepath.Join(bin, b+".exe")}
+		}
+		f.outputs[filepath.Join(bin, "ElmerSolver.exe")+" -v"] = "ELMER SOLVER (v 9.0) STARTED"
+		return nil
+	}
 	var buf bytes.Buffer
 	outs, err := e.Install(&buf, InstallOptions{Yes: true, Only: "elmer"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(f.ran, [][]string{{`C:\Temp\elmer.exe`, "/S"}}) || outs[0].Action != "installed" {
-		t.Fatalf("%v %+v\n%s", f.ran, outs, buf.String())
+	if len(f.ran) != 0 {
+		t.Fatalf("no program may be run to install Elmer on Windows (the installer needs elevation): %v", f.ran)
 	}
-	// download failure → optional warning with the fallback URL
-	e.Download = func(string) (string, error) { return "", errors.New("404") }
-	f.bins = map[string]string{}
-	buf.Reset()
-	if _, err := e.Install(&buf, InstallOptions{Yes: true, Only: "elmer"}); err != nil {
-		t.Fatal(err)
+	if !reflect.DeepEqual(f.unpacked, [][2]string{{`C:\Temp\elmer.zip`, dest}}) || !reflect.DeepEqual(f.removed, []string{`C:\Temp\elmer.zip`}) {
+		t.Fatalf("unpacked=%v removed=%v", f.unpacked, f.removed)
 	}
-	if !strings.Contains(buf.String(), "nic.funet.fi") {
+	if outs[0].Action != "installed" || outs[0].After != StatusOK || outs[0].Message != "" {
+		t.Fatalf("%+v\n%s", outs, buf.String())
+	}
+	if strings.Contains(buf.String(), "administrator approval") || strings.Contains(buf.String(), "elevation") {
 		t.Fatal(buf.String())
+	}
+	if r := e.CheckTool(tool(t, "elmer")); r.Status != StatusOK || r.OnPath || r.Version != "9.0" || !strings.HasPrefix(r.Path, dest) {
+		t.Fatalf("%+v", r)
+	}
+}
+
+// Every failure of the per-user install is one short line that names the
+// manual step, and stays a warning (Elmer is optional).
+func TestInstallWindowsElmerFailuresAreShortAndOptional(t *testing.T) {
+	cases := map[string]func(e *Env, f *fake){
+		"404": func(e *Env, f *fake) {
+			e.Download = func(string) (string, error) { return "", errors.New("404") }
+		},
+		"does not match the pinned SHA-256": func(e *Env, f *fake) { f.sha = strings.Repeat("0", 64) },
+		"disk full": func(e *Env, f *fake) {
+			e.Unpack = func(string, string, []string, []string) error { return errors.New("disk full") }
+		},
+	}
+	for want, breakIt := range cases {
+		e, f := newFake("windows")
+		f.sha = ElmerWindowsSHA256
+		breakIt(e, f)
+		var buf bytes.Buffer
+		outs, err := e.Install(&buf, InstallOptions{Yes: true, Only: "elmer"})
+		if err != nil {
+			t.Fatalf("%s: optional Elmer must not fail the install: %v", want, err)
+		}
+		o := outs[0]
+		if o.Action != "failed" || o.After != StatusMissing || !strings.Contains(o.Message, want) {
+			t.Fatalf("%s: %+v", want, o)
+		}
+		if strings.Count(o.Message, "nic.funet.fi") != 1 || strings.Count(buf.String(), o.Message) != 1 {
+			t.Fatalf("%s: the reason and the manual step must be printed once:\n%s", want, buf.String())
+		}
+		if want != "disk full" && len(f.unpacked) != 0 {
+			t.Fatalf("%s: nothing may be unpacked: %v", want, f.unpacked)
+		}
+		if len(f.ran) != 0 {
+			t.Fatalf("%s: ran %v", want, f.ran)
+		}
+	}
+	// --require-elmer turns the same failure into an error
+	e, f := newFake("windows")
+	f.sha = "bad"
+	if _, err := e.Install(&bytes.Buffer{}, InstallOptions{Yes: true, Only: "elmer", RequireElmer: true}); !errors.Is(err, ErrRequired) {
+		t.Fatal(err)
 	}
 }
 

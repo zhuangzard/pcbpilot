@@ -30,15 +30,25 @@ import (
 	"time"
 )
 
-// Elmer's official Windows binaries (NSIS installer, needs admin, `/S` = silent)
-// live on the CSC mirror at nic.funet.fi. rel26.1 is the latest release folder
-// with a stable file name (checked 2026-09-28; the top-level folder only holds
-// rolling devel builds). If the file is gone, ElmerWindowsFallback tells the
-// user where to look instead of guessing another URL.
+// Elmer's official Windows binaries live on the CSC mirror at nic.funet.fi.
+// Every build is published twice: an NSIS installer (.exe, writes to Program
+// Files, so it needs administrator rights) and a plain .zip of the same tree.
+// pcbpilot uses the .zip: it is unpacked into the user's own ~/.pcbpilot/elmer
+// folder, which needs no elevation, no installer run and no PATH change — a
+// standard account could never finish the installer ("requires elevation").
+//
+// rel26.1 is the latest release folder with a stable file name (checked
+// 2026-11-12; the top-level folder only holds rolling devel builds). The mirror
+// publishes no checksum files, so the archive is pinned here by its SHA-256:
+// a changed or damaged download is refused, never unpacked. If the file is
+// gone, ElmerWindowsFallback tells the user where to look instead of guessing
+// another URL.
 const (
 	ElmerWindowsRelease  = "26.1"
-	ElmerWindowsURL      = "https://www.nic.funet.fi/pub/sci/physics/elmer/bin/windows/rel26.1/ElmerFEM-nogui-nompi-Windows-AMD64-rel26.1.exe"
-	ElmerWindowsFallback = "download the Windows installer (ElmerFEM-*-Windows-AMD64*.exe) from https://www.nic.funet.fi/pub/sci/physics/elmer/bin/windows/ (see https://www.elmerfem.org/blog/binaries/), run it, and put its bin folder on PATH"
+	ElmerWindowsURL      = "https://www.nic.funet.fi/pub/sci/physics/elmer/bin/windows/rel26.1/ElmerFEM-nogui-nompi-Windows-AMD64-rel26.1.zip"
+	ElmerWindowsSHA256   = "8ce866cc6ff16a842f01edc1dc56c9a801cdd758210ec02cf1353398e6839455"
+	ElmerWindowsUserDir  = "rel" + ElmerWindowsRelease // folder name under ~/.pcbpilot/elmer
+	ElmerWindowsFallback = `by hand (no administrator rights needed): download ElmerFEM-nogui-nompi-Windows-AMD64-rel26.1.zip from https://www.nic.funet.fi/pub/sci/physics/elmer/bin/windows/rel26.1/, unzip it, and move the unpacked folder (the one that holds bin\ElmerSolver.exe) to %USERPROFILE%\.pcbpilot\elmer\rel26.1`
 	ElmerSourceHelp      = "no packaged Elmer for this system: build from source (https://github.com/ElmerCSC/elmerfem, cmake + gfortran + BLAS/LAPACK) or see https://www.elmerfem.org/blog/binaries/"
 	NgspiceWindowsHelp   = "download ngspice for Windows from https://ngspice.sourceforge.io/download.html, unpack it (e.g. C:\\Spice64) and put its bin folder on PATH"
 	HomebrewHelp         = `Homebrew is required on macOS and is not installed; install it yourself from https://brew.sh:  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"  then re-run: pcbpilot sim tools install`
@@ -68,6 +78,10 @@ type Tool struct {
 	// WinDirs are glob patterns (env vars expanded) searched on Windows when
 	// the binary is not on PATH — installers there often skip PATH.
 	WinDirs []string
+	// UserDir is the folder under ~/.pcbpilot that holds pcbpilot's own
+	// per-user unpack of the tool on Windows (<UserDir>/<release>/bin). It is
+	// searched after PATH and before WinDirs.
+	UserDir string
 }
 
 // Tools is the catalog, in install order.
@@ -93,6 +107,7 @@ func Tools() []Tool {
 			Required:    false,
 			UsedBy:      []string{"pcbpilot sim post-layout --elmer-check (thermal cross-check)"},
 			WinDirs:     []string{`%ProgramFiles%\Elmer*\bin`, `%ProgramFiles(x86)%\Elmer*\bin`, `C:\Elmer*\bin`},
+			UserDir:     "elmer",
 		},
 	}
 }
@@ -122,6 +137,14 @@ type Env struct {
 	Download func(url string) (string, error)
 	Glob     func(pattern string) ([]string, error)
 	Getenv   func(string) string
+	// Home is the user's home directory (~/.pcbpilot lives in it).
+	Home func() (string, error)
+	// SHA256 returns the lowercase hex digest of a file.
+	SHA256 func(path string) (string, error)
+	// Unpack extracts a .zip into dest (see UnpackZip).
+	Unpack func(archive, dest string, skip, expect []string) error
+	// Remove deletes a downloaded temp file.
+	Remove func(path string) error
 }
 
 // Real returns the Env of this machine.
@@ -133,6 +156,10 @@ func Real() *Env {
 		Glob:     filepath.Glob,
 		Getenv:   os.Getenv,
 		Download: download,
+		Home:     os.UserHomeDir,
+		SHA256:   FileSHA256,
+		Unpack:   UnpackZip,
+		Remove:   os.Remove,
 	}
 	e.StdinTTY = stdinIsTerminal()
 	if e.GOOS == "linux" {
@@ -186,7 +213,7 @@ func readOSRelease(path string) map[string]string {
 }
 
 func download(url string) (string, error) {
-	f, err := os.CreateTemp("", "pcbpilot-elmer-*.exe")
+	f, err := os.CreateTemp("", "pcbpilot-elmer-*"+downloadExt(url))
 	if err != nil {
 		return "", err
 	}
@@ -203,6 +230,17 @@ func download(url string) (string, error) {
 		return "", fmt.Errorf("download %s: %w", url, err)
 	}
 	return f.Name(), nil
+}
+
+var reDownloadExt = regexp.MustCompile(`^\.[a-z0-9]{1,5}$`)
+
+// downloadExt keeps a plain file extension of the URL for the temp file.
+func downloadExt(url string) string {
+	ext := strings.ToLower(filepath.Ext(strings.SplitN(url, "?", 2)[0]))
+	if reDownloadExt.MatchString(ext) {
+		return ext
+	}
+	return ".bin"
 }
 
 // ── check ─────────────────────────────────────────────────────────────────
@@ -259,6 +297,18 @@ func (e *Env) Locate(t Tool, bin string) (path string, onPath bool) {
 	if e.GOOS != "windows" {
 		return "", false
 	}
+	// pcbpilot's own per-user unpack (~/.pcbpilot/<UserDir>/<release>/bin).
+	if root := e.UserToolDir(t); root != "" {
+		dirs, _ := e.Glob(filepath.Join(root, "*", "bin"))
+		sort.Sort(sort.Reverse(sort.StringSlice(dirs)))
+		for _, dir := range dirs {
+			for _, n := range names {
+				if m, _ := e.Glob(filepath.Join(dir, n+".exe")); len(m) > 0 {
+					return m[0], false
+				}
+			}
+		}
+	}
 	for _, d := range t.WinDirs {
 		pat := expandWin(d, e.Getenv)
 		dirs, _ := e.Glob(pat)
@@ -273,6 +323,37 @@ func (e *Env) Locate(t Tool, bin string) (path string, onPath bool) {
 		}
 	}
 	return "", false
+}
+
+// UserToolDir is ~/.pcbpilot/<t.UserDir>: where pcbpilot unpacks a tool for
+// this user only. Empty when the tool has no per-user install or the home
+// directory is unknown.
+func (e *Env) UserToolDir(t Tool) string {
+	if t.UserDir == "" || e.Home == nil {
+		return ""
+	}
+	home, err := e.Home()
+	if err != nil || home == "" {
+		return ""
+	}
+	return filepath.Join(home, ".pcbpilot", t.UserDir)
+}
+
+// ElmerHome returns the Elmer install root for an ElmerSolver/ElmerGrid
+// binary that sits in <root>/bin next to <root>/share/elmersolver — the layout
+// of every official package — or "" when the layout is different. A solver
+// started from outside PATH needs ELMER_HOME to find its own share folder;
+// without it Elmer falls back to its build-time prefix under Program Files.
+func ElmerHome(bin string) string {
+	binDir := filepath.Dir(bin)
+	if !strings.EqualFold(filepath.Base(binDir), "bin") {
+		return ""
+	}
+	root := filepath.Dir(binDir)
+	if fi, err := os.Stat(filepath.Join(root, "share", "elmersolver")); err != nil || !fi.IsDir() {
+		return ""
+	}
+	return root
 }
 
 var reWinVar = regexp.MustCompile(`%([A-Za-z0-9_()]+)%`)
@@ -381,7 +462,7 @@ func (e *Env) CheckTool(t Tool) Result {
 		r.Status = StatusOK
 	}
 	if r.Status == StatusOK && !r.OnPath {
-		r.Detail = strings.TrimSpace(r.Detail + " (found outside PATH; add its folder to PATH for other tools)")
+		r.Detail = strings.TrimSpace(r.Detail + " (found outside PATH: pcbpilot uses it from there; add its folder to PATH only if other programs need it)")
 	}
 	return r
 }
@@ -464,6 +545,15 @@ type Step struct {
 	Admin    bool     `json:"admin,omitempty"`    // Windows elevation (UAC)
 	Download string   `json:"download,omitempty"` // fetch this URL first; "{file}" in Argv is the result
 	Optional bool     `json:"optional,omitempty"` // failure does not stop the plan
+	// SHA256, when set, must match the downloaded file or the step fails.
+	SHA256 string `json:"sha256,omitempty"`
+	// Unpack, when set, makes this an unpack step instead of a command: the
+	// downloaded .zip is extracted into this directory and no Argv is run.
+	// Skip lists archive folders left out; Expect lists files that must be
+	// in the tree for the unpack to count.
+	Unpack string   `json:"unpack,omitempty"`
+	Skip   []string `json:"skip,omitempty"`
+	Expect []string `json:"expect,omitempty"`
 }
 
 // String renders the step as a shell line.
@@ -471,6 +561,13 @@ func (s Step) String() string {
 	argv := s.Argv
 	if s.Sudo {
 		argv = append([]string{"sudo"}, argv...)
+	}
+	if s.Unpack != "" {
+		line := "download " + s.Download + " and unpack it into " + s.Unpack
+		if s.SHA256 != "" {
+			line += " (SHA-256 checked)"
+		}
+		return line + "   (per-user: no administrator rights, PATH unchanged)"
 	}
 	line := shellJoin(argv)
 	if s.Download != "" {
@@ -580,9 +677,23 @@ func (e *Env) Plan(t Tool, upgrade bool) Plan {
 				p.Manual = NgspiceWindowsHelp
 			}
 		case "elmer":
-			p.Steps = []Step{{Download: ElmerWindowsURL, Argv: []string{"{file}", "/S"}, Admin: true}}
-			p.Manual = "if the download fails: " + ElmerWindowsFallback
-			p.Warning = "the Elmer " + ElmerWindowsRelease + " installer needs administrator approval and may not add its bin folder to PATH; pcbpilot also looks in Program Files\\Elmer*\\bin"
+			// Per-user: the official .zip goes under ~/.pcbpilot/elmer. The
+			// official installer (.exe) is never run — it needs elevation.
+			root := e.UserToolDir(t)
+			if root == "" {
+				p.Manual = "cannot tell this account's home folder; install Elmer " + ElmerWindowsFallback
+				break
+			}
+			p.Steps = []Step{{
+				Download: ElmerWindowsURL,
+				SHA256:   ElmerWindowsSHA256,
+				Unpack:   filepath.Join(root, ElmerWindowsUserDir),
+				// the bundled gfortran toolchain (about 340 MB) only compiles
+				// user-written solver code (elmerf90); the cross-check never does
+				Skip:   []string{"stripped_gfortran"},
+				Expect: []string{"bin/ElmerSolver.exe", "bin/ElmerGrid.exe"},
+			}}
+			p.Manual = "or install it " + ElmerWindowsFallback
 		}
 	default:
 		p.Manual = "no automatic install for " + e.GOOS + "; install " + t.Title + " yourself"
@@ -724,6 +835,16 @@ func (e *Env) runPlan(w io.Writer, p Plan, o InstallOptions) (action, msg string
 		fmt.Fprintln(w, "  (these commands use sudo and may ask for your password)")
 	}
 	for _, s := range p.Steps {
+		if s.Unpack != "" {
+			if err := e.runUnpack(w, s); err != nil {
+				m := err.Error()
+				if p.Manual != "" {
+					m += " — " + p.Manual
+				}
+				return "failed", m
+			}
+			continue
+		}
 		argv := append([]string{}, s.Argv...)
 		if s.Download != "" {
 			fmt.Fprintln(w, "  → downloading "+s.Download)
@@ -755,6 +876,40 @@ func (e *Env) runPlan(w io.Writer, p Plan, o InstallOptions) (action, msg string
 		}
 	}
 	return "installed", ""
+}
+
+// runUnpack downloads s.Download, checks its SHA-256 and extracts it into
+// s.Unpack. Nothing is executed and nothing outside s.Unpack is written, so it
+// needs no elevation.
+func (e *Env) runUnpack(w io.Writer, s Step) error {
+	if e.Download == nil || e.Unpack == nil {
+		return errors.New("unpacking is not available on this machine")
+	}
+	fmt.Fprintln(w, "  → downloading "+s.Download)
+	f, err := e.Download(s.Download)
+	if err != nil {
+		return err
+	}
+	if e.Remove != nil {
+		defer e.Remove(f)
+	}
+	if s.SHA256 != "" {
+		if e.SHA256 == nil {
+			return errors.New("cannot verify the download (no SHA-256 available)")
+		}
+		got, err := e.SHA256(f)
+		if err != nil {
+			return fmt.Errorf("cannot verify the download: %w", err)
+		}
+		if !strings.EqualFold(got, s.SHA256) {
+			return fmt.Errorf("the download does not match the pinned SHA-256 (got %s) and was not unpacked", got)
+		}
+	}
+	fmt.Fprintln(w, "  → unpacking into "+s.Unpack)
+	if err := e.Unpack(f, s.Unpack, s.Skip, s.Expect); err != nil {
+		return fmt.Errorf("unpacking into %s failed: %w", s.Unpack, err)
+	}
+	return nil
 }
 
 // canSudo: sudo exists and either we can prompt (TTY) or it needs no password.

@@ -106,7 +106,7 @@ SaveScalars 在探针点——板最高点、每个发热器件下最热单元�
 不一致为 `disagree` 并降级为 warn；找不到则 `skipped`，提示 `pcbpilot sim tools install --only elmer`，
 输入包保留，之后可在该目录 `ElmerSolver case.sif`，再 `--elmer-result probes.dat` 比较。
 安装与版本自检见 [environment-setup.md](environment-setup.md#仿真工具ngspice--elmer-fem)
-（`pcbpilot sim tools check|install`，macOS brew tap `elmercsc/elmerfem`、Ubuntu PPA、Windows 官方安装包）。
+（`pcbpilot sim tools check|install`，macOS brew tap `elmercsc/elmerfem`、Ubuntu PPA、Windows 官方 zip 解压到用户目录、免管理员权限）。
 报告里写实际 Elmer 版本；未运行时不得写“已交叉验证”。
 
 ## 6. 验证（解析解，`go test ./pkg/postsim`）
