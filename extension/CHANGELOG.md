@@ -24,6 +24,13 @@
 - Per-user Elmer install: the install lock is held by the operating system for the installing process (released when it
   ends, however it ends) instead of a lock file that a second install could take over after a time limit; `kicad lcsc
   --verify` never caches or reports a catalogue answer about a different number.
+- **Schematic layout (`kicad sch-build`, layout engine v5): more real wires, fewer net labels inside a zone.** A node that
+  sits on no IC pin and joins several 2-/3-pin parts (a divider tap, an RC filter node, a feedback node) used to get one
+  label per member. The new `compact-node` variants chain parts along signal nets first, leave room on the first wire of
+  such a net for the other members to tap it, and draw the node as a wired T off the part already attached. The existing
+  clash checks still decide: a member whose wire would clash keeps its label. Supply and ground nets keep their symbols.
+  Node and plain variants are ranked together per zone; a page that would be left under-filled is packed from the zones'
+  alternative shapes on the same paper.
 - **BOM sheets (`kicad sch-build`): parts identified through fields are no longer reported as unidentified.** The BOM read
   only the spec's `mpn` / `lcsc`. A part whose number sits in a field — `LCSC Part #`, `LCSC`, `JLCPCB Part #`, `MPN`,
   `Mfr Part`, `Manufacturer Part Number` … as a schematic read back from another tool carries it — had empty MPN / LCSC
@@ -44,7 +51,7 @@
   to a pin on a 2.54 mm pitch (a potentiometer lug beside its track pin, a pin header) the jog ended on that pin's wire,
   every compact drawing of the zone was rejected as a short, and the zone fell back to the old spread-out drawing (more
   than twice the area on a field board, one paper size up for the page). The symbol now goes to the free side. Layout
-  engine `v4`: an in-place rebuild redraws every zone once.
+  engine `v5`: an in-place rebuild redraws every zone once.
 - Per-user Elmer unpack (`sim tools install`, `pcbpilot update` on Windows): each install stages in a folder of its own
   and takes a per-destination lock, so two installs at once cannot delete each other's files; an existing install is moved
   aside and put back if the new tree cannot take its place (it used to be deleted first); staging and moved-aside folders
