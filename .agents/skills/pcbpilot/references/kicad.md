@@ -505,7 +505,7 @@ pcbpilot kicad route --pcb board-b-v5a.kicad_pcb --intent intent.json --sim sim.
    到点即杀——它**只在结束时写 SES，没有检查点**，超时等于没有结果，大板要么给足时间要么减少轮数。它不认 fastroute 的
    禁止缩细/差分对/调优参数，结果由全部门禁按板面实况判定；日志在 `route.freerouting.log`，数不出未布通数的结果按不完整处理。
    fastroute 与 Freerouting 是同一个布线内核（同板同分数、同未布通数），所以它不是互补的第二意见；互补后端是 TraceMaker。
-   Freerouting 为 GPL-3.0，只在内部使用；对外分发含它的包须履行 GPL 义务。
+   Freerouting 为 GPL-3.0，与 fastroute 一样只作独立进程运行，pcbpilot 不打包、不下载、不链接它。
    `summary.routerCandidates` 记录每个后端的未布通数、用时、快检结果、是否过全量门禁。任何门禁、签核都不因后端而减少。
 3. **过孔尺寸**：fastroute（0.1.14）不会让每个过孔都用类的 `use_via`：fanout 等路径从 DSN structure `(via …)` 列表里取过孔（实板 262 个
    过孔全是 Default 的 0.6 mm，类要求 0.6096 / 0.7 mm，`kicad rules --check` 的 via-size 判失败）。所以列表里只放**逐项取最大**的

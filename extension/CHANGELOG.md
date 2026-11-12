@@ -6,17 +6,16 @@
 `pcbpilot-connector.eext` — the daemon pauses design actions until the versions match.**
 
 Summary: a stability release. It ports the fixes the upstream project made to the EasyEDA path since the fork (schematic
-readbacks, connector queue, PCB clear and rules), makes `pcbpilot update` and the install scripts work now that the
-repository is private, and adds Freerouting as a third `kicad route` backend. **Routing completion on large boards is
+readbacks, connector queue, PCB clear and rules), lets `pcbpilot update` and the install scripts fetch releases from a private
+repository, and adds Freerouting as a third `kicad route` backend. **Routing completion on large boards is
 unchanged from 0.12.7.** The ported EasyEDA fixes pass their unit tests and seven review rounds by Codex and Kimi; none of
 them was run against a live EasyEDA window.
 
-**Private repository (`pcbpilot update`, `install.sh`, `install.ps1`)**
-- The repository is private, so anonymous release downloads answer 404. The updater and both install scripts now fetch release
+**Private release repositories (`pcbpilot update`, `install.sh`, `install.ps1`)**
+- A private repository answers anonymous release downloads with 404. The updater and both install scripts then fetch release
   assets through the GitHub API with `GITHUB_TOKEN`, `GH_TOKEN` or the `gh` CLI's login. The token goes to `api.github.com`
   only. Checksums are verified as before; a private repository has no mirror fallback.
-- **A machine on 0.12.7 or older cannot self-update to this version**: its updater does not know the API route. Run the
-  0.12.8 install script once with a token set.
+- A public repository is fetched as before, with no token.
 
 **Freerouting backend (`kicad route --router freerouting|all`)**
 - Freerouting reads the same DSN and its session is imported like fastroute's; every gate judges the board as usual. Use the
@@ -29,7 +28,8 @@ them was run against a live EasyEDA window.
 - **What to expect:** fastroute and Freerouting are the same routing engine — on the small test board both gave 7 unrouted
   and 11 violations. On the 1443-part test board Freerouting did not leave its fanout stage in 65 minutes and produced
   nothing, where fastroute reached 1460 unrouted in 60 minutes on the same input. It is not a second opinion; TraceMaker is.
-- Freerouting is GPL-3.0. This build is for internal use; a package given to anyone outside must meet the GPL's terms.
+- Freerouting is GPL-3.0 and, like fastroute, only ever runs as a separate program you install yourself: pcbpilot does not
+  bundle, download or link it.
 
 **Schematic (EasyEDA)**
 - `sch list --include-pins`: a block instance missing from the netlist gets its pin nets from the wires that touch it, with
