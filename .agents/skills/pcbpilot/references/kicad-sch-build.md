@@ -25,6 +25,10 @@
      `Isolation`、`Core`；其余字段原样以 `键: 值` 进规格列；
    - `fields.Sourcing`：`LCSC`、指定厂家，或 `custom / self-sourced`（定制 / 自备件写清性能参数）。
    阻容至少要有封装和值，功率、耐压、介质有要求时也写上。报告的 `bom.missing[]` 交付前**必须为空**（每条有 `fix`）。
+   只有 C 号的件：**构建时加 `--bom-catalog`**，BOM 会用 LCSC 目录补上 MPN 和“厂家, 描述”（标 `[LCSC catalogue]`；
+   联网，有时限，取不到只是警告）。`bom.catalog.unknown[]` 不为空 = 目录里没有这个 C 号，多半写错了，必须核对。
+   MPN / C 号写在字段里（`MPN`、`LCSC Part #` …）也认。定制件（变压器、电感、线束）没有料号时必须写 `Description`
+   和参数，否则留在 `bom.missing`。
    导出：`pcbpilot kicad sch-pdf --project build/ --out build/schematic.pdf`（页、它的 BOM、下一页 …）。
    关闭开关 `--no-package-text` / `--no-bom-pages` 只在用户要求时用。
 6. 一次构建失败时读 `error.code` / `error.fix`；spec 问题是一次全部列出的（例如 `PIN_NOT_ON_SYMBOL` 会给出

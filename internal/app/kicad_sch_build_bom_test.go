@@ -1,10 +1,13 @@
 package app
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/zhuangzard/pcbpilot/internal/kicad"
@@ -537,5 +540,126 @@ func TestSchPdfNeedsARoot(t *testing.T) {
 	}
 	if _, err := schPdfRoot(t.TempDir(), ""); err == nil {
 		t.Errorf("a directory without a project must be an error")
+	}
+}
+
+// A spec that keeps a part's identity in fields ("LCSC Part #", "MPN" — what
+// a schematic read back from another tool carries) is identified like one
+// that uses lcsc / mpn.
+func TestSbBomIdentityFromFields(t *testing.T) {
+	t.Setenv(kicad.EnvCacheDir, t.TempDir())
+	u1 := sbTestPart("U1", "LDO", "Package_TO_SOT_SMD:SOT-23-5", map[string]string{"LCSC Part #": " c12345 ", "mpn": "DEMO-3V3"})
+	u2 := sbTestPart("U2", "OPAMP", "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm", map[string]string{"JLCPCB Part #": "C777"})
+	u3 := sbTestPart("U3", "MCU", "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm", map[string]string{"LCSC": "not a number"})
+	t1 := sbTestPart("T1", "EE16 custom", "My:XFMR", nil)
+	t2 := sbTestPart("T2", "EE16 custom", "My:XFMR", map[string]string{"Description": "flyback, 1:2.5, 400 uH, 1.5 kV isolation"})
+	parts := []*sbRPart{u1, u2, u3, t1, t2}
+	_, _, missing := sbBomCheck(parts)
+	got := map[string]string{}
+	for _, m := range missing {
+		got[m.Ref] = m.Reason
+	}
+	if len(got) != 2 || !strings.Contains(got["T1"], "custom part") || !strings.Contains(got["U3"], "no MPN") {
+		t.Fatalf("missing = %v, want T1 (custom, no requirements) and U3 (invalid number)", got)
+	}
+	rows := map[string]sbBomRow{}
+	for _, r := range sbBomRows(parts) {
+		rows[r.RefText] = r
+	}
+	if r := rows["U1"]; r.LCSC != "C12345" || r.MPN != "DEMO-3V3" || r.Sourcing != "LCSC" || strings.Contains(strings.ToLower(r.Spec), "lcsc") || strings.Contains(r.Spec, "DEMO") {
+		t.Errorf("U1 row %+v: the fields must fill the MPN / LCSC columns and stay out of the spec cell", r)
+	}
+	if r := rows["U2"]; r.LCSC != "C777" {
+		t.Errorf("U2 row %+v", r)
+	}
+	if r := rows["U3"]; r.LCSC != "" || r.Sourcing != "—" {
+		t.Errorf("U3 row %+v: an invalid number is not an LCSC number", r)
+	}
+	if r := rows["T1"]; r.Sourcing != "custom / self-sourced" {
+		t.Errorf("T1 row %+v", r)
+	}
+}
+
+// The catalogue record of an LCSC number fills the MPN and the spec cell,
+// marked as catalogue text; the design's own words win; without
+// --bom-catalog nothing is fetched; a failed lookup is not fatal.
+func TestSbBomCatalog(t *testing.T) {
+	t.Setenv(kicad.EnvCacheDir, t.TempDir())
+	calls := map[string]int{}
+	var mu sync.Mutex
+	old := sbCatalogLookup
+	defer func() { sbCatalogLookup = old }()
+	sbCatalogLookup = func(ctx context.Context, n string) (kicad.EasyEDAPart, bool, error) {
+		mu.Lock()
+		calls[n]++
+		mu.Unlock()
+		switch n {
+		case "C100":
+			return kicad.EasyEDAPart{LCSC: n, MPN: "DEMO-LDO33", Manufacturer: "DemoSemi", Description: "LDO 3.3 V 300 mA"}, true, nil
+		case "C200":
+			return kicad.EasyEDAPart{LCSC: n, MPN: "CAT-MPN", Manufacturer: "DemoSemi", Description: "op amp"}, true, nil
+		case "C300":
+			return kicad.EasyEDAPart{LCSC: n}, false, nil
+		}
+		return kicad.EasyEDAPart{LCSC: n}, false, errors.New("no answer")
+	}
+	mk := func() []*sbRPart {
+		u1 := sbTestPart("U1", "LDO", "Package_TO_SOT_SMD:SOT-23-5", nil)
+		u1.LCSC = "C100"
+		u2 := sbTestPart("U2", "OPAMP", "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm", map[string]string{"LCSC Part #": "C200", "MPN": "OWN-MPN", "Description": "rail-to-rail, GBW 10 MHz"})
+		u3 := sbTestPart("U3", "X", "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm", map[string]string{"LCSC": "C300"})
+		u4 := sbTestPart("U4", "Y", "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm", map[string]string{"LCSC": "C400"})
+		u5 := sbTestPart("U5", "LDO", "Package_TO_SOT_SMD:SOT-23-5", nil)
+		u5.LCSC = "C100"
+		return []*sbRPart{u1, u2, u3, u4, u5}
+	}
+	// no fetch, empty cache: nothing known, no call
+	parts := mk()
+	st := sbBomCatalog(parts, false)
+	if st.Numbers != 4 || st.Known != 0 || len(calls) != 0 || parts[0].cat != nil {
+		t.Fatalf("offline: %+v calls %v", st, calls)
+	}
+	if _, noSpec, _ := sbBomCheck(parts); strings.Join(noSpec, ",") != "U1,U3,U4,U5" {
+		t.Errorf("noSpec without the catalogue = %v", noSpec)
+	}
+	// fetch
+	parts = mk()
+	st = sbBomCatalog(parts, true)
+	if st.Numbers != 4 || st.Known != 2 || st.Fetched != 2 || strings.Join(st.Failed, ",") != "C400" || strings.Join(st.Unknown, ",") != "C300" {
+		t.Fatalf("fetch: %+v", st)
+	}
+	if calls["C100"] != 1 {
+		t.Errorf("C100 asked %d times for two parts", calls["C100"])
+	}
+	rows := map[string]sbBomRow{}
+	for _, r := range sbBomRows(parts) {
+		rows[r.RefText] = r
+	}
+	if r := rows["U1, U5"]; r.MPN != "DEMO-LDO33" || r.Spec != "[LCSC catalogue] DemoSemi, LDO 3.3 V 300 mA" {
+		t.Errorf("U1/U5 row %+v", r)
+	}
+	if r := rows["U2"]; r.MPN != "OWN-MPN" || r.Spec != "rail-to-rail, GBW 10 MHz" {
+		t.Errorf("U2 row %+v: the design's own MPN and description win", r)
+	}
+	if _, noSpec, _ := sbBomCheck(parts); strings.Join(noSpec, ",") != "U3,U4" {
+		t.Errorf("noSpec with the catalogue = %v", noSpec)
+	}
+	// the cache now answers without the network
+	calls = map[string]int{}
+	parts = mk()
+	st = sbBomCatalog(parts, false)
+	if st.Known != 2 || st.Fetched != 0 || len(calls) != 0 || parts[4].cat == nil || parts[4].cat.MPN != "DEMO-LDO33" {
+		t.Fatalf("cached: %+v calls %v", st, calls)
+	}
+	// a damaged cache file, or one for another number, is ignored
+	path := filepath.Join(kicad.CacheRoot(), "kicad-lcsc-catalog", "C100.json")
+	if err := os.WriteFile(path, []byte(`{"LCSC":"C999","MPN":"WRONG"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := kicad.CatalogCached("C100"); ok {
+		t.Error("a record of another number was accepted")
+	}
+	if _, ok := kicad.CatalogCached("../C100"); ok {
+		t.Error("an invalid number reached the cache")
 	}
 }

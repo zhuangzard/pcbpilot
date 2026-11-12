@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"math"
@@ -8,6 +9,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/zhuangzard/pcbpilot/internal/kicad"
 )
@@ -129,6 +132,148 @@ type sbBomRow struct {
 	DNP      bool     `json:"dnp,omitempty"`
 }
 
+// sbBomMPNKeys / sbBomLCSCKeys are the field names a spec (or a schematic
+// read back from another tool) keeps a part's identity under when it is not
+// in the part's own mpn / lcsc. The BOM reads them; the symbol source does
+// not change (only "lcsc" imports a symbol).
+var sbBomMPNKeys = []string{"MPN", "Mfr Part", "Mfr Part #", "Manufacturer Part", "Manufacturer Part Number", "Part Number"}
+var sbBomLCSCKeys = []string{"LCSC", "LCSC Part", "LCSC Part #", "LCSC Part Number", "JLCPCB Part", "JLCPCB Part #"}
+
+// sbBomOwnMPN is the manufacturer part number the design itself names: mpn,
+// else a field.
+func sbBomOwnMPN(p *sbRPart) string {
+	if v := strings.TrimSpace(p.MPN); v != "" {
+		return v
+	}
+	return strings.Join(strings.Fields(sbFieldCI(p.Fields, sbBomMPNKeys...)), " ")
+}
+
+// sbBomMPN is the MPN column: the design's own, else the catalogue's for the
+// part's LCSC number.
+func sbBomMPN(p *sbRPart) string {
+	if v := sbBomOwnMPN(p); v != "" {
+		return v
+	}
+	if p.cat != nil {
+		return strings.Join(strings.Fields(p.cat.MPN), " ")
+	}
+	return ""
+}
+
+// sbBomCatText is what the catalogue says the part's LCSC number is
+// (manufacturer, description), marked as such: it describes what would be
+// bought, not what the design requires.
+func sbBomCatText(p *sbRPart) string {
+	if p.cat == nil {
+		return ""
+	}
+	var t []string
+	for _, v := range []string{p.cat.Manufacturer, p.cat.Description} {
+		if v = strings.Join(strings.Fields(v), " "); v != "" {
+			t = append(t, v)
+		}
+	}
+	if len(t) == 0 {
+		return ""
+	}
+	return "[LCSC catalogue] " + strings.Join(t, ", ")
+}
+
+// sbCatalogLookup asks the live catalogue (replaced in tests).
+var sbCatalogLookup = kicad.LookupEasyEDAPart
+
+// sbBomCatalog attaches the cached catalogue record to every part with an
+// LCSC number; with fetch (--bom-catalog) it first asks the catalogue for
+// the numbers not cached yet: two at a time, 25 s per number, 4 min in all.
+// A number that could not be read is listed in Failed — the BOM is then
+// only less complete, the build does not fail.
+func sbBomCatalog(parts []*sbRPart, fetch bool) *sbBomCatalogStat {
+	st := &sbBomCatalogStat{Failed: []string{}, Unknown: []string{}}
+	byNum := map[string][]*sbRPart{}
+	var nums []string
+	for _, p := range parts {
+		p.cat = nil
+		n := sbBomLCSC(p)
+		if n == "" {
+			continue
+		}
+		if byNum[n] == nil {
+			nums = append(nums, n)
+		}
+		byNum[n] = append(byNum[n], p)
+	}
+	sort.Strings(nums)
+	st.Numbers = len(nums)
+	recs := map[string]kicad.EasyEDAPart{}
+	var todo []string
+	for _, n := range nums {
+		if c, ok := kicad.CatalogCached(n); ok {
+			recs[n] = c
+		} else {
+			todo = append(todo, n)
+		}
+	}
+	if fetch && len(todo) > 0 {
+		ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+		defer cancel()
+		var mu sync.Mutex
+		var wg sync.WaitGroup
+		sem := make(chan struct{}, 2)
+		for _, n := range todo {
+			wg.Add(1)
+			go func(n string) {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+				pctx, pcancel := context.WithTimeout(ctx, 25*time.Second)
+				defer pcancel()
+				c, found, err := sbCatalogLookup(pctx, n)
+				mu.Lock()
+				defer mu.Unlock()
+				switch {
+				case err != nil:
+					st.Failed = append(st.Failed, n)
+				case !found:
+					st.Unknown = append(st.Unknown, n)
+				default:
+					recs[n] = c
+					st.Fetched++
+					_ = kicad.CatalogStore(c)
+				}
+			}(n)
+		}
+		wg.Wait()
+		sort.Strings(st.Failed)
+		sort.Strings(st.Unknown)
+	}
+	for n, c := range recs {
+		c := c
+		for _, p := range byNum[n] {
+			p.cat = &c
+		}
+	}
+	st.Known = len(recs)
+	return st
+}
+
+// sbBomLCSC is the part's LCSC number: lcsc, else a field that holds one.
+func sbBomLCSC(p *sbRPart) string {
+	if v := strings.TrimSpace(p.LCSC); v != "" {
+		return v
+	}
+	if v := strings.ToUpper(sbFieldCI(p.Fields, sbBomLCSCKeys...)); kicad.ValidLCSC(v) {
+		return v
+	}
+	return ""
+}
+
+var sbBomCustomRE = regexp.MustCompile(`(?i)\b(custom|self[- ]?wound|self[- ]?sourced)\b|定制|自制|自购|自绕`)
+
+// sbBomCustom: the part's own text says it is made or sourced by the owner.
+func sbBomCustom(p *sbRPart) bool {
+	return sbBomCustomRE.MatchString(p.Value + " " + sbFieldCI(p.Fields, "Description", "Spec", "Requirements", "Note", "Notes"))
+}
+
 // sbBomSpecKeys are the fields the "Spec / requirements" column shows, in
 // this order; every other field that is not bookkeeping follows as
 // "key: value".
@@ -138,8 +283,13 @@ var sbBomSpecKeys = []string{"Description", "Rating", "Power", "Voltage", "Curre
 func sbBomSkipField(k string) bool {
 	l := strings.ToLower(k)
 	switch l {
-	case "package", "sourcing", "reference", "value", "footprint", "datasheet", "lcsc", "lcsc part", "lcsc part #", "mpn", "dnp":
+	case "package", "sourcing", "reference", "value", "footprint", "datasheet", "dnp":
 		return true
+	}
+	for _, n := range append(append([]string(nil), sbBomMPNKeys...), sbBomLCSCKeys...) {
+		if strings.EqualFold(k, n) {
+			return true
+		}
 	}
 	return strings.HasPrefix(l, "pcbpilot_") || strings.HasPrefix(l, "sim.") || strings.HasPrefix(l, "ki_")
 }
@@ -148,6 +298,7 @@ func sbBomSkipField(k string) bool {
 // first, then the ratings, then every other field.
 func sbBomSpec(p *sbRPart) string {
 	var out []string
+	described := false
 	used := map[string]bool{}
 	for _, name := range sbBomSpecKeys {
 		var keys []string
@@ -165,6 +316,7 @@ func sbBomSpec(p *sbRPart) string {
 			}
 			if name == "Description" {
 				out = append(out, v)
+				described = true
 			} else {
 				out = append(out, name+": "+v)
 			}
@@ -182,6 +334,9 @@ func sbBomSpec(p *sbRPart) string {
 			out = append(out, k+": "+v)
 		}
 	}
+	if c := sbBomCatText(p); c != "" && !described {
+		out = append([]string{c}, out...)
+	}
 	return strings.Join(out, "; ")
 }
 
@@ -191,8 +346,11 @@ func sbBomSourcing(p *sbRPart) string {
 	if v := sbFieldCI(p.Fields, "Sourcing"); v != "" {
 		return strings.Join(strings.Fields(v), " ")
 	}
-	if p.LCSC != "" {
+	if sbBomLCSC(p) != "" {
 		return "LCSC"
+	}
+	if sbBomCustom(p) {
+		return "custom / self-sourced"
 	}
 	return "—"
 }
@@ -206,7 +364,7 @@ func sbBomRows(parts []*sbRPart) []sbBomRow {
 	sorted := append([]*sbRPart(nil), parts...)
 	sort.SliceStable(sorted, func(a, b int) bool { return sbRefLess(sorted[a].Ref, sorted[b].Ref) })
 	for _, p := range sorted {
-		r := sbBomRow{Value: p.Value, Package: p.Package, MPN: p.MPN, LCSC: p.LCSC, Spec: sbBomSpec(p), Sourcing: sbBomSourcing(p), DNP: p.DNP}
+		r := sbBomRow{Value: p.Value, Package: p.Package, MPN: sbBomMPN(p), LCSC: sbBomLCSC(p), Spec: sbBomSpec(p), Sourcing: sbBomSourcing(p), DNP: p.DNP}
 		key := strings.Join([]string{r.Value, p.Footprint, r.Package, r.MPN, r.LCSC, r.Spec, r.Sourcing, strconv.FormatBool(r.DNP)}, "\x00")
 		i, ok := idx[key]
 		if !ok {
@@ -324,7 +482,12 @@ func sbBomCheck(parts []*sbRPart) (noPackage, noSpec []string, missing []sbBomMi
 		if !described && sbBomSpec(p) == "" {
 			noSpec = append(noSpec, p.Ref)
 		}
-		if p.MPN == "" && p.LCSC == "" && !described {
+		if sbBomMPN(p) == "" && sbBomLCSC(p) == "" && !described && sbBomCustom(p) {
+			missing = append(missing, sbBomMissing{Ref: p.Ref, Reason: "a custom part with no requirements: nobody can make or buy it from this BOM",
+				Fix: fmt.Sprintf("add fields.Description to %s with what it must meet (a transformer or inductor: turns ratio, inductance, saturation current, isolation voltage, core; a connector or mechanical part: drawing or mating part)", p.Ref)})
+			continue
+		}
+		if sbBomMPN(p) == "" && sbBomLCSC(p) == "" && !described {
 			missing = append(missing, sbBomMissing{Ref: p.Ref, Reason: "no MPN, no LCSC number and no description: the BOM does not say what this part is",
 				Fix: fmt.Sprintf("add fields.Description and fields.Sourcing to %s (or mpn / lcsc)", p.Ref)})
 		}
@@ -567,6 +730,21 @@ type sbBomReport struct {
 	NoPackage   []string       `json:"noPackage"`
 	NoSpec      []string       `json:"noSpec"`
 	Missing     []sbBomMissing `json:"missing"`
+	// Catalog: how many of the design's LCSC numbers have a catalogue
+	// record the BOM could show.
+	Catalog *sbBomCatalogStat `json:"catalog,omitempty"`
+}
+
+// sbBomCatalogStat: numbers = distinct LCSC numbers in the design, known =
+// those with a catalogue record (cached or just fetched), fetched = read
+// from the network in this build, failed = the catalogue did not answer,
+// unknown = the catalogue has no such number.
+type sbBomCatalogStat struct {
+	Numbers int      `json:"numbers"`
+	Known   int      `json:"known"`
+	Fetched int      `json:"fetched"`
+	Failed  []string `json:"failed"`
+	Unknown []string `json:"unknown"`
 }
 
 // sbBomFile is the file of a page's n-th BOM sheet (1 = first), next to the
@@ -642,11 +820,21 @@ func sbBomSymSpot(fr kicad.FitResult, name, file string, n int) (x, y float64) {
 func sbBomSummary(d *sbDesign, o sbOptions) (*sbBomReport, []string) {
 	b := &sbBomReport{Sheets: !o.NoBomPages, PackageText: !o.NoPackageText, Parts: len(d.Parts),
 		Pages: []sbBomPage{}, NoPackage: []string{}, NoSpec: []string{}, Missing: []sbBomMissing{}}
+	b.Catalog = sbBomCatalog(d.Parts, o.BomCatalog && !o.Offline)
 	np, ns, miss := sbBomCheck(d.Parts)
 	b.NoPackage, b.NoSpec, b.Missing = append(b.NoPackage, np...), append(b.NoSpec, ns...), append(b.Missing, miss...)
 	var warn []string
 	if len(np) > 0 {
 		warn = append(warn, fmt.Sprintf("no package text for %s: no footprint (add footprint, lcsc or fields.Package)", sbShortList(np, 12)))
+	}
+	if c := b.Catalog; len(c.Failed) > 0 {
+		warn = append(warn, fmt.Sprintf("BOM: the LCSC catalogue did not answer for %s — those rows show only what the spec says; run again with --bom-catalog", sbShortList(c.Failed, 12)))
+	}
+	if c := b.Catalog; len(c.Unknown) > 0 {
+		warn = append(warn, fmt.Sprintf("BOM: the LCSC catalogue has no record of %s — check the number (kicad lcsc --verify)", sbShortList(c.Unknown, 12)))
+	}
+	if c := b.Catalog; !o.BomCatalog && c.Numbers > c.Known {
+		warn = append(warn, fmt.Sprintf("BOM: %d of %d LCSC numbers have no cached catalogue record, so their MPN / description are not filled in — build with --bom-catalog (network) to fetch them", c.Numbers-c.Known, c.Numbers))
 	}
 	if len(miss) > 0 {
 		refs := map[string]bool{}

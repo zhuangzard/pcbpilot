@@ -118,9 +118,17 @@ SOT-23 还是 SOIC-8。文字由封装名推出：`R_0603_1608Metric` → `0603`
 | 列 | 来源 |
 |---|---|
 | Refs / Qty | 值、封装、MPN、C 号、规格、来源都相同的件合成一行，位号压缩（`R1-R4, R7`）；DNP 的件单独成行并标 `DNP` |
-| Value / Package / MPN / LCSC | `value`、封装文字、`mpn`、`lcsc` |
+| Value / Package / MPN / LCSC | `value`、封装文字、`mpn`、`lcsc`。MPN 也认字段 `MPN` / `Mfr Part` / `Manufacturer Part (Number)` / `Part Number`，C 号也认字段 `LCSC Part #` / `LCSC` / `LCSC Part` / `JLCPCB Part #`（值必须是合法 C 号）——从别的工具读回来的原理图通常把它们放在字段里。设计自己没写 MPN 而 C 号有目录记录时，MPN 取目录的 |
 | Spec / requirements | `fields.Description` 在前，然后 `Rating` `Power` `Voltage` `Current` `Tolerance` `Dielectric` `Note(s)` `Spec` `Requirements`，再是其余字段（`键: 值`）。变压器、电感这类件把 `Inductance`、`TurnsRatio`、`Isat`、`Isolation`、`Core` 等写成字段就会出现在这里 |
-| Sourcing | `fields.Sourcing`（如 `custom / self-sourced`、`any`、指定厂家）；没写而有 C 号 → `LCSC`；都没有 → `—` |
+| Sourcing | `fields.Sourcing`（如 `custom / self-sourced`、`any`、指定厂家）；没写而有 C 号 → `LCSC`；值或说明里写着 custom / 定制 / 自制 → `custom / self-sourced`；都没有 → `—` |
+
+**LCSC 目录补全（`--bom-catalog`）。** 设计只给了 C 号时，BOM 用该 C 号的目录记录补 MPN，并在规格格最前面加
+`[LCSC catalogue] 厂家, 描述`（设计自己写了 `Description` 就不加：目录说的是“会买到什么”，不是“设计要求什么”）。
+记录来自本机缓存（`~/.pcbpilot/cache/kicad-lcsc-catalog/`），由 `kicad lcsc --verify` 和 `sch-build --bom-catalog`
+写入。默认构建只读缓存、不联网；`--bom-catalog` 才去取还没缓存的 C 号（每次 2 个并发、单个 25 s、总共 4 分钟；
+`--offline` 时不取）。取不到只是警告，不让构建失败。报告 `bom.catalog`：`numbers`（设计里不同的 C 号数）、
+`known`（有记录的）、`fetched`（本次联网取到的）、`failed[]`（目录没应答）、`unknown[]`（**目录里没有这个 C 号**——
+多半是号写错了，用 `kicad lcsc --verify` 核对）。
 
 表格放不下一张纸时依次用 A4 → A3 → A2 横向，再放不下就续页（`<页>-bom-2.kicad_sch` …）。一行不拆页；单元格内容超过半张纸高时截断并以“… (cut: see the spec)”结尾。没有任何 BOM 行的页（只有电源符号、测试点之类）不生成 BOM 图纸。BOM 图纸里没有符号、
 导线和标签，不进网表；页面填充率、`page-fit`、布局看门狗等按页测量的门禁不计 BOM 图纸。原地重建时 BOM 图纸的
@@ -129,7 +137,9 @@ uuid 由页和行内容确定，内容不变文件就不变。`--no-bom-pages` �
 报告的 `bom`：`sheets` / `packageText`（两个开关的实际状态）、`pages[]`（`page`、`file`、`sheet`、`paper`、
 `pageNumber`、`rows`）、`rows`、`parts`、`noPackage[]`、`noSpec[]`（不是普通阻容、规格格为空的件）和
 `missing[]`（`ref`、`reason`、`fix`）。**`bom.missing` 是警告而不是门禁失败**：列出读者认不出来的件——没有封装，
-或者既没有 MPN、也没有 C 号、也没有 `Description`。每条的 `fix` 是一句话的改法；交付前应为空。
+或者既没有 MPN、也没有 C 号（含上面那些字段）、也没有 `Description`。值里写着 custom / 定制 的件单独一种原因
+（“a custom part with no requirements”）：`fix` 要求写出它必须满足的参数（变压器 / 电感：匝比、电感量、饱和电流、
+隔离电压、磁芯；连接器 / 结构件：图纸或对插件）。每条的 `fix` 是一句话的改法；交付前应为空。
 
 spec 作者对每个**不是普通阻容**的件要写：`fields.Description`（这是什么）、关键额定值（功率、电压、电流、容差；
 磁性件：电感量 / 匝比 / 饱和电流 / 隔离耐压 / 磁芯）和 `fields.Sourcing`（来源：LCSC、指定厂家、定制 / 自备）。例：

@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+- **BOM sheets (`kicad sch-build`): parts identified through fields are no longer reported as unidentified.** The BOM read
+  only the spec's `mpn` / `lcsc`. A part whose number sits in a field — `LCSC Part #`, `LCSC`, `JLCPCB Part #`, `MPN`,
+  `Mfr Part`, `Manufacturer Part Number` … as a schematic read back from another tool carries it — had empty MPN / LCSC
+  columns and was listed in `bom.missing`. The fields now fill the columns and count as identity.
+- **New `--bom-catalog`**: for a part that has only an LCSC number, the BOM takes the MPN from the LCSC catalogue record and
+  puts `[LCSC catalogue] manufacturer, description` in the spec cell (not when the design has its own `Description`). Records
+  are cached per user; a default build reads only the cache and never uses the network. `kicad lcsc --verify` fills the same
+  cache. The report's `bom.catalog` counts the numbers and lists `unknown[]` — LCSC numbers the catalogue has no record of.
+- A custom part (value or description says custom / self-wound / 定制) with no requirements gets its own `bom.missing`
+  reason and a fix that names what to write; its sourcing column reads `custom / self-sourced`.
 - **Elmer FEM installs on Windows without administrator rights.** `pcbpilot sim tools install` and `pcbpilot update` used
   to run the official installer, which a standard account cannot finish ("requires elevation"), so Elmer stayed `missing`
   on every update. They now download the official `.zip` of the same release from the same mirror, check its SHA-256, and

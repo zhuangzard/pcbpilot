@@ -43,6 +43,8 @@ spec 字段、门禁细节与 delta 语法以 [kicad-sch-build.md](../pcbpilot/r
    `TurnsRatio` / `Isat` / `Isolation` / `Core`）和 `fields.Sourcing`（`LCSC`、指定厂家、`custom / self-sourced` …）；
    每个件都要有封装（`footprint`、C 号或 `fields.Package`）。报告的 `bom.missing[]` **交付前必须为空**（每条带一句话的
    `fix`）；不为空就报“未完成”并照抄。不要用 `--no-package-text` / `--no-bom-pages` 省事，除非用户要求。
+   构建命令带 `--bom-catalog`：只有 C 号的件由 LCSC 目录补 MPN 和描述；`bom.catalog.unknown[]`（目录里没有的 C 号）
+   必须逐个核对后报告，不能当成功。
 
 ## 工作流
 

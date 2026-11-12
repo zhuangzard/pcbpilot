@@ -307,7 +307,13 @@ func runLcscVerify(stdout, stderr io.Writer, pcb, sch string, asJSON bool) error
 	sort.Strings(numbers)
 	ctx, cancel := context.WithTimeout(context.Background(), lcscVerifyDeadline)
 	defer cancel()
-	catalog, err := lcscLookup(ctx, numbers, kicad.LookupEasyEDAPart)
+	catalog, err := lcscLookup(ctx, numbers, func(ctx context.Context, n string) (kicad.EasyEDAPart, bool, error) {
+		part, found, err := kicad.LookupEasyEDAPart(ctx, n)
+		if err == nil && found {
+			_ = kicad.CatalogStore(part) // for the BOM sheets; best-effort
+		}
+		return part, found, err
+	})
 	if err != nil {
 		return fmt.Errorf("LCSC lookup failed (live, needs the network; nothing was judged): %w", err)
 	}
