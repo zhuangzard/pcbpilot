@@ -556,7 +556,7 @@ func refLessSB(a, b string) bool {
 // 2026-11-12: the field boards rebuilt in place after the compact-layout change kept the
 // 0.12.x zones and 6 of 7 boards failed the layout-quality watchdog).
 // v3: package text next to the value (wider zone drawings).
-const sbLayoutEngineVersion = "v4"
+const sbLayoutEngineVersion = "v5"
 
 // hash covers what shapes the zone: parts, symbols, pin connectivity (nets
 // numbered canonically, so a rename keeps the hash), policies, NC pins, and
@@ -2979,7 +2979,7 @@ type sbGridVariant struct {
 	// a node that is on no IC pin becomes one wired cluster hanging off the
 	// part that reaches it. Both kinds of compact variant are drawn and
 	// ranked together (a zone the node wiring draws worse keeps the plain
-	// drawing); the node variants first, so a zone past its time limit
+	// drawing); node and plain in turn, so a zone past its time limit
 	// keeps one of them.
 	Node bool
 	// Sub draws a sub-circuit block of a zone (gridZoneSub): no blocks of
@@ -2988,8 +2988,12 @@ type sbGridVariant struct {
 }
 
 var sbGridVariants = []sbGridVariant{
-	{Room: 1, Node: true}, {Room: 1.5, Node: true}, {Room: 1, OffsetMin: 30, Node: true}, {Room: 1.8, OffsetMin: 30, Node: true},
-	{Room: 1}, {Room: 1.5}, {Room: 1, OffsetMin: 30}, {Room: 1.8, OffsetMin: 30},
+	// node and plain drawing of each shape in turn: a zone past its time
+	// limit has both kinds to rank and to offer the page packer (all node
+	// variants first left a slow zone with node drawings only, and a page
+	// one paper size up for it)
+	{Room: 1, Node: true}, {Room: 1}, {Room: 1.5, Node: true}, {Room: 1.5},
+	{Room: 1, OffsetMin: 30, Node: true}, {Room: 1, OffsetMin: 30}, {Room: 1.8, OffsetMin: 30, Node: true}, {Room: 1.8, OffsetMin: 30},
 	{Room: 1, Legacy: true}, {Room: 1.5, Legacy: true}, {Room: 1, OffsetMin: 30, Legacy: true}, {Room: 1.8, OffsetMin: 30, Legacy: true},
 	{Room: 1.5, NoAttach: true, Legacy: true}, {Room: 2.4, OffsetMin: 40, NoAttach: true, Legacy: true}, {Room: 1, NoAttach: true, Legacy: true},
 }
