@@ -84,6 +84,10 @@ var staleViewOnlyActions = map[string]bool{
 // the canvas-origin offset stale, so these reads must not inherit staleRisk.
 var staleMetadataReadActions = map[string]bool{
 	"pcb.origin.get": true,
+	// Document listing (names/uuids) is editor metadata. Every CLI command's
+	// context probe reads it, so inheriting staleRisk printed PCB stale warnings
+	// on unrelated schematic commands (live 2026-10-13: `sch check`).
+	"pcb.documents.list": true,
 }
 
 // pcbStaleMarks reports whether a successful request should mark the window's

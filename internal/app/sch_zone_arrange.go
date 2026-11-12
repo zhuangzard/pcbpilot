@@ -552,7 +552,7 @@ func zaTriedText(probe []zaEdgeProbe) string {
 // zone-arrange 断言③ 全绿(逐区框零重叠)的页面,zone-plan 却报 partitionOverlap,
 // zone-draw 拒绝画框。配对由 TestRuler_ZonePartitionGroupingMatchesArrange 钉住。
 func zaPartitionPlan(res zaResult, sheet layoutBBox, keepout *layoutBBox, opts partitionOpts) partitionPlan {
-	plan := partitionPlan{Sheet: sheet, Keepout: keepout}
+	plan := partitionPlan{Sheet: sheet, Keepout: keepout, FrameGap: opts.Gutter}
 	for _, p := range res.Placed {
 		plan.Partitions = append(plan.Partitions, partitionRect{
 			Modules: []string{p.Name},

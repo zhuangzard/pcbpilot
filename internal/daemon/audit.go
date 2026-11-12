@@ -22,7 +22,10 @@ type auditEntry struct {
 	// ("<hostname>:<pid>[:<label>]", see protocol.Request.ClientID) so
 	// multi-client incidents are attributable from the audit log alone
 	// (issue #108). Empty for callers that sent no identity.
-	ClientID   string         `json:"clientId,omitempty"`
+	ClientID string `json:"clientId,omitempty"`
+	// Command is the CLI command path that issued the action (see
+	// protocol.Request.Command); empty for raw HTTP callers.
+	Command    string         `json:"command,omitempty"`
 	Action     string         `json:"action"`
 	Payload    map[string]any `json:"payload,omitempty"`
 	OK         bool           `json:"ok"`
@@ -133,6 +136,7 @@ func fromResponse(started time.Time, req *protocol.Request, resp *protocol.Respo
 		RequestID:  req.ID,
 		WindowID:   req.WindowID,
 		ClientID:   req.ClientID,
+		Command:    req.Command,
 		Action:     req.Action,
 		Payload:    req.Payload,
 		DurationMs: time.Since(started).Milliseconds(),

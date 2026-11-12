@@ -5,7 +5,7 @@ package app
 // humans; the CODE is what actually gates). Five rules:
 //
 //   silk-over-pad     §11.2 丝印不压焊盘 — silk text over exposed copper is fab-clipped
-//   decap-too-far     §3.1  去耦电容紧贴 IC 电源引脚 (≤2mm)
+//   decap-too-far     §3.1  去耦电容紧贴 IC 电源引脚 (规范建议 ≤2mm；检查超过 pcbDecapMaxMil=100mil 才报)
 //   via-in-pad        §2.3  禁止过孔打在焊盘上 (solder wicking; needs filled-via)
 //   copper-to-edge    §5.4  板边安全距离 (pcb_check_edge.go)
 //   fiducial-missing  §9    SMT 板需要 ≥3 个不共线 Mark 点
@@ -218,8 +218,8 @@ func findDecapTooFar(pads []pcbPadP) []pcbCheckFinding {
 		out = append(out, pcbCheckFinding{
 			Type: "decap-too-far", Level: "WARN", Net: pwr.Net, Designator: d,
 			At: &pcbXY{round2(pwr.X), round2(pwr.Y)},
-			Message: fmt.Sprintf("decoupling cap %s sits %.0fmil (%.1fmm) from the nearest %s pin %s — a decap must hug its IC (≤2mm)%s",
-				d, best, best*0.0254, pwr.Net, bestRef, docRule("3.1", "去耦电容紧贴IC")),
+			Message: fmt.Sprintf("decoupling cap %s sits %.0fmil (%.1fmm) from the nearest %s pin %s — a decap must hug its IC (≤%.0fmil / %.2fmm)%s",
+				d, best, best*0.0254, pwr.Net, bestRef, pcbDecapMaxMil, pcbDecapMaxMil*0.0254, docRule("3.1", "去耦电容紧贴IC")),
 		})
 	}
 	return out

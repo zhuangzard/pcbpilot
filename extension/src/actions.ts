@@ -21,7 +21,9 @@ import {
 	isDegenerateWireSegment,
 	physicalWireIslands,
 	readObservedWireSegments,
+	resolvePinNetFromWires,
 	WIRE_CONTACT_EPS,
+	wireContactAnchor,
 	wirePointOnSegment,
 	type ObservedWireSegment,
 } from './schematic-wire-topology';
@@ -566,7 +568,10 @@ const documentCurrent: Handler = async () => {
 		throw edaError(err, 'Failed to read current document info.');
 	}
 	if (!doc) {
-		throw new ActionError(ErrorCodes.EDA_CALL_FAILED, 'No active document.');
+		// A state (all tabs closed, or mid doc reload/switch), not a host failure:
+		// PRECONDITION_REFUSED keeps it out of write-health, which flagged the
+		// connector DEGRADED on every reload.
+		throw new ActionError(ErrorCodes.PRECONDITION_REFUSED, 'No active document.');
 	}
 	return {
 		result: {
@@ -1236,6 +1241,43 @@ export const schematicDesignatorsList: Handler = async () => {
 	}
 };
 
+// Wire guards consume part bodies, world-space pins and wire topology only.
+// SDK component.getAll() additionally hydrates three library records per object;
+// none of that metadata participates in these checks.
+export const schematicGeometryRead: Handler = async () => {
+	const kind = 'part' as Parameters<typeof eda.sch_PrimitiveComponent.getAllPrimitiveId>[0];
+	const ids = await eda.sch_PrimitiveComponent.getAllPrimitiveId(kind, false);
+	if (!Array.isArray(ids) || ids.some(id => typeof id !== 'string' || !id) || new Set(ids).size !== ids.length) {
+		throw new ActionError(ErrorCodes.EDA_CALL_FAILED, 'Part inventory is unavailable or invalid.');
+	}
+	const attributes = await eda.sch_PrimitiveAttribute.getAll();
+	if (!Array.isArray(attributes)) throw new ActionError(ErrorCodes.EDA_CALL_FAILED, 'Part attributes are unavailable.');
+	const designators = new Map<string, string>();
+	for (const attribute of attributes) {
+		if (attribute.getState_Key() === 'Designator') {
+			designators.set(attribute.getState_ParentPrimitiveId(), attribute.getState_Value());
+		}
+	}
+	const components: Array<Record<string, unknown>> = [];
+	for (const primitiveId of ids) {
+		const bbox = await eda.sch_Primitive.getPrimitivesBBox([primitiveId]);
+		const pins = await eda.sch_PrimitiveComponent.getAllPinsByPrimitiveId(primitiveId);
+		if (!bbox || !Array.isArray(pins)) {
+			throw new ActionError(ErrorCodes.EDA_CALL_FAILED, `Geometry unavailable for part ${primitiveId}.`);
+		}
+		components.push({ primitiveId, componentType: 'part', designator: designators.get(primitiveId), bbox,
+			pins: pins.map(pin => ({ ...serializePin(pin), net: null })), pinsAvailable: true });
+	}
+	const rawWires = await eda.sch_PrimitiveWire.getAll();
+	if (!Array.isArray(rawWires)) throw new ActionError(ErrorCodes.EDA_CALL_FAILED, 'Wire inventory is unavailable.');
+	const wires = collectWireSegments(rawWires).map(serializeWireSegment);
+	const afterIds = await eda.sch_PrimitiveComponent.getAllPrimitiveId(kind, false);
+	if (!Array.isArray(afterIds) || afterIds.length !== ids.length || new Set(afterIds).size !== ids.length || afterIds.some(id => !ids.includes(id))) {
+		throw new ActionError(ErrorCodes.EDA_CALL_FAILED, 'Part inventory changed during geometry read.');
+	}
+	return { result: { scope: 'active-page-part-geometry', components, count: components.length, wires, wiresAvailable: true } };
+};
+
 export const schematicComponentsList: Handler = async (payload) => {
 	const allPages = optionalBoolean(payload, 'allPages') === true;
 	const includePins = optionalBoolean(payload, 'includePins') === true;
@@ -1287,15 +1329,19 @@ export const schematicComponentsList: Handler = async (payload) => {
 	// tell "already connected to the target net" (skip) from "connected to a DIFFERENT
 	// net" (conflict) from "floating" (new connect). See issue #50.
 	let pinNetsByDesignator: Map<string, Map<string, string>> | null = null;
-	// Designators that resolve to MORE THAN ONE distinct device identity across
-	// the whole document (issue #136: cross-page designator collision). The
-	// netlist is keyed by designator.pin DOCUMENT-wide, so a collided designator's
-	// pin→net attribution is poisoned — autoconnect would misread "already
-	// connected to <some other page's net>". For those we report net:null
-	// (unknown) + netAmbiguous:true instead of a confidently-wrong net. Sub-parts
-	// of one physical device (U1.A/U1.B) share the device identity and are NOT
-	// flagged.
-	const ambiguousDesignators = new Set<string>();
+	// Designators carried by more than one component of the current schematic's
+	// netlist (issue #136: cross-page designator collision). The netlist is keyed
+	// by designator.pin, so a collided designator's pin→net attribution is
+	// poisoned — autoconnect would misread "already connected to <some other
+	// page's net>". For those we report net:null (unknown) + netAmbiguous:true
+	// instead of a confidently-wrong net. The netlist folds sub-parts of one
+	// physical device (U1.A/U1.B) into one component, so they are NOT flagged.
+	// Taken from the netlist rather than getAll(undefined, true): that call spans
+	// every LOADED page of the PROJECT, so a second schematic reusing a
+	// designator (RK3568 board V0.3/V1.0, 2026-10-23) blanked a real part's nets,
+	// and only after the other schematic's page happened to be opened.
+	let ambiguousDesignators = new Set<string>();
+	let netlistIdentity: Pick<NetlistPinNets, 'identitiesByDesignator' | 'identities'> | null = null;
 	// Whether the netlist behind every pin's `net` was actually fetched+parsed. When
 	// it was not, `net` is FORCED to null on every pin of every component. Reporting
 	// that flag is not cosmetic: a run of nulls used to read as "all these pins are
@@ -1304,40 +1350,38 @@ export const schematicComponentsList: Handler = async (payload) => {
 	// for block instances while the real cause was a muted netlist export).
 	let pinNetsAvailable = false;
 	let pinNetsError: string | undefined;
+	// Current-page wires, read once, for parts absent from the netlist (#244).
+	// Wire enumeration is page-scoped, so an all-pages listing cannot use it.
+	let wireSegmentsPromise: Promise<ObservedWireSegment[] | undefined> | undefined;
+	const pageWireSegments = (): Promise<ObservedWireSegment[] | undefined> => wireSegmentsPromise ??= (async () => {
+		if (allPages) return undefined;
+		try { return readObservedWireSegments(await eda.sch_PrimitiveWire.getAll()); }
+		catch { return undefined; }
+	})();
+	let memberProbes: NetlistMemberProbe[] | undefined;
+	// Every loaded page's components, read at most once and only when a record
+	// looks foreign on a single-page listing: the record's owner may sit on
+	// another page (a multi-unit part split across pages). null = unreadable.
+	let widerProbes: NetlistMemberProbe[] | null | undefined;
+	const netlistMemberProbe = (c: (typeof components)[number]): NetlistMemberProbe => ({
+		uniqueId: String(c.getState_UniqueId?.() ?? ''),
+		designator: String(c.getState_Designator?.() ?? ''),
+		kind: String(c.getState_ComponentType?.() ?? ''),
+		deviceUuid: String((c.getState_Component?.() as { uuid?: unknown } | undefined)?.uuid ?? ''),
+		subPartName: String(c.getState_SubPartName?.() ?? '').trim(),
+	});
 	if (includePins && includePinNets) {
 		try {
 			const collected = await collectNetlistPinNets();
 			pinNetsByDesignator = collected.byDesignator;
+			ambiguousDesignators = collected.ambiguous;
+			netlistIdentity = collected;
 			pinNetsAvailable = collected.available;
 			pinNetsError = collected.error;
 		}
 		catch (err) {
 			pinNetsByDesignator = null;
 			pinNetsError = describeThrown(err);
-		}
-		if (pinNetsByDesignator) {
-			try {
-				const everywhere = allPages ? components : await eda.sch_PrimitiveComponent.getAll(undefined, true);
-				const identByDesig = new Map<string, Set<string>>();
-				for (const c of everywhere ?? []) {
-					let type = '';
-					try { type = String(c.getState_ComponentType?.() ?? ''); }
-					catch { continue; }
-					if (type !== 'part' && type !== '') continue;
-					const d = String(c.getState_Designator?.() ?? '');
-					if (!d) continue;
-					let ident = '';
-					try { ident = JSON.stringify(c.getState_Component?.() ?? '') || String(c.getState_Name?.() ?? ''); }
-					catch { ident = ''; }
-					const set = identByDesig.get(d) ?? new Set<string>();
-					set.add(ident);
-					identByDesig.set(d, set);
-				}
-				for (const [d, idents] of identByDesig) {
-					if (idents.size > 1) ambiguousDesignators.add(d);
-				}
-			}
-			catch { /* best-effort — no ambiguity info degrades to prior behavior */ }
 		}
 	}
 
@@ -1406,9 +1450,48 @@ export const schematicComponentsList: Handler = async (payload) => {
 				const designator = String(component.getState_Designator?.() ?? '');
 				const ambiguous = ambiguousDesignators.has(designator);
 				if (ambiguous) record.netAmbiguous = true;
-				const netByNumber = ambiguous ? null : (pinNetsByDesignator?.get(designator) ?? null);
+				let netByNumber = ambiguous ? null : (pinNetsByDesignator?.get(designator) ?? null);
+				// A record under this designator that belongs to another component
+				// is not this component's record: do not let it stand in for one.
+				if (netByNumber && netlistIdentity) {
+					memberProbes ??= components.map(netlistMemberProbe);
+					const self = netlistMemberProbe(component);
+					let foreign = netlistRecordIsForeign(self, memberProbes, netlistIdentity);
+					if (foreign && !allPages) {
+						if (widerProbes === undefined) {
+							try {
+								const every = await eda.sch_PrimitiveComponent.getAll(undefined, true);
+								widerProbes = Array.isArray(every) ? every.map(netlistMemberProbe) : null;
+							}
+							catch { widerProbes = null; }
+						}
+						// The wider set only ever adds candidate owners; it can
+						// clear the verdict on multi-unit evidence, never invent one.
+						if (widerProbes) foreign = netlistRecordIsForeign(self, [...memberProbes, ...widerProbes], netlistIdentity);
+					}
+					if (foreign) {
+						netByNumber = null;
+						record.netlistRecordForeign = true;
+					}
+				}
+				// Netlist readable but this part has no record in it (a reuse-block
+				// instance, #244): resolve its pins from touching wires instead of a
+				// silent null that reads like "floating".
+				const symbolKind = String(component.getState_ComponentType?.() ?? '');
+				const absentFromNetlist = includePinNets && pinNetsAvailable && !ambiguous && netByNumber === null
+					&& (symbolKind === 'part' || symbolKind === 'block_symbol');
+				const wireSegments = absentFromNetlist ? await pageWireSegments() : undefined;
+				if (absentFromNetlist) record.netSource = 'wire-geometry';
 				record.pins = pins.map((pin) => {
 					const rec = serializePin(pin);
+					if (absentFromNetlist) {
+						const resolved = wireSegments
+							? resolvePinNetFromWires({ x: Number(rec.x), y: Number(rec.y) }, wireSegments)
+							: { unresolved: allPages ? 'not-in-netlist' as const : 'wires-unreadable' as const };
+						if ('net' in resolved) rec.net = resolved.net;
+						else { rec.net = null; rec.netUnresolved = resolved.unresolved; }
+						return rec;
+					}
 					// null (not '') distinguishes "known floating" from "netlist unavailable"
 					// — and a cross-page-collided designator's nets are FORCED to null
 					// (netAmbiguous) rather than confidently wrong (issue #136).
@@ -1443,7 +1526,7 @@ export const schematicComponentsList: Handler = async (payload) => {
 			const rawWires = await eda.sch_PrimitiveWire.getAll();
 			if (!Array.isArray(rawWires)) throw new Error('Wire API did not return an array.');
 			for (const s of collectWireSegments(rawWires)) {
-				wires.push({ x0: s.seg[0], y0: s.seg[1], x1: s.seg[2], y1: s.seg[3], net: s.net, primitiveId: s.wirePrimitiveId, segmentIndex: s.segmentIndex, rawLine: s.rawLine, rawEncoding: s.rawEncoding });
+				wires.push(serializeWireSegment(s));
 			}
 			wiresAvailable = true;
 		} catch (err) {
@@ -2502,9 +2585,13 @@ export function schAttributeOwnerComponent(parent: string): string {
 }
 
 function independentSchPagePrimitives(page: Record<string, Array<Record<string, unknown>>>): { orphanAttributes: Array<string>; objects: Array<string> } {
-	const parents = new Set(page.components.map(c => String(c.primitiveId)));
+	// Attributes can belong to any enumerated native primitive, including wires
+	// and graphics. Attributes themselves never establish a valid parent.
+	const parents = new Set(Object.entries(page).filter(([kind]) => kind !== 'attributes')
+		.flatMap(([, primitives]) => primitives.map(p => p.primitiveId))
+		.filter((id): id is string => typeof id === 'string' && id.length > 0));
 	return {
-		orphanAttributes: page.attributes.filter(a => !parents.has(schAttributeOwnerComponent(String(a.ParentPrimitiveId)))).map(a => String(a.primitiveId)),
+		orphanAttributes: page.attributes.filter(a => typeof a.ParentPrimitiveId !== 'string' || !parents.has(schAttributeOwnerComponent(a.ParentPrimitiveId))).map(a => String(a.primitiveId)),
 		objects: page.objects.map(o => String(o.primitiveId)),
 	};
 }
@@ -3377,21 +3464,52 @@ export const schematicPinSetNoConnect: Handler = async (payload) => {
 	// Default to setting the flag; only an explicit false clears it.
 	const value = optionalBoolean(payload, 'noConnected') === false ? false : true;
 
-	let components;
-	try {
-		components = await eda.sch_PrimitiveComponent.getAll(undefined, true);
+	const ids = await eda.sch_PrimitiveComponent.getAllPrimitiveId(undefined, false);
+	const attributes = await eda.sch_PrimitiveAttribute.getAll();
+	if (!Array.isArray(ids) || !Array.isArray(attributes)) {
+		throw new ActionError(ErrorCodes.EDA_CALL_FAILED, 'Current-page component inventory is unavailable.');
 	}
-	catch (err) {
-		throw edaError(err, 'Failed to read schematic components.');
+	const targets = new Set(attributes.filter(a => a.getState_Key() === 'Designator'
+		&& a.getState_Value() === designator && ids.includes(a.getState_ParentPrimitiveId()))
+		.map(a => a.getState_ParentPrimitiveId()));
+	// Several current-page primitives under one designator are either the units
+	// of a multi-unit part or a real designator collision. The requested pin
+	// numbers decide: exactly one primitive must own all of them. Anything else
+	// stays refused, before a component is fetched or a pin is touched.
+	let owners = [...targets];
+	if (owners.length > 1) {
+		const owning: string[] = [];
+		for (const id of owners) {
+			let unitPins;
+			try {
+				unitPins = await eda.sch_PrimitiveComponent.getAllPinsByPrimitiveId(id);
+			}
+			catch (err) {
+				throw edaError(err, `Failed to read pins of "${designator}" (${id}).`);
+			}
+			if (!Array.isArray(unitPins)) {
+				throw new ActionError(ErrorCodes.EDA_CALL_FAILED, `Pins of "${designator}" (${id}) are unavailable.`);
+			}
+			const numbers = new Set(unitPins.map(p => String(p.getState_PinNumber())));
+			if (wantPins.every(n => numbers.has(n))) owning.push(id);
+		}
+		if (owning.length !== 1) {
+			throw new ActionError(
+				ErrorCodes.EDA_CALL_FAILED,
+				`Expected one current-page component with designator "${designator}"; found ${owners.length}, `
+				+ `of which ${owning.length} own all of pin(s) ${wantPins.join(', ')}. `
+				+ 'Pins of different units need one call per unit.',
+			);
+		}
+		owners = owning;
 	}
-	const target = (components ?? []).find(c => c.getState_Designator() === designator);
-	if (!target) {
+	if (owners.length !== 1) {
 		throw new ActionError(
 			ErrorCodes.EDA_CALL_FAILED,
-			`No component with designator "${designator}" on the schematic.`,
+			`Expected one current-page component with designator "${designator}"; found ${owners.length}.`,
 		);
 	}
-	const cid = target.getState_PrimitiveId();
+	const cid = owners[0];
 
 	let component: SchComponent | undefined;
 	try {
@@ -3814,7 +3932,7 @@ interface CheckPinDetail {
 
 // One reconstructed design-check finding. Reuses the DRC severity buckets.
 interface CheckFinding {
-	type: string; // 'floating-pin' | 'geom-net-mismatch' | 'wire-crossing' | 'wire-over-pin' | 'net-marker-mismatch' | 'multi-net-wire' | 'zero-length-wire' | 'dangling-wire' | 'polarity-convention-outlier'
+	type: string; // 'floating-pin' | 'geom-net-mismatch' | 'wire-contact' | 'wire-crossing' | 'wire-over-pin' | 'net-marker-mismatch' | 'multi-net-wire' | 'zero-length-wire' | 'dangling-wire' | 'polarity-convention-outlier'
 	level: DrcSeverity;
 	designator?: string;
 	primitiveId?: string; // owning component (floating-pin / wire-over-pin)
@@ -3880,6 +3998,11 @@ export function collectWireSegments(wires: Parameters<typeof readObservedWireSeg
 	return readObservedWireSegments(wires);
 }
 
+function serializeWireSegment(s: CheckWireSegment) {
+	return { x0: s.seg[0], y0: s.seg[1], x1: s.seg[2], y1: s.seg[3], net: s.net,
+		primitiveId: s.wirePrimitiveId, segmentIndex: s.segmentIndex, rawLine: s.rawLine, rawEncoding: s.rawEncoding };
+}
+
 /** A whole primitive with no real geometry: every observed segment is zero-length.
  * The platform really does leave these behind (live B04_2_1 2026-09-20: 31 such
  * primitives on one page), and they carry no connectivity at all.
@@ -3904,6 +4027,11 @@ function isWhollyDegenerateWire(own: CheckWireSegment[]): boolean {
  * — even though `zero-length-wire` was already a documented WARN rule that the code
  * could never reach. Dropping them here, at one shared point, is what lets that
  * existing rule report them instead of aborting the run.
+ * 
+ * The result is shorter than the input whenever a wholly degenerate primitive is
+ * removed. Geometry, net name and primitive identity for one contact pair must
+ * all come from this array, Pairing its index with the unfiltered collection
+ * classifies one segment and then names a different wire.
  */
 export function connectivityWireSegments(segments: CheckWireSegment[]): CheckWireSegment[] {
 	const byWire = new Map<string, CheckWireSegment[]>();
@@ -3926,6 +4054,17 @@ export function connectivityWireSegments(segments: CheckWireSegment[]): CheckWir
 // and manufacture geom-net-mismatch false reports.
 interface NetlistPinNets {
 	byDesignator: Map<string, Map<string, string>>;
+	/** Designators carried by MORE THAN ONE netlist component (issue #136). The
+	 * export covers exactly the current schematic and folds a multi-part device's
+	 * sub-symbols into one component, so this is the collision set at the right
+	 * scope: another schematic of the same project reusing the designator is not
+	 * a collision. */
+	ambiguous: Set<string>;
+	/** Identity values each designator's netlist record carries: its map key
+	 * and its `Unique ID` prop. Only meaningful once a listed component's own
+	 * uniqueId is found among them (see netlistRecordIsForeign). */
+	identitiesByDesignator: Map<string, Set<string>>;
+	identities: Set<string>;
 	available: boolean;
 	/** Why the netlist could not be fetched/parsed. Set only when available===false,
 	 * so callers can report a CAUSE instead of silently degrading to "no nets". */
@@ -3934,8 +4073,11 @@ interface NetlistPinNets {
 
 async function collectNetlistPinNets(_allPages = false): Promise<NetlistPinNets> {
 	const byDesignator = new Map<string, Map<string, string>>();
+	const ambiguous = new Set<string>();
+	const identitiesByDesignator = new Map<string, Set<string>>();
+	const identities = new Set<string>();
 	const muted = (error?: string): NetlistPinNets =>
-		({ byDesignator, available: false, ...(error ? { error } : {}) });
+		({ byDesignator, ambiguous, identitiesByDesignator, identities, available: false, ...(error ? { error } : {}) });
 	let file: File | undefined;
 	try { file = await eda.sch_ManufactureData.getNetlistFile(); }
 	catch (err) { return muted(describeThrown(err)); }
@@ -3945,9 +4087,15 @@ async function collectNetlistPinNets(_allPages = false): Promise<NetlistPinNets>
 	catch (err) { return muted(`netlist JSON parse failed: ${describeThrown(err)}`); }
 	const components = (parsed as { components?: Record<string, NetlistComponentInfo> })?.components;
 	if (!components || typeof components !== 'object') return muted('netlist JSON carries no components map');
-	for (const comp of Object.values(components)) {
+	for (const [key, comp] of Object.entries(components)) {
 		const designator = String(comp.props?.Designator ?? '');
 		if (!designator || !comp.pinInfoMap) continue;
+		const own = identitiesByDesignator.get(designator) ?? new Set<string>();
+		for (const id of [key, comp.props?.['Unique ID'], comp.props?.uniqueId]) {
+			if (typeof id === 'string' && id) { own.add(id); identities.add(id); }
+		}
+		identitiesByDesignator.set(designator, own);
+		if (byDesignator.has(designator)) ambiguous.add(designator);
 		const pins = byDesignator.get(designator) ?? new Map<string, string>();
 		for (const pin of Object.values(comp.pinInfoMap)) {
 			const number = String((pin as { number?: unknown })?.number ?? '');
@@ -3956,7 +4104,54 @@ async function collectNetlistPinNets(_allPages = false): Promise<NetlistPinNets>
 		}
 		byDesignator.set(designator, pins);
 	}
-	return { byDesignator, available: true };
+	return { byDesignator, ambiguous, identitiesByDesignator, identities, available: true };
+}
+
+interface NetlistMemberProbe {
+	uniqueId: string;
+	designator: string;
+	kind: string;
+	deviceUuid: string;
+	subPartName: string;
+}
+
+/**
+ * Whether the netlist record found under a component's designator belongs to a
+ * DIFFERENT component. The netlist is keyed by designator, so a part or block
+ * instance that has no record of its own would otherwise inherit the nets of
+ * an unrelated component that happens to share its designator.
+ *
+ * This only ever answers true on positive evidence, because the identity the
+ * netlist carries is host data this code cannot assume:
+ *   - nothing is concluded until some listed component's uniqueId is found
+ *     among the netlist identities (that proves the two share a namespace);
+ *   - a component whose own identity sits in the record under its designator
+ *     owns that record;
+ *   - a component whose identity sits only under ANOTHER designator has a
+ *     stale designator: the record under its current one is someone else's;
+ *   - otherwise, when a listed component owns the record, the two share it
+ *     only on positive multi-unit evidence: both are parts of the same device
+ *     and carry different, non-empty sub-part names. The same device alone
+ *     proves nothing, since two separate placements of one library device
+ *     share it too;
+ *   - when the owner is not among the listed components it cannot be
+ *     inspected, so nothing proves the two are units of one part: the record
+ *     is not handed out. A single-page listing therefore passes the components
+ *     of every loaded page before settling, so a multi-unit part split across
+ *     pages still finds its owner.
+ */
+export function netlistRecordIsForeign(self: NetlistMemberProbe, listed: NetlistMemberProbe[], netlist: Pick<NetlistPinNets, 'identitiesByDesignator' | 'identities'>): boolean {
+	const recordIds = netlist.identitiesByDesignator.get(self.designator);
+	if (!recordIds || recordIds.size === 0 || !self.uniqueId) return false;
+	if (recordIds.has(self.uniqueId)) return false;
+	if (netlist.identities.has(self.uniqueId)) return true;
+	if (!listed.some(c => c.uniqueId && netlist.identities.has(c.uniqueId))) return false;
+	const owner = listed.find(c => c.designator === self.designator && c.uniqueId && recordIds.has(c.uniqueId));
+	if (!owner) return true;
+	const sameDevice = self.kind === 'part' && owner.kind === 'part'
+		&& self.deviceUuid !== '' && self.deviceUuid === owner.deviceUuid;
+	const distinctUnits = self.subPartName !== '' && owner.subPartName !== '' && self.subPartName !== owner.subPartName;
+	return !(sameDevice && distinctUnits);
 }
 
 // ─── Polarity-convention outlier (#183 phase 1) ─────────────────────────────
@@ -4313,10 +4508,10 @@ const schematicCheck: Handler = async (payload) => {
 	// pin→net witnesses on BOTH physical islands. A name alone is not proof.
 	if ([...allPins, ...connectionMarkers].some(p => !Number.isFinite(p.x) || !Number.isFinite(p.y))) throw new Error('Incomplete check anchor coordinates.');
 	const crossingAnchors = [...allPins, ...connectionMarkers];
-	const physicalIslands = physicalWireIslands(wireSegs, crossingAnchors);
+	const physicalIslands = physicalWireIslands(connectivitySegs, crossingAnchors);
 	const verifiedSegments = new Set<number>();
 	for (const island of physicalIslands) {
-		const own = island.map(i => wireSegs[i]);
+		const own = island.map(i => connectivitySegs[i]);
 		const onIsland = (p: { x: number; y: number }) => own.some(w => wirePointOnSegment(p, w.seg));
 		const witnesses = allPins.filter(p => p.designator && onIsland(p));
 		const markers = connectionMarkers.filter(onIsland);
@@ -4337,25 +4532,32 @@ const schematicCheck: Handler = async (payload) => {
 	}
 	const CROSS_CAP = 50;
 	let crossingTotal = 0;
-	for (let i = 0; i < segs.length; i++) {
-		for (let j = i + 1; j < segs.length; j++) {
-			const relation = classifyWireContact(segs[i], segs[j]);
-			const a = wireSegs[i], b = wireSegs[j];
-			if ((relation === 'endpoint-touch' || relation === 'collinear-overlap') && a.net && b.net && a.net !== b.net) {
-				findings.push({ type: 'wire-contact', level: 'error', nets: [a.net, b.net],
+	let wireContacts = 0;
+	for (let i = 0; i < connectivitySegs.length; i++) {
+		for (let j = i + 1; j < connectivitySegs.length; j++) {
+			const a = connectivitySegs[i], b = connectivitySegs[j];
+			const relation = classifyWireContact(a.seg, b.seg);
+			if (a.wirePrimitiveId !== b.wirePrimitiveId
+				&& (relation === 'endpoint-touch' || relation === 'collinear-overlap')
+				&& a.net && b.net && a.net !== b.net) {
+				wireContacts++;
+				findings.push({
+					type: 'wire-contact', level: 'error', nets: [a.net, b.net],
+					at: wireContactAnchor(a.seg, b.seg) ?? undefined,
 					message: '异网导线存在端点/T接/共线重叠的真实电气接触',
-					segments: [a, b].map(s => ({ primitiveId: s.wirePrimitiveId, segmentIndex: s.segmentIndex, rawEncoding: s.rawEncoding })) });
+					segments: [a, b].map(s => ({ primitiveId: s.wirePrimitiveId, segmentIndex: s.segmentIndex, rawEncoding: s.rawEncoding }))
+				});
 			}
 			if (relation !== 'proper-cross') continue;
 			crossingTotal++;
 			if (findings.filter(f => f.type === 'wire-crossing').length >= CROSS_CAP) continue;
-			const anchorAtCrossing = [...crossingAnchors, ...wireEndpoints].some(p => wirePointOnSegment(p, segs[i]) && wirePointOnSegment(p, segs[j]));
+			const anchorAtCrossing = [...crossingAnchors, ...wireEndpoints].some(p => wirePointOnSegment(p, a.seg) && wirePointOnSegment(p, b.seg));
 			const verified = !anchorAtCrossing && verifiedSegments.has(i) && verifiedSegments.has(j);
 			findings.push({
 				type: 'wire-crossing',
 				level: verified ? 'info' : 'error',
 				count: 1,
-				at: segIntersection(segs[i], segs[j]) ?? undefined,
+				at: segIntersection(a.seg, b.seg) ?? undefined,
 				segments: [a, b].map(s => ({ primitiveId: s.wirePrimitiveId, segmentIndex: s.segmentIndex, rawEncoding: s.rawEncoding })),
 				message: verified
 					? '已验证无接点正交内部交叉：原始段端不在交点、无引脚/标记，两个物理线岛的逐pin网络证据完整'
@@ -4484,6 +4686,7 @@ const schematicCheck: Handler = async (payload) => {
 		geomNetMismatches,
 		netMarkerMismatches,
 		multiNetWires,
+		wireContacts,
 		wireCrossings: crossingTotal,
 		wireOverPins: overPinTotal,
 		zeroLengthWires,
@@ -6049,6 +6252,14 @@ async function preflightV4DeviceVariant(libraryUuid: string, uuid: string): Prom
 	let device: unknown;
 	try { device = await api.get(uuid, libraryUuid); }
 	catch { return; } // identity/readback code retains its existing error handling
+	// An unknown device makes sch_PrimitiveComponent.create hang forever (no
+	// throw, nothing placed) and wedges the action queue — refuse up front.
+	if (device === undefined || device === null || device === false) {
+		throw new ActionError(
+			ErrorCodes.PRECONDITION_REFUSED,
+			`Device "${uuid}" was not found in library "${libraryUuid}". Placement was not attempted; resolve the 32-char device uuid with \`pcbpilot lib search\` / \`lib by-lcsc\` (a component's 16-char symbol id is not a device uuid).`,
+		);
+	}
 	const issue = unsupportedV4DeviceVariant(device);
 	if (issue) {
 		throw new ActionError(
@@ -8274,26 +8485,32 @@ const documentOpen: Handler = async (payload) => {
 	// API only when the caller did not preserve the target split. Older hosts
 	// without this metadata keep the original one-argument open path.
 	let splitScreenId = requestedSplitScreenId;
+	let tabId: string | undefined;
 	if (splitScreenId === undefined) {
 		try {
 			const current = await eda.dmt_SelectControl.getCurrentDocumentInfo();
 			if (typeof current?.tabId === 'string' && current.tabId.trim()) {
-				const split = await eda.dmt_EditorControl.getSplitScreenIdByTabId(current.tabId);
-				if (typeof split === 'string' && split.trim()) {
-					splitScreenId = split;
+				// Apply's per-batch doc switch often targets the active PCB (#286).
+				// Do not ask the host to reopen it on every checkpoint. This is
+				// not reload evidence: identity/settle checks below still run.
+				if (current.uuid === uuid) tabId = current.tabId;
+				else {
+					const split = await eda.dmt_EditorControl.getSplitScreenIdByTabId(current.tabId);
+					if (typeof split === 'string' && split.trim()) splitScreenId = split;
 				}
 			}
 		}
 		catch { /* split metadata is optional; never guess a destination ID */ }
 	}
-	let tabId;
-	try {
-		tabId = splitScreenId === undefined
-			? await eda.dmt_EditorControl.openDocument(uuid)
-			: await eda.dmt_EditorControl.openDocument(uuid, splitScreenId);
-	}
-	catch (err) {
-		throw edaError(err, 'Failed to open document.');
+	if (tabId === undefined) {
+		try {
+			tabId = splitScreenId === undefined
+				? await eda.dmt_EditorControl.openDocument(uuid)
+				: await eda.dmt_EditorControl.openDocument(uuid, splitScreenId);
+		}
+		catch (err) {
+			throw edaError(err, 'Failed to open document.');
+		}
 	}
 	if (tabId === undefined) {
 		throw new ActionError(ErrorCodes.EDA_CALL_FAILED, `Failed to open document "${uuid}".`);
@@ -10588,6 +10805,13 @@ async function clickImportConfirm(timeoutMs: number): Promise<string> {
 	return 'no-dialog';
 }
 
+// A footprint-embedded primitive's id is its parent component's primitiveId
+// followed by its own `e<digits>` id (ba45…f3 + e184). A bare prefix match is
+// not ownership: top-level `e200` starts with component `e2` but is independent.
+export function pcbEmbeddedParent(id: string, componentIds: ReadonlyArray<string>): string | undefined {
+	return componentIds.find(cid => id.startsWith(cid) && /^e\d+$/.test(id.slice(cid.length)));
+}
+
 const pcbImportChanges: Handler = async (payload) => {
 	const schematicUuid = optionalString(payload, 'schematicUuid');
 	const ensureBoard = optionalBoolean(payload, 'ensureBoard') !== false;
@@ -11397,7 +11621,27 @@ export function normalizePcbComponentPatch(raw: Record<string, unknown>): Record
 	if (Object.keys(out).length === 0) {
 		throw new ActionError(ErrorCodes.MISSING_PAYLOAD_FIELD, 'Patch object is empty — nothing to modify.');
 	}
+	if ('layer' in out) out.layer = pcbComponentLayerId(out.layer);
 	return out;
+}
+
+/**
+ * A placed component lives on TOP (1) or BOTTOM (2). The host accepts a layer
+ * NAME like "BOTTOM", reports success and leaves the part where it was
+ * (upstream #275), so names are mapped to the numeric id here — which also
+ * lets the fresh readback verify the flip.
+ */
+export function pcbComponentLayerId(value: unknown): number {
+	if (value === 1 || value === 2) return value;
+	if (typeof value === 'string') {
+		const name = value.trim().toLowerCase().replace(/[\s_-]+/g, ' ');
+		if (name === 'top' || name === 'top layer' || name === '1') return 1;
+		if (name === 'bottom' || name === 'bottom layer' || name === '2') return 2;
+	}
+	throw new ActionError(
+		ErrorCodes.PRECONDITION_REFUSED,
+		`Component layer ${JSON.stringify(value)} is not a component side; use "top"/"bottom" or 1/2. Nothing was modified.`,
+	);
 }
 
 export interface PcbPatchVerification {
@@ -11833,6 +12077,15 @@ export const pcbPageClear: Handler = async (payload) => {
 	// later rounds: retrying is what fixes a stale enumeration, not a rejected batch —
 	// hammering it 5× would only repeat the same warning.
 	const failedSet = new Set<string>();
+	// Footprint-embedded routing primitives (<componentId>e<n>: thermal-pad vias,
+	// and tracks/arcs drawn inside a footprint) go with their component — deleted
+	// with it, or kept with it. The primitive API cannot delete them: an embedded
+	// via made the whole via batch throw, so a clean board reported
+	// failed:["vias"]. This is the same ownership rule pcb.route.delete applies
+	// to tracks, arcs and vias. Component ids are unioned across rounds because a
+	// stale enumeration can still list a just-deleted component's primitives.
+	const componentIds = new Set<string>();
+	const embeddedSkipped: Record<string, Set<string>> = {};
 
 	// Collect this round's ids for one kind, skipping locked (unless includeLocked)
 	// and applying each kind's copper-layer / membership filter. An enumeration
@@ -11849,8 +12102,14 @@ export const pcbPageClear: Handler = async (payload) => {
 			return [];
 		}
 		const ids: Array<string> = [];
+		const routable = kind.scope === 'routing';
+		const owners = routable ? [...componentIds] : [];
 		for (const p of items) {
 			if (kind.filter && !kind.filter(p)) continue;
+			if (routable) {
+				const id = p.getState_PrimitiveId();
+				if (pcbEmbeddedParent(id, owners)) { (embeddedSkipped[kind.key] ??= new Set<string>()).add(id); continue; }
+			}
 			if (!ignoreLock && !includeLocked && pcbPrimLocked(p)) {
 				if (countLocked) skippedLocked[kind.key] = (skippedLocked[kind.key] ?? 0) + 1;
 				continue;
@@ -11881,6 +12140,10 @@ export const pcbPageClear: Handler = async (payload) => {
 	let leftover = 0;
 	for (let r = 0; r < maxRounds; r++) {
 		rounds++;
+		try {
+			for (const c of (await eda.pcb_PrimitiveComponent.getAll()) ?? []) componentIds.add(c.getState_PrimitiveId());
+		}
+		catch (err) { warnings.push(warnText('enumerate components for embedded-via ownership', err)); }
 		const round: Record<string, Array<string>> = {};
 		let found = 0;
 		for (const { kind, ignoreLock } of targets) {
@@ -11925,6 +12188,9 @@ export const pcbPageClear: Handler = async (payload) => {
 	for (const [key, ids] of Object.entries(idsByKey)) { deleted[key] = ids.length; total += ids.length; }
 	const skippedTotal = Object.values(skippedLocked).reduce((a, b) => a + b, 0);
 	const failed = [...failedSet];
+	const skippedEmbedded: Record<string, number> = {};
+	for (const [key, ids] of Object.entries(embeddedSkipped)) skippedEmbedded[key] = ids.size;
+	const skippedEmbeddedTotal = Object.values(skippedEmbedded).reduce((a, b) => a + b, 0);
 
 	return {
 		result: {
@@ -11934,6 +12200,8 @@ export const pcbPageClear: Handler = async (payload) => {
 			deletedIds: idsByKey,
 			rounds,
 			...(skippedTotal ? { skippedLocked, skippedLockedTotal: skippedTotal } : {}),
+			...(skippedEmbeddedTotal ? { skippedEmbedded, skippedEmbeddedTotal } : {}),
+			...(skippedEmbedded.vias ? { skippedEmbeddedVias: skippedEmbedded.vias } : {}),
 			...(failed.length ? { failed } : {}),
 			preserveOutline,
 			includeLocked,
@@ -13734,8 +14002,7 @@ const pcbRouteDelete: Handler = async (payload) => {
 		componentIds = (comps ?? []).map(c => c.getState_PrimitiveId()).filter(Boolean);
 	}
 	catch { /* best-effort: without component ids the readback below still reports honestly */ }
-	const embeddedParent = (id: string): string | undefined =>
-		componentIds.find(cid => id !== cid && id.startsWith(cid));
+	const embeddedParent = (id: string): string | undefined => pcbEmbeddedParent(id, componentIds);
 
 	const toDelete: Record<'track' | 'arc' | 'via', Array<string>> = { track: [], arc: [], via: [] };
 	const removed: Array<Record<string, unknown>> = [];
@@ -14716,6 +14983,7 @@ const HANDLERS: Record<string, Handler> = {
 	'schematic.titleblock.get': schematicTitleBlockGet,
 	'schematic.titleblock.modify': schematicTitleBlockModify,
 	'schematic.components.list': schematicComponentsList,
+	'schematic.geometry.read': schematicGeometryRead,
 	'schematic.attribute.inspect': schematicAttributeInspect,
 	'schematic.designators.list': schematicDesignatorsList,
 	'schematic.components.count': schematicComponentsCount,

@@ -88,24 +88,46 @@ func TestPartitionDrawRenderedBBoxStaysClearOfTitleBlock(t *testing.T) {
 	}
 }
 
-func TestBuildZoneClearJS(t *testing.T) {
-	js := buildZoneClearJS(&workflow.SchZoneFrames{Rects: []string{"r1"}, Texts: []string{"t1", "t2"}})
-	if !strings.Contains(js, `["r1"]`) || !strings.Contains(js, `["t1","t2"]`) {
-		t.Errorf("ids not embedded:\n%s", js)
-	}
-	for _, want := range []string{"getAllPrimitiveId", "survived", "ok:survived.length===0"} {
-		if !strings.Contains(js, want) {
-			t.Errorf("clear script missing verification %q:\n%s", want, js)
+// The verdict waits for a settled readback: a frame still listed right after its
+// delete but gone on the next read is deleted, not a survivor (v1.13.0
+// acceptance: the old exec_js clear re-read at once and failed zone move).
+func TestClearZoneFramesWithSettlesBeforeJudging(t *testing.T) {
+	f := &workflow.SchZoneFrames{Rects: []string{"r1"}, Texts: []string{"t1", "gone"}}
+	reads, deleted := 0, map[string]int{}
+	alive := func() (map[string]bool, error) {
+		reads++
+		if reads <= 2 { // before-read + the first post-delete read: not settled yet
+			return map[string]bool{"r1": true, "t1": true, "user": true}, nil
 		}
+		return map[string]bool{"user": true}, nil
 	}
-	// 缺陷 3:删除必须逐个(delete([id]))+ 幸存者重试一次,不允许回到批量 delete。
-	for _, want := range []string{"delOne", ".delete([id])", "retried"} {
-		if !strings.Contains(js, want) {
-			t.Errorf("clear script lost the one-by-one+retry delete semantics (%q missing):\n%s", want, js)
-		}
+	found, err := clearZoneFramesWith(f, func(id string) error { deleted[id]++; return nil }, alive)
+	if err != nil || found != 2 {
+		t.Fatalf("settled delete reported failure: found=%d err=%v", found, err)
 	}
-	if strings.Contains(js, "delete(all)") {
-		t.Errorf("clear script regressed to a batch delete:\n%s", js)
+	if deleted["gone"] != 0 || deleted["user"] != 0 || deleted["r1"] != 1 || deleted["t1"] != 1 {
+		t.Fatalf("deleted the wrong ids: %v", deleted)
+	}
+}
+
+func TestClearZoneFramesWithFailsOnRealSurvivor(t *testing.T) {
+	f := &workflow.SchZoneFrames{Rects: []string{"r1"}, Texts: []string{"t1"}}
+	alive := func() (map[string]bool, error) { return map[string]bool{"t1": true}, nil }
+	if _, err := clearZoneFramesWith(f, func(string) error { return nil }, alive); err == nil || !strings.Contains(err.Error(), "survived=[t1]") {
+		t.Fatalf("persistent survivor not reported: %v", err)
+	}
+}
+
+func TestZoneFrameAliveSetRequiresInventory(t *testing.T) {
+	if _, err := zoneFrameAliveSet(map[string]any{}); err == nil {
+		t.Fatal("missing pagePrimitives must not read as all-deleted")
+	}
+	got, err := zoneFrameAliveSet(map[string]any{"pagePrimitives": map[string]any{
+		"rectangles": []any{map[string]any{"primitiveId": "r1"}},
+		"texts":      []any{map[string]any{"primitiveId": "t1"}},
+	}})
+	if err != nil || !got["r1"] || !got["t1"] || len(got) != 2 {
+		t.Fatalf("alive set wrong: %v %v", got, err)
 	}
 }
 
@@ -136,12 +158,10 @@ func TestClearPriorZoneFramesFailsClosedAndKeepsState(t *testing.T) {
 			"page-a": {DocumentUUID: "page-a", Rects: []string{"r1"}, Texts: []string{"t1"}},
 		},
 	}
-	exec := func(_, _ string) (map[string]any, error) {
-		return map[string]any{
-			"ok": false, "found": float64(2), "survived": []string{"t1"},
-		}, nil
+	clear := func(*workflow.SchZoneFrames, string) (int, error) {
+		return 2, errors.New("zone frame delete was not verified; survived=[t1]")
 	}
-	if _, err := clearPriorZoneFrames(st, "page-a", exec, io.Discard); err == nil {
+	if _, err := clearPriorZoneFrames(st, "page-a", clear, io.Discard); err == nil {
 		t.Fatal("surviving text did not fail clear")
 	}
 	if st.SchZoneFrameIdsByPage["page-a"] == nil {
@@ -153,12 +173,10 @@ func TestCompensateZoneDrawRetainsRecoveryIdsWhenCleanupSurvives(t *testing.T) {
 	t.Setenv(workflow.EnvDir, t.TempDir())
 	st := &workflow.State{Project: "zone-project"}
 	frames := &workflow.SchZoneFrames{Rects: []string{"r1"}, Texts: []string{"t1"}}
-	exec := func(_, _ string) (map[string]any, error) {
-		return map[string]any{
-			"ok": false, "found": float64(2), "survived": []string{"t1"},
-		}, nil
+	clear := func(*workflow.SchZoneFrames, string) (int, error) {
+		return 2, errors.New("zone frame delete was not verified; survived=[t1]")
 	}
-	err := compensateZoneDraw(nil, "", "page-a", st, "partition", exec, frames, errors.New("draw count mismatch"))
+	err := compensateZoneDraw(nil, "", "page-a", st, "partition", clear, frames, errors.New("draw count mismatch"))
 	if err == nil || !strings.Contains(err.Error(), "recovery ids retained") {
 		t.Fatalf("compensation did not report retained recovery ids: %v", err)
 	}
@@ -233,5 +251,111 @@ func TestZoneDrawSkipsFrameFullySwallowedByTitleBlock(t *testing.T) {
 	keepout := layoutBBox{MinX: 0, MinY: 0, MaxX: 400, MaxY: 300}
 	if _, ok := schZoneFrameRect("right-bottom", sheet, &keepout, defaultSchZoneOpts()); ok {
 		t.Error("a frame fully inside the keep-out must not be drawable")
+	}
+}
+
+func TestZoneFrameAliveSetFailsClosedOnMalformedEntries(t *testing.T) {
+	good := map[string]any{"primitiveId": "ok"}
+	inv := func(rects, texts any) map[string]any {
+		return map[string]any{"pagePrimitives": map[string]any{"rectangles": rects, "texts": texts}}
+	}
+	for name, result := range map[string]map[string]any{
+		"rectangle empty object":     inv([]any{map[string]any{}}, []any{}),
+		"rectangle not an object":    inv([]any{"r1"}, []any{}),
+		"rectangle null entry":       inv([]any{nil}, []any{}),
+		"rectangle id null":          inv([]any{map[string]any{"primitiveId": nil}}, []any{}),
+		"rectangle id not a string":  inv([]any{map[string]any{"primitiveId": 7.0}}, []any{}),
+		"rectangle id blank":         inv([]any{map[string]any{"primitiveId": "  "}}, []any{}),
+		"bad rectangle after a good": inv([]any{good, map[string]any{}}, []any{}),
+		"text empty object":          inv([]any{good}, []any{map[string]any{}}),
+		"text not an object":         inv([]any{}, []any{42.0}),
+		"text id blank":              inv([]any{}, []any{map[string]any{"primitiveId": ""}}),
+		"rectangles null":            inv(nil, []any{}),
+		"texts not a list":           inv([]any{}, map[string]any{}),
+	} {
+		if got, err := zoneFrameAliveSet(result); err == nil {
+			t.Errorf("%s: accepted as alive set %v", name, got)
+		}
+	}
+	if got, err := zoneFrameAliveSet(inv([]any{}, []any{})); err != nil || len(got) != 0 {
+		t.Fatalf("well-formed empty inventory = %v, %v", got, err)
+	}
+
+	// The clear must not report success on an inventory it could not read.
+	frames := &workflow.SchZoneFrames{Rects: []string{"r1"}, Texts: []string{"t1"}}
+	deleted := 0
+	alive := func() (map[string]bool, error) { return zoneFrameAliveSet(inv([]any{map[string]any{}}, []any{})) }
+	n, err := clearZoneFramesWith(frames, func(string) error { deleted++; return nil }, alive)
+	if err == nil || n != 0 || deleted != 0 {
+		t.Fatalf("clear on malformed inventory = (%d, %v) with %d deletes, want an error and no deletes", n, err, deleted)
+	}
+}
+
+// A first inventory that predates the frames must not pass for "already
+// absent": the ids that show up on the settle re-read are deleted and counted.
+func TestClearZoneFramesWithRereadsIdsMissingFromFirstInventory(t *testing.T) {
+	f := &workflow.SchZoneFrames{Rects: []string{"r1"}, Texts: []string{"t1"}}
+	reads, deleted := 0, map[string]int{}
+	gone := map[string]bool{}
+	alive := func() (map[string]bool, error) {
+		reads++
+		if reads == 1 { // unsettled: the frames are not in the inventory yet
+			return map[string]bool{"user": true}, nil
+		}
+		out := map[string]bool{"user": true}
+		for _, id := range []string{"r1", "t1"} {
+			if !gone[id] {
+				out[id] = true
+			}
+		}
+		return out, nil
+	}
+	found, err := clearZoneFramesWith(f, func(id string) error { deleted[id]++; gone[id] = true; return nil }, alive)
+	if err != nil || found != 2 || deleted["r1"] != 1 || deleted["t1"] != 1 || deleted["user"] != 0 {
+		t.Fatalf("late-appearing frames: found=%d err=%v deleted=%v", found, err, deleted)
+	}
+
+	// Absent on every read: confirmed absent, nothing deleted, more than one read.
+	reads = 0
+	found, err = clearZoneFramesWith(f, func(string) error { t.Fatal("deleted an absent id"); return nil },
+		func() (map[string]bool, error) { reads++; return map[string]bool{"user": true}, nil })
+	if err != nil || found != 0 || reads != settleAttempts {
+		t.Fatalf("confirmed-absent clear: found=%d err=%v reads=%d", found, err, reads)
+	}
+
+	// Every id present at once: no extra read before deleting.
+	reads = 0
+	gone = map[string]bool{}
+	if _, err = clearZoneFramesWith(f, func(id string) error { gone[id] = true; return nil }, func() (map[string]bool, error) {
+		reads++
+		return map[string]bool{"r1": !gone["r1"], "t1": !gone["t1"]}, nil
+	}); err != nil || reads != 2 {
+		t.Fatalf("all-present clear: err=%v reads=%d, want one pre-read and one verify read", err, reads)
+	}
+}
+
+// When the re-read that should confirm absence fails, absence is unproven: the
+// clear errors, and the prior record stays in the workflow state.
+func TestClearPriorZoneFramesKeepsRecordWhenAbsenceIsUnconfirmed(t *testing.T) {
+	const doc = "doc-1"
+	prev := &workflow.SchZoneFrames{Rects: []string{"r1"}, Texts: []string{"t1"}, DocumentUUID: doc}
+	st := &pcbStageState{SchZoneFrameIdsByPage: map[string]*workflow.SchZoneFrames{doc: prev}}
+	reads := 0
+	clear := func(f *workflow.SchZoneFrames, _ string) (int, error) {
+		return clearZoneFramesWith(f, func(string) error { t.Fatal("deleted without a confirmed inventory"); return nil },
+			func() (map[string]bool, error) {
+				reads++
+				if reads == 1 {
+					return map[string]bool{}, nil
+				}
+				return nil, errors.New("inventory unavailable")
+			})
+	}
+	cleared, err := clearPriorZoneFrames(st, doc, clear, io.Discard)
+	if err == nil || cleared {
+		t.Fatalf("unconfirmed absence reported as cleared: cleared=%v err=%v", cleared, err)
+	}
+	if st.SchZoneFrameIdsByPage[doc] != prev {
+		t.Fatalf("recovery record dropped: %+v", st.SchZoneFrameIdsByPage)
 	}
 }

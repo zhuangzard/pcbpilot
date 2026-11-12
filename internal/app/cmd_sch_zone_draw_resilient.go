@@ -8,7 +8,7 @@ package app
 // 三条修法,全部 Go 侧(连接器零改动):
 //
 //  1. **单区单次 exec_js**:一个区的框线 + 区名标题合并进一段 JS(rect→text→
-//     失败自清理,复用删除路径 buildZoneClearJS 早已验证的「逐个删+回读」内联
+//     失败自清理,复用 typedZoneFrameClear 的 typed「逐个删+落定回读」
 //     先例)——要么全成要么全败,消除「框成了名没成」的中间态。
 //  2. **settle 重试 + 写前/写后轻读复核(假失败定律)**:报失败的写大概率已
 //     落地。transport 层失败后先 survey(轻读页面 rect id + text 内容/锚点),
@@ -528,7 +528,7 @@ func runPartitionDrawResilient(cfg *appConfig, window string, opts partitionOpts
 			}
 		}
 		if len(staleFrames.Rects)+len(staleFrames.Texts) > 0 {
-			found, cerr := clearZoneFrames(exec, staleFrames, "clear stale zone frames")
+			found, cerr := typedZoneFrameClear(pinnedCfg, win, docUUID)(staleFrames, "clear stale zone frames")
 			if cerr != nil {
 				return fmt.Errorf("clear stale zone frames: %w (matching frames were kept; nothing new was drawn)", cerr)
 			}

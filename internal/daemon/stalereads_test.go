@@ -233,6 +233,9 @@ func TestStaleGuard_CatalogClassification(t *testing.T) {
 	if pcbStaleRead(staleReq("pcb.origin.get", "w1", nil)) {
 		t.Error("origin metadata must not be classified as a geometry stale read")
 	}
+	if pcbStaleRead(staleReq("pcb.documents.list", "w1", nil)) {
+		t.Error("document listing is the CLI context probe and must not inherit staleRisk")
+	}
 }
 
 // TestStaleGuard_DryRunNeverMarks pins issue #112b: `pcb clear --dry-run` only

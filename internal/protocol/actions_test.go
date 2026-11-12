@@ -197,3 +197,38 @@ func TestProjectTransferCatalog(t *testing.T) {
 		t.Fatal("incorrect side-effect metadata")
 	}
 }
+
+// The connector registers a schematic.geometry.read handler; without a
+// catalogue entry the daemon answers UNKNOWN_ACTION before forwarding it.
+func TestGeometryReadActionIsCataloguedReadOnly(t *testing.T) {
+	seen := 0
+	for _, action := range AllActions() {
+		if action.Name != "schematic.geometry.read" {
+			continue
+		}
+		seen++
+		if action.Mutates || action.NeedsConfirm || !action.NeedsWindow || action.Domain != DomainSchematic || action.Phase != 1 {
+			t.Fatalf("geometry read must be a current-page read-only schematic action: %+v", action)
+		}
+		if SchematicGeometryGuarded(action.Name) {
+			t.Fatal("a read must not be wrapped in the geometry guard")
+		}
+		for _, phrase := range []string{"Read-only", "world-space pins", "every wire segment", "not a complete component/marker inventory"} {
+			if !strings.Contains(action.Description, phrase) {
+				t.Fatalf("geometry read contract missing %q: %s", phrase, action.Description)
+			}
+		}
+		for _, out := range []string{"scope", "count", "wires", "wiresAvailable"} {
+			found := false
+			for _, got := range action.Outputs {
+				found = found || got == out
+			}
+			if !found {
+				t.Fatalf("geometry read outputs miss %q: %v", out, action.Outputs)
+			}
+		}
+	}
+	if seen != 1 {
+		t.Fatalf("schematic.geometry.read catalogued %d times, want exactly once", seen)
+	}
+}

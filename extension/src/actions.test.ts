@@ -23,6 +23,7 @@ import {
 	isPowerRailNet,
 	normalizeDeviceRef,
 	pcbPadExtent,
+	pcbEmbeddedParent,
 	planOtherPropertyBackfill,
 	polygonSourceToPoints,
 	PROJECTED_STATE_KEYS,
@@ -671,6 +672,7 @@ function installDocumentOpenStub(t: { after: (fn: () => void) => void }, options
 	split?: string;
 	splitFails?: boolean;
 	beforeTabId?: string;
+	beforeUuid?: string;
 	afterUuid?: string;
 	afterReadFails?: boolean;
 } = {}) {
@@ -694,7 +696,7 @@ function installDocumentOpenStub(t: { after: (fn: () => void) => void }, options
 				if (opened && options.afterReadFails) throw new Error('identity unavailable');
 				return opened
 					? { uuid: options.afterUuid ?? 'pcb-target', tabId: 'tab-target', documentType: 3 }
-					: { uuid: 'old-page', tabId: options.beforeTabId ?? 'tab-old', documentType: 1 };
+					: { uuid: options.beforeUuid ?? 'old-page', tabId: options.beforeTabId ?? 'tab-old', documentType: options.beforeUuid === 'pcb-target' ? 3 : 1 };
 			},
 		},
 		dmt_EditorControl: {
@@ -712,6 +714,51 @@ function installDocumentOpenStub(t: { after: (fn: () => void) => void }, options
 	};
 	return { opens, splitReads };
 }
+
+test('document.open repeated active PCB checks never reopen the host document (#286)', async (t) => {
+	const fx = installDocumentOpenStub(t, { beforeUuid: 'pcb-target' });
+	for (let batch = 0; batch < 150; batch++) {
+		const res: any = await runAction('document.open', { uuid: 'pcb-target' });
+		assert.deepEqual(res.result, { tabId: 'tab-old', ready: true });
+	}
+	assert.deepEqual(fx.opens, [], 'an already active document must not be reopened per batch');
+	assert.deepEqual(fx.splitReads, [], 'no navigation needs no split lookup');
+});
+
+test('document.open still honors an explicit split for an already active target', async (t) => {
+	const fx = installDocumentOpenStub(t, { beforeUuid: 'pcb-target' });
+	await runAction('document.open', { uuid: 'pcb-target', splitScreenId: 'requested-split' });
+	assert.deepEqual(fx.opens, [['pcb-target', 'requested-split']]);
+});
+
+test('document.open rechecks identity even when navigation is skipped (#286)', async (t) => {
+	const fx = installDocumentOpenStub(t, { beforeUuid: 'pcb-target' });
+	let reads = 0;
+	(globalThis as any).eda.dmt_SelectControl.getCurrentDocumentInfo = async () => ({
+		uuid: ++reads <= 1 ? 'pcb-target' : 'other-page', tabId: 'tab-old', documentType: 3,
+	});
+	const res: any = await runAction('document.open', { uuid: 'pcb-target' });
+	assert.equal(res.result.ready, false, 'a skipped navigation is not readiness evidence');
+	assert.deepEqual(fx.opens, [], 'identity drift must not trigger corrective navigation');
+});
+
+test('document.open does not reuse an active UUID without a usable tab ID', async (t) => {
+	const fx = installDocumentOpenStub(t, { beforeUuid: 'pcb-target', beforeTabId: ' ' });
+	await runAction('document.open', { uuid: 'pcb-target' });
+	assert.deepEqual(fx.opens, [['pcb-target']]);
+});
+
+test('document.open skipped navigation cannot hide an unavailable fresh identity', async (t) => {
+	const fx = installDocumentOpenStub(t, { beforeUuid: 'pcb-target' });
+	let reads = 0;
+	(globalThis as any).eda.dmt_SelectControl.getCurrentDocumentInfo = async () => {
+		if (++reads > 1) throw new Error('identity unavailable');
+		return { uuid: 'pcb-target', tabId: 'tab-old', documentType: 3 };
+	};
+	const res: any = await runAction('document.open', { uuid: 'pcb-target' });
+	assert.equal(res.result.ready, false);
+	assert.deepEqual(fx.opens, []);
+});
 
 test('document.open uses the active tab\'s official split ID without guessing', async (t) => {
 	const fx = installDocumentOpenStub(t, { split: 'official-split-42' });
@@ -1186,6 +1233,22 @@ test('V4 plural device variants fail closed before create or placement mutation'
 	finally { delete (globalThis as any).eda; }
 });
 
+test('unknown device is refused before sch create (create would hang forever)', async () => {
+	let placements = 0;
+	(globalThis as any).eda = {
+		lib_Device: { get: async () => undefined },
+		sch_PrimitiveComponent: { create: async () => { placements++; return mockComponent(); } },
+	};
+	try {
+		await assert.rejects(
+			() => runAction('schematic.component.place', { libraryUuid: 'LIB-D', uuid: 'SYMBOL-16CHAR', x: 0, y: 0 }),
+			(err: any) => err.code === 'PRECONDITION_REFUSED' && /not found/.test(err.message),
+		);
+		assert.equal(placements, 0);
+	}
+	finally { delete (globalThis as any).eda; }
+});
+
 test('library Device delete requires exact expected name and verifies absence', async () => {
 	let live: any = { uuid: 'DEV-1', name: 'EA_AGENT__TEST' };
 	let deleteCalls = 0;
@@ -1466,6 +1529,49 @@ test('components.list: complete page inventory loads unvisited pages and rejects
 			finally { delete (globalThis as any).eda; }
 		});
 	}
+});
+
+test('components.list: a block instance absent from the netlist resolves pins from touching wires, never a silent null (#244)', async () => {
+	const pin = (id: string, num: string, x: number, y: number) => ({
+		getState_PrimitiveId: () => id, getState_PinNumber: () => num, getState_PinName: () => `P${num}`,
+		getState_X: () => x, getState_Y: () => y, getState_Rotation: () => 0, getState_NoConnected: () => false,
+	});
+	const wire = (id: string, line: number[], net: string) => ({ getState_PrimitiveId: () => id, getState_Line: () => line, getState_Net: () => net });
+	const components = [
+		mockComponent({ PrimitiveId: 'blk', ComponentType: 'block_symbol', Designator: 'CBB1' }),
+		mockComponent({ PrimitiveId: 'r1', ComponentType: 'part', Designator: 'R1' }),
+	];
+	const pins: Record<string, unknown[]> = {
+		blk: [pin('b1', '1', 0, 0), pin('b2', '2', 0, 20), pin('b3', '3', 0, 40), pin('b4', '4', 0, 60)],
+		r1: [pin('r1p1', '1', 100, 0)],
+	};
+	(globalThis as any).eda = {
+		sch_PrimitiveComponent: { getAll: async () => components, getAllPinsByPrimitiveId: async (id: string) => pins[id] },
+		sch_PrimitiveWire: { getAll: async () => [
+			wire('w1', [0, 0, 100, 0], '3V3'), // b1 → named net
+			wire('w2', [0, 20, -40, 20], ''), // b2 → unnamed wire
+			wire('w3', [0, 60, -40, 60], 'A'), wire('w4', [0, 60, 40, 60], 'B'), // b4 → disagreeing nets
+		] },
+		dmt_SelectControl: { getCurrentDocumentInfo: async () => ({ uuid: 'page', tabId: 'page@project' }) },
+		dmt_EditorControl: { activateDocument: async () => true },
+		sch_ManufactureData: { getNetlistFile: async () => ({ text: async () => JSON.stringify({ components: {
+			c1: { props: { Designator: 'R1' }, pinInfoMap: { p0: { number: '1', net: '3V3' } } },
+		} }) }) },
+	};
+	try {
+		const res: any = await schematicComponentsList({ includePins: true });
+		const blk = res.result.components.find((c: any) => c.primitiveId === 'blk');
+		assert.equal(blk.netSource, 'wire-geometry');
+		const byNum = Object.fromEntries(blk.pins.map((p: any) => [p.pinNumber, p]));
+		assert.equal(byNum['1'].net, '3V3');
+		assert.deepEqual([byNum['2'].net, byNum['2'].netUnresolved], [null, 'unnamed-wire']);
+		assert.deepEqual([byNum['3'].net, byNum['3'].netUnresolved], [null, 'no-touching-wire']);
+		assert.deepEqual([byNum['4'].net, byNum['4'].netUnresolved], [null, 'conflicting-wire-nets']);
+		const r1 = res.result.components.find((c: any) => c.primitiveId === 'r1');
+		assert.equal(r1.netSource, undefined, 'netlist-backed parts keep netlist nets');
+		assert.equal(r1.pins[0].net, '3V3');
+	}
+	finally { delete (globalThis as any).eda; }
 });
 
 test('components.list: includePins distinguishes empty success, unavailable data, and failure', async () => {
@@ -1958,11 +2064,14 @@ function installNoConnectStub(initial: Record<string, boolean>) {
 	};
 
 	(globalThis as any).eda = {
+		sch_PrimitiveAttribute: { getAll: async () => [{
+			getState_Key: () => 'Designator', getState_Value: () => 'U1', getState_ParentPrimitiveId: () => componentId,
+		}] },
 		sch_PrimitiveComponent: {
-			getAll: async () => [{
-				getState_Designator: () => 'U1',
-				getState_PrimitiveId: () => componentId,
-			}],
+			getAllPrimitiveId: async (kind: unknown, allPages: boolean) => {
+				assert.equal(allPages, false);
+				return [componentId];
+			},
 			get: async (id: string) => {
 				getCalls.push(id);
 				return id === componentId ? component : undefined;
@@ -2607,6 +2716,120 @@ test('prim-delete: a fully successful delete carries no partial flag', async () 
 	}
 });
 
+/** Synthetic native inventory; deleting a parent cascades to its owned attributes. */
+function guardedClearOwnedAttributeFixture() {
+	const state: Record<string, Array<Record<string, any>>> = {
+		components: [{ PrimitiveId: 'sheet-1', ComponentType: 'sheet', OtherProperty: { Title: 'Circuit' } }],
+		wires: [1, 2, 3].map(n => ({ PrimitiveId: `wire-${n}`, Line: [0, n * 10, 20, n * 10], Net: 'GND', Color: '#000', LineWidth: 1, LineType: 0 })),
+		texts: [{ PrimitiveId: 'text-1', X: 0, Y: 0, Content: 'Circuit', Rotation: 0, TextColor: '#000', FontName: 'Arial', FontSize: 10, Bold: false, Italic: false, UnderLine: false, AlignMode: 0 }],
+		rectangles: [{ PrimitiveId: 'rectangle-1', TopLeftX: 0, TopLeftY: 0, Width: 20, Height: 10, CornerRadius: 0, Rotation: 0, Color: '#000', FillColor: 'none', LineWidth: 1, LineType: 0, FillStyle: 0 }],
+		buses: [], arcs: [], circles: [], polygons: [], objects: [], attributes: [],
+	};
+	const attribute = (id: string, parent: unknown, key = 'Name') => ({
+		PrimitiveId: id, X: 0, Y: 0, Rotation: 0, Color: '#000', FontName: 'Arial', FontSize: 10,
+		Bold: false, Italic: false, UnderLine: false, AlignMode: 0, FillColor: 'none',
+		Key: key, Value: 'GND', KeyVisible: false, ValueVisible: true, ParentPrimitiveId: parent,
+	});
+	for (const wire of state.wires) {
+		for (const key of ['Name', 'Relevance']) state.attributes.push(attribute(`${wire.PrimitiveId}-${key}`, wire.PrimitiveId, key));
+	}
+	for (const parent of ['sheet-1', 'text-1', 'rectangle-1']) state.attributes.push(attribute(`${parent}-Name`, parent));
+	const primitive = (record: Record<string, any>) => new Proxy({}, { get: (_target, prop) =>
+		typeof prop === 'string' && prop.startsWith('getState_') ? () => record[prop.slice(9)] : undefined });
+	const deleteCalls: string[][] = [];
+	const remove = async (ids: string[]) => {
+		deleteCalls.push([...ids]);
+		for (const [kind, records] of Object.entries(state)) state[kind] = records.filter(record => !ids.includes(record.PrimitiveId));
+		state.attributes = state.attributes.filter(record => !ids.includes(record.ParentPrimitiveId));
+		return true;
+	};
+	const klass = (kind: string) => ({ getAll: async () => state[kind].map(primitive), delete: remove });
+	const eda = {
+		dmt_SelectControl: { getCurrentDocumentInfo: async () => ({ uuid: 'page', tabId: 'page@project' }) },
+		sch_PrimitiveComponent: klass('components'), sch_PrimitiveWire: klass('wires'),
+		sch_PrimitiveText: klass('texts'), sch_PrimitiveRectangle: klass('rectangles'),
+		sch_PrimitiveBus: klass('buses'), sch_PrimitiveArc: klass('arcs'),
+		sch_PrimitiveCircle: klass('circles'), sch_PrimitivePolygon: klass('polygons'),
+		sch_PrimitiveObject: klass('objects'),
+		sch_PrimitiveAttribute: {
+			getAll: async (parent?: string) => state.attributes.filter(a => parent === undefined || a.ParentPrimitiveId === parent).map(primitive),
+			getAllPrimitiveId: async () => state.attributes.map(a => a.PrimitiveId),
+			get: async (id: string) => { const found = state.attributes.find(a => a.PrimitiveId === id); return found ? primitive(found) : undefined; },
+		},
+	};
+	return { eda, state, attribute, deleteCalls };
+}
+
+test('ordinary guarded clear plans and deletes wires with Name/Relevance and graphic-owned attributes, preserving sheet', async t => {
+	const fx = guardedClearOwnedAttributeFixture();
+	(globalThis as any).eda = fx.eda;
+	t.after(() => { delete (globalThis as any).eda; });
+	const before: any = await runAction('schematic.components.list', { includePagePrimitives: true });
+	assert.equal(before.result.pagePrimitives.attributes.length, 9);
+	const expectedPagePrimitives = JSON.stringify(before.result.pagePrimitives);
+	const planned: any = await runAction('schematic.page.clear', { dryRun: true, expectedPagePrimitives });
+	assert.equal(planned.result.total, 5);
+	assert.deepEqual(planned.result.deletedIds.wires, ['wire-1', 'wire-2', 'wire-3']);
+	assert.deepEqual(planned.result.deletedIds.texts, ['text-1']);
+	assert.deepEqual(planned.result.deletedIds.rectangles, ['rectangle-1']);
+	assert.equal(fx.deleteCalls.length, 0);
+	const cleared: any = await runAction('schematic.page.clear', { expectedPagePrimitives });
+	assert.equal(cleared.result.total, 5);
+	assert.equal(cleared.result.remaining, 0);
+	assert.ok(fx.deleteCalls.length > 0, 'the typed clear must execute deletion');
+	const after: any = await runAction('schematic.components.list', { includePagePrimitives: true });
+	assert.deepEqual(after.result.pagePrimitives.components, before.result.pagePrimitives.components);
+	assert.deepEqual(after.result.pagePrimitives.attributes, before.result.pagePrimitives.attributes.filter((a: any) => a.ParentPrimitiveId === 'sheet-1'));
+	for (const [kind, records] of Object.entries(after.result.pagePrimitives)) {
+		if (kind !== 'components' && kind !== 'attributes') assert.deepEqual(records, [], `${kind} must independently read empty`);
+	}
+	const empty: any = await runAction('schematic.page.clear', {
+		dryRun: true, requireCompleteInventory: true, expectedPagePrimitives: JSON.stringify(after.result.pagePrimitives),
+	});
+	assert.equal(empty.result.total, 0);
+});
+
+for (const parent of ['missing-parent', '', null, 17, 'wire-1-Name']) {
+	test(`ordinary guarded clear refuses orphan attribute parent ${JSON.stringify(parent)} before deletion`, async t => {
+		const fx = guardedClearOwnedAttributeFixture();
+		fx.state.attributes.push(fx.attribute('orphan-1', parent));
+		(globalThis as any).eda = fx.eda;
+		t.after(() => { delete (globalThis as any).eda; });
+		const before: any = await runAction('schematic.components.list', { includePagePrimitives: true });
+		await assert.rejects(() => runAction('schematic.page.clear', { expectedPagePrimitives: JSON.stringify(before.result.pagePrimitives) }),
+			/ordinary clear cannot prove removal of 1 orphan attributes and 0 embedded objects/);
+		await assert.rejects(() => runAction('schematic.page.clear', { dryRun: true, requireCompleteInventory: true }), /1 orphan attributes/);
+		assert.equal(fx.deleteCalls.length, 0);
+	});
+}
+
+for (const changed of ['wire', 'attribute']) {
+	test(`ordinary guarded clear refuses ${changed} drift with legitimate wire-owned attributes before deletion`, async t => {
+		const fx = guardedClearOwnedAttributeFixture();
+		(globalThis as any).eda = fx.eda;
+		t.after(() => { delete (globalThis as any).eda; });
+		const before: any = await runAction('schematic.components.list', { includePagePrimitives: true });
+		const expectedPagePrimitives = JSON.stringify(before.result.pagePrimitives);
+		if (changed === 'wire') fx.state.wires[0].LineWidth = 2;
+		else fx.state.attributes[0].Value = 'CHANGED';
+		await assert.rejects(() => runAction('schematic.page.clear', { expectedPagePrimitives }), /No primitives deleted: page drawing\/object state differs/);
+		assert.equal(fx.deleteCalls.length, 0);
+	});
+}
+
+test('ordinary guarded clear still refuses embedded objects with valid owned attributes before deletion', async t => {
+	const fx = guardedClearOwnedAttributeFixture();
+	fx.state.objects.push({ PrimitiveId: 'object-1', Content: 'data', StartX: 0, StartY: 0, Width: 10, Height: 10, Rotation: 0, Mirror: false, FileName: 'image.svg' });
+	fx.state.attributes.push(fx.attribute('object-name', 'object-1'));
+	(globalThis as any).eda = fx.eda;
+	t.after(() => { delete (globalThis as any).eda; });
+	const before: any = await runAction('schematic.components.list', { includePagePrimitives: true });
+	await assert.rejects(() => runAction('schematic.page.clear', { expectedPagePrimitives: JSON.stringify(before.result.pagePrimitives) }),
+		/ordinary clear cannot prove removal of 0 orphan attributes and 1 embedded objects/);
+	await assert.rejects(() => runAction('schematic.page.clear', { dryRun: true, requireCompleteInventory: true }), /1 embedded objects remain/);
+	assert.equal(fx.deleteCalls.length, 0);
+});
+
 test('guarded schematic clear refuses changed wire, flag and graphic before deletion', async () => {
 	const state: any = {
 		part: { PrimitiveId: 'part-1', ComponentType: 'part', Designator: 'R1', UniqueId: 'gge1', Name: 'R', SubPartName: 'device.1', AddIntoBom: false, AddIntoPcb: true, Manufacturer: '', ManufacturerId: '', Supplier: '', SupplierId: '', OtherProperty: {}, Component: {}, Symbol: {}, Footprint: {}, X: 0, Y: 0, Rotation: 0, Mirror: false },
@@ -2979,6 +3202,7 @@ test('disconnect: wire-id locator stays targeted (single wire) and still verifie
 import {
 	classifyLockReadback,
 	normalizePcbComponentPatch,
+	pcbComponentLayerId,
 	pcbComponentLock,
 	pcbComponentModify,
 	verifyPcbComponentPatch,
@@ -4205,4 +4429,250 @@ test('pcb.pour.create removes and rejects a pour that landed on another layer th
 		assert.deepEqual(deleted, ['pour-bad'], 'a correctly placed pour is never deleted');
 	}
 	finally { delete (globalThis as any).eda; }
+});
+
+test('PCB embedded ownership needs the parent id followed by a child e<digits> id, not a bare prefix', () => {
+	const components = ['e2', 'ba45f3'];
+	assert.equal(pcbEmbeddedParent('e200', components), undefined);
+	assert.equal(pcbEmbeddedParent('e20e5', components), undefined);
+	assert.equal(pcbEmbeddedParent('e2', components), undefined);
+	assert.equal(pcbEmbeddedParent('e2e5', components), 'e2');
+	assert.equal(pcbEmbeddedParent('ba45f3e184', components), 'ba45f3');
+	assert.equal(pcbEmbeddedParent('ba45f3x', components), undefined);
+});
+
+test('pcb.route.delete deletes a top-level track whose id merely starts with a component id and still refuses embedded vias', async () => {
+	const prim = (id: string, extra: Record<string, unknown> = {}): any => ({
+		getState_PrimitiveId: () => id, getState_PrimitiveLock: () => false, getState_Net: () => 'GND', getState_Layer: () => 1,
+		getState_StartX: () => 0, getState_StartY: () => 0, getState_EndX: () => 10, getState_EndY: () => 0, getState_LineWidth: () => 10,
+		getState_X: () => 0, getState_Y: () => 0, getState_HoleDiameter: () => 12, getState_Diameter: () => 24, ...extra,
+	});
+	let lines = [prim('e200')];
+	const vias = [prim('ba45f3e184'), prim('e2e5')];
+	const deleted: Array<Array<string>> = [];
+	(globalThis as any).eda = {
+		pcb_PrimitiveLine: { getAll: async () => lines, delete: async (ids: Array<string>) => { deleted.push(ids); lines = lines.filter(l => !ids.includes(l.getState_PrimitiveId())); return true; } },
+		pcb_PrimitiveArc: { getAll: async () => [], delete: async () => true },
+		pcb_PrimitiveVia: { getAll: async () => vias, delete: async (ids: Array<string>) => { deleted.push(ids); return true; } },
+		pcb_PrimitiveComponent: { getAll: async () => [prim('e2'), prim('ba45f3')] },
+	};
+	try {
+		const res: any = await runAction('pcb.route.delete', { primitiveIds: ['e200', 'ba45f3e184', 'e2e5'] });
+		assert.deepEqual(deleted, [['e200']]);
+		assert.equal(res.result.count, 1);
+		assert.deepEqual(res.result.notDeletable.map((n: any) => [n.primitiveId, n.parentComponent]), [['ba45f3e184', 'ba45f3'], ['e2e5', 'e2']]);
+	}
+	finally { delete (globalThis as any).eda; }
+});
+
+test('component layer names map to side ids so a flip is written and verified, never silently dropped (#275)', () => {
+	for (const [input, id] of [['BOTTOM', 2], ['bottom', 2], ['Bottom Layer', 2], ['bottom_layer', 2], [2, 2], ['TOP', 1], ['Top Layer', 1], [1, 1]] as const) {
+		assert.equal(pcbComponentLayerId(input), id, String(input));
+	}
+	for (const bad of ['TOP_SILKSCREEN', 'inner1', 3, 15, null]) {
+		assert.throws(() => pcbComponentLayerId(bad), (err: any) => err.code === 'PRECONDITION_REFUSED');
+	}
+	const patch = normalizePcbComponentPatch({ rotation: 90, layer: 'BOTTOM' });
+	assert.deepEqual(patch, { rotation: 90, layer: 2 });
+	assert.deepEqual(verifyPcbComponentPatch(patch, { rotation: 90, layer: 1 }).notApplied, [{ field: 'layer', expected: 2, actual: 1 }]);
+});
+
+test('pcbPageClear: footprint-embedded vias stay out of the via delete; standalone vias still go', async () => {
+	// A QFN's thermal-pad vias (<componentId>e<n>) made the via batch throw, so a
+	// clean board reported failed:["vias"].
+	const s = installPcbClearStub({
+		components: [pcbPrim('6ea58e4ac6716d3d', 1), pcbPrim('e2', 1)],
+		vias: [pcbPrim('6ea58e4ac6716d3de184'), pcbPrim('6ea58e4ac6716d3de185'), pcbPrim('v9'), pcbPrim('e200')],
+	});
+	const realVias = (globalThis as any).eda.pcb_PrimitiveVia;
+	(globalThis as any).eda.pcb_PrimitiveVia = {
+		getAll: realVias.getAll,
+		delete: async (ids: string[]) => {
+			if (ids.some(id => id.startsWith('6ea58e4ac6716d3de'))) throw new Error("Cannot read properties of undefined (reading 'length')");
+			return realVias.delete(ids);
+		},
+	};
+	const res: any = await pcbPageClear({});
+	assert.equal(res.result.failed, undefined, JSON.stringify(res.result.warnings));
+	assert.deepEqual((s.deleted.vias ?? []).sort(), ['e200', 'v9'], 'e200 merely shares the e2 prefix; it is an independent via');
+	assert.equal(res.result.skippedEmbeddedVias, 2);
+	delete (globalThis as any).eda;
+});
+
+test('pcbPageClear: footprint-embedded tracks and arcs are skipped like vias, each kind counted', async () => {
+	const s = installPcbClearStub({
+		components: [pcbPrim('c0ffee01', 1), pcbPrim('e2', 1)],
+		lines: [pcbPrim('c0ffee01e7', 1), pcbPrim('t1', 1), pcbPrim('e200', 2)],
+		arcs: [pcbPrim('c0ffee01e8', 1), pcbPrim('e2e9', 1), pcbPrim('a1', 2)],
+		vias: [pcbPrim('c0ffee01e184'), pcbPrim('v9')],
+	});
+	const res: any = await pcbPageClear({ only: 'routing' });
+	assert.equal(res.result.failed, undefined, JSON.stringify(res.result.warnings));
+	assert.deepEqual((s.deleted.lines ?? []).sort(), ['e200', 't1'], 'e200 merely shares the e2 prefix');
+	assert.deepEqual((s.deleted.arcs ?? []).sort(), ['a1']);
+	assert.deepEqual((s.deleted.vias ?? []).sort(), ['v9']);
+	assert.equal(s.deleted.components, undefined, 'routing scope leaves components, so their embedded primitives stay too');
+	assert.deepEqual(res.result.skippedEmbedded, { tracks: 1, arcs: 2, vias: 1 });
+	assert.equal(res.result.skippedEmbeddedTotal, 4);
+	assert.equal(res.result.skippedEmbeddedVias, 1);
+	assert.deepEqual(res.result.deletedIds.tracks.sort(), ['e200', 't1']);
+
+	// Dry run reports the same split without deleting.
+	const d = installPcbClearStub({
+		components: [pcbPrim('c0ffee01', 1)],
+		lines: [pcbPrim('c0ffee01e7', 1), pcbPrim('t1', 1)],
+	});
+	const dry: any = await pcbPageClear({ dryRun: true });
+	assert.deepEqual(dry.result.deletedIds.tracks, ['t1']);
+	assert.deepEqual(dry.result.skippedEmbedded, { tracks: 1 });
+	assert.deepEqual(d.deleted, {});
+	delete (globalThis as any).eda;
+});
+
+test('components.list: a netlist record owned by another component of the same designator does not suppress the wire fallback', async () => {
+	const { netlistRecordIsForeign } = require('./actions') as typeof import('./actions');
+	const pin = (id: string, num: string, x: number, y: number) => ({
+		getState_PrimitiveId: () => id, getState_PinNumber: () => num, getState_PinName: () => `P${num}`,
+		getState_X: () => x, getState_Y: () => y, getState_Rotation: () => 0, getState_NoConnected: () => false,
+	});
+	const wire = (id: string, line: number[], net: string) => ({ getState_PrimitiveId: () => id, getState_Line: () => line, getState_Net: () => net });
+	const dev = (uuid: string) => ({ libraryUuid: 'LIB', uuid });
+	let allPageReads = 0;
+	const run = async (components: any[], netlist: Record<string, unknown>, offPage: any[] = []) => {
+		allPageReads = 0;
+		const pins: Record<string, unknown[]> = {};
+		components.forEach((c, i) => { pins[c.getState_PrimitiveId()] = [pin(`${c.getState_PrimitiveId()}-1`, '1', 0, i * 100)]; });
+		(globalThis as any).eda = {
+			sch_PrimitiveComponent: {
+				getAll: async (_kind: unknown, every: boolean) => { if (every) allPageReads++; return every ? [...components, ...offPage] : components; },
+				getAllPinsByPrimitiveId: async (id: string) => pins[id],
+			},
+			sch_PrimitiveWire: { getAll: async () => components.map((c, i) => wire(`w${i}`, [0, i * 100, 50, i * 100], `WIRE_${i}`)) },
+			dmt_SelectControl: { getCurrentDocumentInfo: async () => ({ uuid: 'page', tabId: 'page@project' }) },
+			dmt_EditorControl: { activateDocument: async () => true },
+			sch_ManufactureData: { getNetlistFile: async () => ({ text: async () => JSON.stringify({ components: netlist }) }) },
+		};
+		try {
+			const res: any = await schematicComponentsList({ includePins: true });
+			return Object.fromEntries(res.result.components.map((c: any) => [c.primitiveId, c]));
+		}
+		finally { delete (globalThis as any).eda; }
+	};
+	const rec = (designator: string, net: string, extra: Record<string, unknown> = {}) =>
+		({ props: { Designator: designator, ...extra }, pinInfoMap: { p: { number: '1', net } } });
+	const anchor = mockComponent({ PrimitiveId: 'r1', ComponentType: 'part', Designator: 'R1', UniqueId: 'id-r1', Component: dev('DEV-R') });
+	const block = (): any => mockComponent({ PrimitiveId: 'blk', ComponentType: 'block_symbol', Designator: 'U7', UniqueId: 'id-blk' });
+
+	// Block instance with no record of its own; the only "U7" record belongs to
+	// a component on a page this listing does not cover.
+	let out = await run([anchor, block()], { 'id-r1': rec('R1', 'NET_R1'), 'id-elsewhere': rec('U7', 'FOREIGN_NET') });
+	assert.equal(out.r1.pins[0].net, 'NET_R1');
+	assert.equal(out.r1.netSource, undefined);
+	assert.equal(out.blk.netSource, 'wire-geometry');
+	assert.equal(out.blk.netlistRecordForeign, true);
+	assert.equal(out.blk.pins[0].net, 'WIRE_1', 'the block pin takes its net from the touching wire, not the foreign record');
+
+	// Same, with the identity carried in the Unique ID prop instead of the key.
+	out = await run([anchor, block()], {
+		a: rec('R1', 'NET_R1', { 'Unique ID': 'id-r1' }),
+		b: rec('U7', 'FOREIGN_NET', { 'Unique ID': 'id-elsewhere' }),
+	});
+	assert.equal(out.blk.pins[0].net, 'WIRE_1');
+
+	// Two listed parts share a designator; the record belongs to the first and
+	// the second is a different device with no record.
+	out = await run([
+		mockComponent({ PrimitiveId: 'own', ComponentType: 'part', Designator: 'U7', UniqueId: 'id-own', Component: dev('DEV-A') }),
+		mockComponent({ PrimitiveId: 'stray', ComponentType: 'part', Designator: 'U7', UniqueId: 'id-stray', Component: dev('DEV-B') }),
+	], { 'id-own': rec('U7', 'OWN_NET') });
+	assert.deepEqual([out.own.pins[0].net, out.own.netSource], ['OWN_NET', undefined]);
+	assert.deepEqual([out.stray.pins[0].net, out.stray.netSource, out.stray.netlistRecordForeign], ['WIRE_1', 'wire-geometry', true]);
+
+	// Sub-symbols of one device share one record: the second is not foreign.
+	out = await run([
+		mockComponent({ PrimitiveId: 'ua', ComponentType: 'part', Designator: 'U7', UniqueId: 'id-ua', Component: dev('DEV-A'), SubPartName: 'X.1' }),
+		mockComponent({ PrimitiveId: 'ub', ComponentType: 'part', Designator: 'U7', UniqueId: 'id-ub', Component: dev('DEV-A'), SubPartName: 'X.2' }),
+	], { 'id-ua': rec('U7', 'OWN_NET') });
+	assert.deepEqual([out.ub.pins[0].net, out.ub.netSource, out.ub.netlistRecordForeign], ['OWN_NET', undefined, undefined]);
+
+	// Two separate placements of the SAME library device under one designator:
+	// a shared device is not multi-unit evidence, so the one without a record
+	// must not inherit the other's nets. Same sub-part name, or none at all.
+	for (const sub of ['X.1', '']) {
+		out = await run([
+			mockComponent({ PrimitiveId: 'own', ComponentType: 'part', Designator: 'U7', UniqueId: 'id-own', Component: dev('DEV-A'), SubPartName: sub }),
+			mockComponent({ PrimitiveId: 'stray', ComponentType: 'part', Designator: 'U7', UniqueId: 'id-stray', Component: dev('DEV-A'), SubPartName: sub }),
+		], { 'id-own': rec('U7', 'OWN_NET') });
+		assert.deepEqual([out.own.pins[0].net, out.own.netSource], ['OWN_NET', undefined]);
+		assert.deepEqual([out.stray.pins[0].net, out.stray.netSource, out.stray.netlistRecordForeign], ['WIRE_1', 'wire-geometry', true],
+			`same device, sub-part "${sub}"`);
+	}
+
+	// A stale designator: the component's own record sits under "R9", and the
+	// record under its current designator "U7" belongs to something else.
+	out = await run([
+		anchor,
+		mockComponent({ PrimitiveId: 'stale', ComponentType: 'part', Designator: 'U7', UniqueId: 'id-stale', Component: dev('DEV-A') }),
+	], { 'id-r1': rec('R1', 'NET_R1'), 'id-stale': rec('R9', 'OLD_NET'), 'id-elsewhere': rec('U7', 'FOREIGN_NET') });
+	assert.deepEqual([out.stale.pins[0].net, out.stale.netSource, out.stale.netlistRecordForeign], ['WIRE_1', 'wire-geometry', true]);
+
+	// The netlist does not carry component identities at all: nothing can be
+	// concluded, and the designator match is used as before.
+	out = await run([anchor, block()], { c1: rec('R1', 'NET_R1'), c2: rec('U7', 'KEPT_NET') });
+	assert.deepEqual([out.blk.pins[0].net, out.blk.netSource], ['KEPT_NET', undefined]);
+
+	// A part whose record owner cannot be inspected (no loaded page carries
+	// it): nothing proves it is a unit of that owner, so the owner's nets are
+	// never attributed to it.
+	const lone = mockComponent({ PrimitiveId: 'p', ComponentType: 'part', Designator: 'U7', UniqueId: 'id-p', Component: dev('DEV-A'), SubPartName: 'X.2' });
+	const offPageNetlist = { 'id-r1': rec('R1', 'NET_R1'), 'id-elsewhere': rec('U7', 'OFFPAGE_NET') };
+	out = await run([anchor, lone], offPageNetlist);
+	assert.deepEqual([out.p.pins[0].net, out.p.netSource, out.p.netlistRecordForeign], ['WIRE_1', 'wire-geometry', true]);
+	assert.equal(allPageReads, 1, 'the other pages are read once before giving up on the owner');
+
+	// The owner sits on another loaded page and is a separate placement (same
+	// device, same unit name; then a different device): still never attributed.
+	for (const owner of [
+		mockComponent({ PrimitiveId: 'far', ComponentType: 'part', Designator: 'U7', UniqueId: 'id-elsewhere', Component: dev('DEV-A'), SubPartName: 'X.2' }),
+		mockComponent({ PrimitiveId: 'far', ComponentType: 'part', Designator: 'U7', UniqueId: 'id-elsewhere', Component: dev('DEV-B'), SubPartName: 'X.1' }),
+	]) {
+		out = await run([anchor, lone], offPageNetlist, [owner]);
+		assert.deepEqual([out.p.pins[0].net, out.p.netSource, out.p.netlistRecordForeign], ['WIRE_1', 'wire-geometry', true]);
+		assert.equal(out.far, undefined, 'the off-page owner is consulted, not listed');
+	}
+
+	// A multi-unit part split across pages: the off-page owner is another unit
+	// of the same device, so this unit keeps the shared record.
+	out = await run([anchor, lone], offPageNetlist,
+		[mockComponent({ PrimitiveId: 'far', ComponentType: 'part', Designator: 'U7', UniqueId: 'id-elsewhere', Component: dev('DEV-A'), SubPartName: 'X.1' })]);
+	assert.deepEqual([out.p.pins[0].net, out.p.netSource, out.p.netlistRecordForeign], ['OFFPAGE_NET', undefined, undefined]);
+	assert.equal(allPageReads, 1);
+
+	// Two foreign-looking components share the single all-page read; a listing
+	// with nothing foreign never makes it.
+	out = await run([anchor, lone, block()], offPageNetlist);
+	assert.equal(allPageReads, 1);
+	out = await run([anchor], { 'id-r1': rec('R1', 'NET_R1') });
+	assert.equal(allPageReads, 0);
+
+	// The pure rule, including a component that has a record under another designator.
+	const netlist = {
+		identitiesByDesignator: new Map([['U7', new Set(['id-own'])], ['R1', new Set(['id-r1'])]]),
+		identities: new Set(['id-own', 'id-r1']),
+	};
+	const probe = (uniqueId: string, designator: string, kind: string, deviceUuid = '', subPartName = '') => ({ uniqueId, designator, kind, deviceUuid, subPartName });
+	const listed = [probe('id-r1', 'R1', 'part', 'DEV-R')];
+	assert.equal(netlistRecordIsForeign(probe('id-blk', 'U7', 'block_symbol'), listed, netlist), true);
+	assert.equal(netlistRecordIsForeign(probe('', 'U7', 'block_symbol'), listed, netlist), false, 'no own identity, no conclusion');
+	assert.equal(netlistRecordIsForeign(probe('id-r1', 'U7', 'block_symbol'), listed, netlist), true, 'own record sits under another designator: the U7 record is not its own');
+	assert.equal(netlistRecordIsForeign(probe('id-r1', 'U7', 'part', 'DEV-R'), [], netlist), true, 'a stale designator needs no other listed component to prove the namespace');
+	assert.equal(netlistRecordIsForeign(probe('id-own', 'U7', 'part', 'DEV-A'), listed, netlist), false, 'owns the record under its designator');
+	const owner = probe('id-own', 'U7', 'part', 'DEV-A', 'X.1');
+	assert.equal(netlistRecordIsForeign(probe('id-b', 'U7', 'part', 'DEV-A', 'X.2'), [owner], netlist), false, 'another unit of the same device');
+	assert.equal(netlistRecordIsForeign(probe('id-b', 'U7', 'part', 'DEV-A', 'X.1'), [owner], netlist), true, 'same unit name is a second placement');
+	assert.equal(netlistRecordIsForeign(probe('id-b', 'U7', 'part', 'DEV-A', ''), [owner], netlist), true, 'no unit name, no multi-unit evidence');
+	assert.equal(netlistRecordIsForeign(probe('id-b', 'U7', 'part', 'DEV-B', 'X.2'), [owner], netlist), true, 'different device');
+	assert.equal(netlistRecordIsForeign(probe('id-b', 'U7', 'part', 'DEV-A', 'X.2'), listed, netlist), true, 'owner not listed: unprovable, not handed out');
+	assert.equal(netlistRecordIsForeign(probe('id-blk', 'U9', 'block_symbol'), listed, netlist), false, 'no record under that designator');
+	assert.equal(netlistRecordIsForeign(probe('id-blk', 'U7', 'block_symbol'), [], netlist), false, 'namespace not proven');
 });

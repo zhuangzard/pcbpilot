@@ -42,6 +42,13 @@ curl -fsSL https://raw.githubusercontent.com/zhuangzard/pcbpilot/main/install.sh
 irm https://raw.githubusercontent.com/zhuangzard/pcbpilot/main/install.ps1 | iex             # Windows
 ```
 
+仓库为私有时先 `gh auth login`，再改用：
+
+```bash
+gh api -H "Accept: application/vnd.github.raw" repos/zhuangzard/pcbpilot/contents/install.sh | bash                    # macOS / Linux
+gh api -H "Accept: application/vnd.github.raw" repos/zhuangzard/pcbpilot/contents/install.ps1 | Out-String | iex       # Windows
+```
+
 发布版脚本会查询 GitHub latest release。遇到 `403`（匿名额度）时 `export GITHUB_TOKEN=…`，
 或用 `PCBPILOT_VERSION=vX.Y.Z` 锁版本。其他变量：`PCBPILOT_INSTALL_DIR`、
 `PCBPILOT_INSTALL_SKILLS=codex,claude,agents|none`、`PCBPILOT_SKILL_PRESERVE=1`、`PCBPILOT_GITHUB_PROXY`、

@@ -35,9 +35,10 @@ import (
 
 type kicadRouteOpts struct {
 	pcb, intent, sim, sch, outDir, waivers, fastrouteBin, widthBasis string
-	// router: fastroute | tracemaker | both (see kicad_route_backends.go).
+	// router: fastroute | tracemaker | freerouting | both | all (see kicad_route_backends.go).
 	router      string
 	tm          tracemakerOpts
+	fr          freeroutingOpts
 	ripUp       bool
 	fo          fastrouteOpts
 	minTraceSet bool
@@ -163,7 +164,10 @@ Exits non-zero when any gate fails; --waivers takes signed {gate,match,reason,by
 				return fmt.Errorf("--pours must be auto, on or off")
 			}
 			if !validRouter(o.router) {
-				return fmt.Errorf("--router must be fastroute, tracemaker or both")
+				return fmt.Errorf("--router must be fastroute, tracemaker, freerouting, both or all")
+			}
+			if o.fr.passes < 0 || o.fr.timeout < 0 {
+				return fmt.Errorf("--freerouting-passes and --freerouting-time must be >= 0")
 			}
 			if o.widthBasis == "" {
 				o.widthBasis = "net"
@@ -176,7 +180,7 @@ Exits non-zero when any gate fails; --waivers takes signed {gate,match,reason,by
 			}
 			o.fo.noOptimizer = !o.optimizer
 			if o.fo.threads <= 0 {
-				o.fo.threads = defaultRouteThreads(runtime.NumCPU(), o.router == routerBoth)
+				o.fo.threads = defaultRouteThreads(runtime.NumCPU(), o.router == routerBoth || o.router == routerAll)
 			}
 			if o.padNeckFloor < 0 {
 				return fmt.Errorf("--pad-neck-floor-mil must be >= 0")
@@ -200,7 +204,10 @@ Exits non-zero when any gate fails; --waivers takes signed {gate,match,reason,by
 	f.StringVar(&o.waivers, "waivers", "", "JSON list of signed waivers [{gate,match,reason,by}]")
 	f.StringVar(&o.widthBasis, "width-basis", "", "intent-widths basis: segment (default with --sim) | net (default without)")
 	f.BoolVar(&o.ripUp, "rip-up", false, "remove unlocked tracks and vias before routing (route from scratch)")
-	f.StringVar(&o.router, "router", routerFastroute, "routing backend: fastroute | tracemaker | both (both run at once; the first result that is complete with no new DRC error is gated first, a result that fails any gate hands over to the other — no gate is relaxed; the outputs describe the first result that passes every gate, else the best judged one, fewest unrouted)")
+	f.StringVar(&o.router, "router", routerFastroute, "routing backend: fastroute | tracemaker | freerouting | both (fastroute + tracemaker) | all (the three). Several run at once; the first result that is complete with no new DRC error is gated first, a result that fails any gate hands over to the next — no gate is relaxed; the outputs describe the first result that passes every gate, else the best judged one, fewest unrouted")
+	f.StringVar(&o.fr.bin, "freerouting-bin", "", "freerouting launcher (default: $FREEROUTING_BIN, ~/.pcbpilot/freerouting/current, PATH); the official package that bundles its Java runtime")
+	f.IntVar(&o.fr.passes, "freerouting-passes", 0, "freerouting autorouter pass limit (0 = 100)")
+	f.DurationVar(&o.fr.timeout, "freerouting-time", 0, "hard limit of the freerouting run (0 = 30 min); it writes its session only at the end, so a run stopped here has no result")
 	f.StringVar(&o.tm.bin, "tracemaker-bin", "", "tracemaker executable (default: $TRACEMAKER_BIN, ~/.pcbpilot/tracemaker/current, PATH)")
 	f.DurationVar(&o.tm.timeout, "tracemaker-time", 300*time.Second, "tracemaker --time budget (it also sets the lattice pitch: ≥ 300 s gave 0.05 mm and a complete Board-A, 90–180 s gave 0.1 mm and 2 open connections)")
 	f.StringVar(&o.fastrouteBin, "fastroute-bin", "", "fastroute executable (default: $FASTROUTE_BIN, ~/.pcbpilot/fastroute/current, PATH)")
@@ -464,7 +471,7 @@ func (r *kicadRun) run() error {
 	if v, err := kt.Version(); err == nil {
 		r.summary["kicadVersion"] = v
 	}
-	if o.router != routerTracemaker {
+	if routerUses(o.router, routerFastroute) {
 		bin, err := resolveFastroute(o.fastrouteBin)
 		if err != nil {
 			return err
@@ -472,13 +479,21 @@ func (r *kicadRun) run() error {
 		r.o.fo.bin = bin
 		r.summary["fastroute"] = bin
 	}
-	if o.router != routerFastroute {
+	if routerUses(o.router, routerTracemaker) {
 		bin, err := resolveTracemaker(o.tm.bin)
 		if err != nil {
 			return err
 		}
 		r.o.tm.bin = bin
 		r.summary["tracemakerBin"] = bin
+	}
+	if routerUses(o.router, routerFreerouting) {
+		bin, err := resolveFreerouting(o.fr.bin)
+		if err != nil {
+			return err
+		}
+		r.o.fr.bin = bin
+		r.summary["freeroutingBin"] = bin
 	}
 
 	// Explicit rule flags must not undercut the board's own minimums

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -41,6 +42,10 @@ var errActionFailed = errors.New("action returned ok=false")
 // action subcommands. The fields are bound directly to Cobra persistent
 // flags so they are populated before any RunE executes.
 type appConfig struct {
+	// command is the invoking CLI command path (e.g. "pcbpilot sch connect"),
+	// sent with every action so the audit log can attribute calls to the
+	// subcommand that issued them — the evidence for pruning unused commands.
+	command string
 	host    string
 	ports   string // "61832-61841"
 	project string // optional stable routing hint (project name/uuid) → windowId
@@ -365,7 +370,14 @@ func encodeResultEnvelope(res *actionResult, report any, stdout io.Writer) error
 // so the caller can post-process artifacts. The streamed bytes are unchanged;
 // callers read res.Artifacts for the persisted file path.
 func dispatchCapture(cfg *appConfig, action, window string, payload any, stdout io.Writer) (*actionResult, error) {
-	respBody, err := postAction(cfg, action, window, payload, defaultActionTimeout)
+	return dispatchCaptureTimed(cfg, action, window, payload, stdout, defaultActionTimeout)
+}
+
+// dispatchCaptureTimed is dispatchCapture with a caller-chosen round-trip budget
+// for actions whose cost grows with the page (clear, export) and that a hidden,
+// throttled tab plus a concurrent autosave can push past the default.
+func dispatchCaptureTimed(cfg *appConfig, action, window string, payload any, stdout io.Writer, timeout time.Duration) (*actionResult, error) {
+	respBody, err := postAction(cfg, action, window, payload, timeout)
 	if err != nil {
 		return nil, err
 	}
@@ -394,7 +406,11 @@ type healthWindow struct {
 	ConnectorVersion string    `json:"connectorVersion"`
 	EasyEDAVersion   string    `json:"easyedaVersion"`
 	ConnectedAt      time.Time `json:"connectedAt"`
-	Context          struct {
+	Host             struct {
+		Kind      string `json:"kind"`
+		UserAgent string `json:"userAgent"`
+	} `json:"host"`
+	Context struct {
 		ProjectUUID  string `json:"projectUuid"`
 		ProjectName  string `json:"projectName"`
 		DocumentUUID string `json:"documentUuid"`
@@ -468,7 +484,7 @@ func selectWindow(windows []healthWindow, project, window string) (string, error
 			if id, ok := newestDuplicateWindow(matches); ok {
 				return id, nil
 			}
-			return "", fmt.Errorf("project %q maps to %d windows — pass --window <id>", project, len(matches))
+			return "", fmt.Errorf("project %q maps to %d windows — pass --window <id>: %s", project, len(matches), describeWindows(matches))
 		}
 	}
 	switch len(windows) {
@@ -494,11 +510,46 @@ func newestDuplicateWindow(matches []healthWindow) (string, bool) {
 		if w.Context.ProjectUUID != first.Context.ProjectUUID || w.Context.DocumentUUID != first.Context.DocumentUUID || w.Context.DocumentType != first.Context.DocumentType || w.Context.TabID != first.Context.TabID {
 			return "", false
 		}
+		// The tab id is "<doc>@<project>", identical in every host. A browser tab
+		// and the edadesk shell on the same document are two live editors, not a
+		// reload leftover, so only same-host registrations count as duplicates.
+		// "Same host" ignores version numbers: a browser or shell that updated
+		// itself between the stale registration and the new one is still the
+		// same host, while a different product (or a different kind) is not.
+		if hostIdentity(w) != hostIdentity(first) {
+			return "", false
+		}
 		if w.ConnectedAt.After(newest.ConnectedAt) {
 			newest = w
 		}
 	}
 	return newest.WindowID, true
+}
+
+var hostVersionRun = regexp.MustCompile(`[0-9]+(?:[._][0-9]+)*`)
+
+// hostIdentity is what stays constant about a window's host across its own
+// updates: the classified kind plus the user agent with every version number
+// removed. Two registrations that report no host at all (an older daemon or
+// connector) compare equal, which keeps the pre-host behaviour.
+func hostIdentity(w healthWindow) string {
+	kind := strings.ToLower(strings.TrimSpace(w.Host.Kind))
+	ua := hostVersionRun.ReplaceAllString(w.Host.UserAgent, "")
+	return kind + "|" + strings.Join(strings.Fields(ua), " ")
+}
+
+// describeWindows lists candidate windows with host and document for an
+// ambiguity error, so the caller can pick --window without another health call.
+func describeWindows(ws []healthWindow) string {
+	parts := make([]string, 0, len(ws))
+	for _, w := range ws {
+		host := w.Host.Kind
+		if host == "" {
+			host = "unknown"
+		}
+		parts = append(parts, fmt.Sprintf("%s [host=%s doc=%s]", w.WindowID, host, w.Context.DocumentType))
+	}
+	return strings.Join(parts, ", ")
 }
 
 // cliClientID identifies this CLI process to the daemon, computed once per
@@ -911,6 +962,9 @@ func postAction(cfg *appConfig, action, window string, payload any, timeout time
 	// Identify this client process for audit attribution and the daemon's
 	// concurrent-writer advisory (issue #108).
 	body["clientId"] = cliClientID()
+	if cfg.command != "" {
+		body["command"] = cfg.command
+	}
 	// Send the round-trip budget: the daemon shortens its connector wait to
 	// (budget - grace) so it answers with a structured DISPATCH_FAILED *before*
 	// this HTTP client times out — instead of both sides hanging to their own

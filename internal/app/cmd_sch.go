@@ -405,8 +405,28 @@ named keep their value. --show/--hide do not apply (KiCad always draws it).`,
 				if page == "" {
 					return fmt.Errorf("--page is required")
 				}
-				return dispatch(cfg, "schematic.page.delete", window,
-					map[string]any{"pageUuid": page}, stdout, stderr)
+				// The platform's delete return is not evidence: live 2026-10-13 it
+				// returned true yet the page stayed listed (unopenable, and its parts
+				// still fed import-changes); a retry returned false under an outer ok.
+				// Only the page list read back after the call decides.
+				res, err := requestAction(cfg, "schematic.page.delete", window, map[string]any{"pageUuid": page})
+				if err != nil {
+					return err
+				}
+				pages, err := requestAction(cfg, "schematic.pages.list", window, nil)
+				if err != nil {
+					return fmt.Errorf("page-delete sent (platform ok=%v) but the page list could not be read back: %w", res.Result["ok"], err)
+				}
+				name, listed, err := schPageListedInInventory(pages.Result, page)
+				if err != nil {
+					return fmt.Errorf("page-delete sent (platform ok=%v) but the page list read back is unusable (%w) — deletion NOT proven; re-read with `pcbpilot sch pages`", res.Result["ok"], err)
+				}
+				if listed {
+					return fmt.Errorf("page %s (%s) is still listed after page-delete (platform ok=%v) — not deleted; stop writing to this project and keep the page uuid as evidence",
+						page, name, res.Result["ok"])
+				}
+				fmt.Fprintf(stdout, "✓ deleted page %s (absent from the page list read back)\n", page)
+				return nil
 			},
 		}
 		c.Flags().StringVar(&page, "page", "", "schematic page UUID (required)")
@@ -476,7 +496,7 @@ named keep their value. --show/--hide do not apply (KiCad always draws it).`,
 					}
 					payload["expectedPagePrimitives"] = expectedPagePrimitives
 				}
-				res, err := dispatchCapture(cfg, "schematic.page.clear", window, payload, stdout)
+				res, err := dispatchCaptureTimed(cfg, "schematic.page.clear", window, payload, stdout, 120*time.Second)
 				if err != nil {
 					return err
 				}
@@ -631,7 +651,7 @@ not permission to substitute a similar symbol.`,
 		c.Flags().BoolVar(&includePagePrimitives, "include-page-primitives", false, "include complete active-page primitive IDs and native drawing state for guarded replacement")
 		c.Flags().BoolVar(&includeDeviceIdentity, "include-device-identity", false, "resolve exact 32-character device-library identity for replay and composition guards (60s request budget)")
 		c.Flags().BoolVar(&includeBBox, "include-bbox", false, "attach each component's rendered extent {minX,minY,maxX,maxY}")
-		c.Flags().BoolVar(&includePins, "include-pins", false, "attach each pin's {pinName,pinNumber,x,y,noConnected,net} — the data plane for routing/connectivity checks (net is the pin's current authoritative net, null when the netlist is unavailable; output grows, esp. with --all-pages)")
+		c.Flags().BoolVar(&includePins, "include-pins", false, "attach each pin's {pinName,pinNumber,x,y,noConnected,net} — the data plane for routing/connectivity checks (net is the pin's current authoritative net, null when the netlist is unavailable; a part or reuse-block instance absent from the netlist gets netSource=wire-geometry: net from the wire touching the pin, else net=null with netUnresolved naming why; output grows, esp. with --all-pages)")
 		sch.AddCommand(c)
 	}
 
@@ -2145,8 +2165,12 @@ the selection). Without --ids it exports the whole active page.`,
 					}
 					payload["primitiveIds"] = ids
 				}
-				if format != "" {
-					payload["format"] = format
+				f, err := exportImageFormat(format, out)
+				if err != nil {
+					return err
+				}
+				if f != "" {
+					payload["format"] = f
 				}
 				if scope != "" {
 					payload["scope"] = scope
@@ -2160,7 +2184,7 @@ the selection). Without --ids it exports the whole active page.`,
 				if out != "" {
 					payload["fileName"] = filepath.Base(out)
 				}
-				res, err := dispatchCapture(cfg, "schematic.export.image", window, payload, stdout)
+				res, err := dispatchCaptureTimed(cfg, "schematic.export.image", window, payload, stdout, 90*time.Second)
 				if err != nil {
 					return err
 				}
@@ -2338,4 +2362,22 @@ func connectLanded(result map[string]any, designator, pin, net string) bool {
 		}
 	}
 	return false
+}
+
+// exportImageFormat infers the export format from --out's extension when
+// --format is omitted, and refuses a mismatch: the default (svg) once wrote SVG
+// bytes into page.png.
+func exportImageFormat(format, out string) (string, error) {
+	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(out)), ".")
+	if ext != "svg" && ext != "png" && ext != "pdf" {
+		ext = ""
+	}
+	f := strings.ToLower(format)
+	switch {
+	case f == "":
+		return ext, nil
+	case ext != "" && ext != f:
+		return "", fmt.Errorf("--format %s conflicts with --out extension .%s", format, ext)
+	}
+	return f, nil
 }

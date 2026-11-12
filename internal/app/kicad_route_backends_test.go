@@ -256,13 +256,30 @@ func TestRaceWinnerFailsCommitFallsThrough(t *testing.T) {
 }
 
 func TestValidRouter(t *testing.T) {
-	for _, ok := range []string{"fastroute", "tracemaker", "both"} {
+	for _, ok := range []string{"fastroute", "tracemaker", "freerouting", "both", "all"} {
 		if !validRouter(ok) {
 			t.Errorf("%s", ok)
 		}
 	}
-	if validRouter("") || validRouter("freerouting") {
-		t.Fatal("only the three backends")
+	if validRouter("") || validRouter("internal") {
+		t.Fatal("only the named backends")
+	}
+	uses := func(mode string) string {
+		var u []string
+		for _, b := range []string{routerFastroute, routerTracemaker, routerFreerouting} {
+			if routerUses(mode, b) {
+				u = append(u, b)
+			}
+		}
+		return strings.Join(u, "+")
+	}
+	for mode, want := range map[string]string{
+		"fastroute": "fastroute", "tracemaker": "tracemaker", "freerouting": "freerouting",
+		"both": "fastroute+tracemaker", "all": "fastroute+tracemaker+freerouting",
+	} {
+		if got := uses(mode); got != want {
+			t.Errorf("%s runs %s, want %s", mode, got, want)
+		}
 	}
 }
 

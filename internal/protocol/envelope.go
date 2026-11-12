@@ -39,8 +39,12 @@ type Request struct {
 	// the audit log cannot say WHO replayed a stale plan. The CLI fills it once
 	// per process as "<hostname>:<pid>[:<PCBPILOT_CLIENT_LABEL>]". Optional —
 	// raw HTTP callers that omit it simply stay unattributed.
-	ClientID string         `json:"clientId,omitempty"`
-	Payload  map[string]any `json:"payload,omitempty"`
+	ClientID string `json:"clientId,omitempty"`
+	// Command is the CLI command path that issued the action (e.g.
+	// "pcbpilot sch connect"). Audit-only; never consulted for routing or
+	// permission. Raw HTTP callers may omit it.
+	Command string         `json:"command,omitempty"`
+	Payload map[string]any `json:"payload,omitempty"`
 }
 
 type Response struct {

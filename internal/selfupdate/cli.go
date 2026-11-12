@@ -265,11 +265,7 @@ func checkWritable(dir string) error {
 // downloadTo streams url into a temp file inside dir (same filesystem as the
 // target, so the later rename is atomic) and returns its path plus the sha256.
 func downloadTo(ctx context.Context, url, dir string, mode os.FileMode) (path, sum string, err error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return "", "", err
-	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := releaseGet(ctx, url)
 	if err != nil {
 		return "", "", err
 	}
@@ -367,11 +363,7 @@ var ErrAssetMissing = errors.New("asset is not part of this release")
 // recorded for asset. Only HTTP 404 permits the legacy-release fallback;
 // network failures, malformed manifests, and missing asset entries fail closed.
 func fetchChecksum(ctx context.Context, version, asset string) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, checksumsURL(version), nil)
-	if err != nil {
-		return "", err
-	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := releaseGet(ctx, checksumsURL(version))
 	if err != nil {
 		return "", err
 	}

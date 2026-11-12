@@ -18,6 +18,7 @@ func TestAudit_EntryCarriesClientID(t *testing.T) {
 		Envelope: protocol.Envelope{ID: "req_1", WindowID: "w1"},
 		Action:   "pcb.via.create",
 		ClientID: "mikas-mbp:12345:e2e-regression",
+		Command:  "pcbpilot pcb via",
 	}
 	resp := &protocol.Response{OK: true}
 	started := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
@@ -41,6 +42,9 @@ func TestAudit_EntryCarriesClientID(t *testing.T) {
 	}
 	if got := row["clientId"]; got != "mikas-mbp:12345:e2e-regression" {
 		t.Errorf("audit row clientId = %v, want mikas-mbp:12345:e2e-regression", got)
+	}
+	if got := row["command"]; got != "pcbpilot pcb via" {
+		t.Errorf("audit row command = %v, want pcbpilot pcb via", got)
 	}
 	if got := row["action"]; got != "pcb.via.create" {
 		t.Errorf("audit row action = %v, want pcb.via.create", got)

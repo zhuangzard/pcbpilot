@@ -10,16 +10,34 @@ import (
 	"github.com/zhuangzard/pcbpilot/internal/kicad"
 )
 
-// Routing backends of `kicad route` (--router fastroute|tracemaker|both).
+// Routing backends of `kicad route`
+// (--router fastroute|tracemaker|freerouting|both|all).
 
 const (
-	routerFastroute  = "fastroute"
-	routerTracemaker = "tracemaker"
-	routerBoth       = "both"
+	routerFastroute   = "fastroute"
+	routerTracemaker  = "tracemaker"
+	routerFreerouting = "freerouting"
+	routerBoth        = "both" // fastroute + tracemaker
+	routerAll         = "all"  // fastroute + tracemaker + freerouting
 )
 
 func validRouter(s string) bool {
-	return s == routerFastroute || s == routerTracemaker || s == routerBoth
+	switch s {
+	case routerFastroute, routerTracemaker, routerFreerouting, routerBoth, routerAll:
+		return true
+	}
+	return false
+}
+
+// routerUses reports whether --router mode runs the named backend.
+func routerUses(mode, backend string) bool {
+	switch mode {
+	case routerAll:
+		return true
+	case routerBoth:
+		return backend == routerFastroute || backend == routerTracemaker
+	}
+	return mode == backend
 }
 
 func failedGateList(gs []gateResult) string {
@@ -61,11 +79,14 @@ func (r *kicadRun) routeBackends(classed string, reqs map[string]kicad.NetRequir
 	}
 	r.dsnPath = dsnPath // D5: saved for route instrumentation
 	var cands []*routeCandidate
-	if o.router != routerTracemaker {
+	if routerUses(o.router, routerFastroute) {
 		cands = append(cands, r.fastrouteCandidate(classed, dsnPath))
 	}
-	if o.router != routerFastroute {
+	if routerUses(o.router, routerTracemaker) {
 		cands = append(cands, r.tracemakerCandidate(classed, reqs, floorMil))
+	}
+	if routerUses(o.router, routerFreerouting) {
+		cands = append(cands, r.freeroutingCandidate(classed, dsnPath))
 	}
 	r.summary["routerMode"] = o.router
 	if len(cands) == 1 {
@@ -185,6 +206,37 @@ func (r *kicadRun) fastrouteCandidate(classed, dsnPath string) *routeCandidate {
 		// fastroute used the largest class via everywhere (one padstack per
 		// run): each router via goes to its own net's class via.
 		// Every failure to size them is a router-vias gate on this result.
+		imported, res.Gates = r.routerViasToClass(classed, imported)
+		c.prov = r.viaProv
+		return r.addEscapes(imported, ses)
+	}
+	return c
+}
+
+// freeroutingCandidate routes the shared DSN with Freerouting and commits
+// its session the way fastroute's is committed (import, class vias,
+// escapes). Freerouting gets none of fastroute's width / pair settings: the
+// gates decide whether its board is good.
+func (r *kicadRun) freeroutingCandidate(classed, dsnPath string) *routeCandidate {
+	o := r.o
+	base := strings.TrimSuffix(dsnPath, ".dsn")
+	ses, logPath := base+".freerouting.ses", base+".freerouting.log"
+	c := &routeCandidate{Name: routerFreerouting}
+	c.exec = func(ctx context.Context) (*routeResult, error) {
+		fr := o.fr
+		if fr.threads <= 0 {
+			fr.threads = o.fo.threads
+		}
+		return runFreerouting(ctx, fr, dsnPath, ses, logPath, &syncWriter{w: r.stderr})
+	}
+	c.commit = func(res *routeResult) (string, error) {
+		r.summary["freerouting"] = map[string]any{"bin": o.fr.bin, "log": logPath, "result": res}
+		imported := r.next("freerouting")
+		imp, err := r.kt.ImportSES(classed, ses, imported)
+		r.summary["freeroutingSesImport"] = imp
+		if err != nil {
+			return "", err
+		}
 		imported, res.Gates = r.routerViasToClass(classed, imported)
 		c.prov = r.viaProv
 		return r.addEscapes(imported, ses)

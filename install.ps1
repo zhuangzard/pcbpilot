@@ -327,7 +327,37 @@ try {
         # -- checksums first; nothing installed is touched until every asset
         # -- downloaded here has been verified.
         $checksumPath = Join-Path $TempRoot 'checksums.txt'
+        # A private repository answers every anonymous request with 404 and
+        # serves its assets through the REST API only. The token (GITHUB_TOKEN /
+        # GH_TOKEN / the gh CLI) goes to api.github.com and nowhere else.
+        $PrivateRepo = @{ On = $false; Assets = $null; Token = '' }
+        function Get-PrivateReleaseAsset {
+            param([string]$Name, [string]$Destination)
+            if (-not $PrivateRepo.Token) { $PrivateRepo.Token = [string](Get-GitHubToken) }
+            if (-not $PrivateRepo.Token) { return $false }
+            $auth = "Bearer $($PrivateRepo.Token)"
+            if ($null -eq $PrivateRepo.Assets) {
+                $release = Invoke-HttpGet -Uri "https://api.github.com/repos/$Repo/releases/tags/$Version" `
+                    -Headers @{ Accept = 'application/vnd.github+json'; Authorization = $auth } -TimeoutSec 60
+                if (-not $release.Ok -or $release.Status -ne 200) { return $false }
+                $assets = @{}
+                foreach ($asset in @((ConvertFrom-Json -InputObject $release.Body).assets)) {
+                    $assets[[string]$asset.name] = [string]$asset.id
+                }
+                $PrivateRepo.Assets = $assets
+            }
+            if (-not $PrivateRepo.Assets.ContainsKey($Name)) { return $false }
+            $result = Invoke-HttpGet -Uri "https://api.github.com/repos/$Repo/releases/assets/$($PrivateRepo.Assets[$Name])" `
+                -Headers @{ Accept = 'application/octet-stream'; Authorization = $auth } -OutFile $Destination
+            return ($result.Ok -and (Test-Path -LiteralPath $Destination))
+        }
+
         $sums = Invoke-HttpGet -Uri "$BaseUrl/checksums.txt" -OutFile $checksumPath -TimeoutSec 120
+        if ($sums.Status -eq 404 -and (Get-PrivateReleaseAsset -Name 'checksums.txt' -Destination $checksumPath)) {
+            $sums = [pscustomobject]@{ Ok = $true; Status = 200; Body = ''; FinalUri = ''; Error = '' }
+            $PrivateRepo.On = $true
+            Write-Step 'Private release repository: downloading through the GitHub API'
+        }
         $HaveChecksums = $false
         if ($sums.Ok -and $sums.Status -eq 200) {
             $HaveChecksums = $true
@@ -369,13 +399,20 @@ try {
             param([string]$Name, [string]$Destination)
             $primary = "$BaseUrl/$Name"
             for ($attempt = 1; $attempt -le 3; $attempt++) {
-                $result = Invoke-HttpGet -Uri $primary -OutFile $Destination
-                if ($result.Ok -and (Test-Path -LiteralPath $Destination)) { return }
+                if ($PrivateRepo.On) {
+                    if (Get-PrivateReleaseAsset -Name $Name -Destination $Destination) { return }
+                } else {
+                    $result = Invoke-HttpGet -Uri $primary -OutFile $Destination
+                    if ($result.Ok -and (Test-Path -LiteralPath $Destination)) { return }
+                }
                 Write-Warn "GitHub download attempt $attempt/3 failed for $Name"
                 if (Test-Path -LiteralPath $Destination) { Remove-Item -LiteralPath $Destination -Force -ErrorAction SilentlyContinue }
             }
             # A third-party transport is trusted only for availability. The expected
             # digest must already have come directly from GitHub.
+            if ($PrivateRepo.On) {
+                Stop-Install "download failed through the GitHub API: $Name (a private repository has no mirror)"
+            }
             if (-not $HaveChecksums) {
                 Stop-Install 'GitHub download failed and no trusted checksum is available; mirror fallback refused'
             }

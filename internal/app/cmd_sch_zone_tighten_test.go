@@ -456,18 +456,18 @@ func TestPartitionGapSplit_FloorsFirstThenHalveTheSlack(t *testing.T) {
 	cb := layoutBBox{MinX: 180, MinY: 0, MaxX: 280, MaxY: 100}
 	fa := layoutBBox{MinX: -20, MinY: 0, MaxX: 120, MaxY: 100}
 	fb := layoutBBox{MinX: 150, MinY: 0, MaxX: 300, MaxY: 100}
-	axis, aFirst, lo, hi := partitionGapSplit(ca, cb, fa, fb)
+	axis, aFirst, lo, hi := partitionGapSplit(ca, cb, fa, fb, 0)
 	if axis != "x" || !aFirst || lo != 135 || hi != 135 {
 		t.Fatalf("axis=%q aFirst=%v lo=%v hi=%v,want x/true/135/135", axis, aFirst, lo, hi)
 	}
 	// 顺序无关:交换只翻 aFirst。
-	axis2, aFirst2, lo2, hi2 := partitionGapSplit(cb, ca, fb, fa)
+	axis2, aFirst2, lo2, hi2 := partitionGapSplit(cb, ca, fb, fa, 0)
 	if axis2 != axis || aFirst2 == aFirst || lo2 != lo || hi2 != hi {
 		t.Fatalf("交换 a/b 换了答案:%q/%v/%v/%v vs %q/%v/%v/%v", axis2, aFirst2, lo2, hi2, axis, aFirst, lo, hi)
 	}
 	// 下界本身就装不下(合计 > 空地):各停在自己的下界,残留量 = 真实差额。
 	fa2 := layoutBBox{MinX: -20, MinY: 0, MaxX: 160, MaxY: 100}
-	_, _, lo3, hi3 := partitionGapSplit(ca, cb, fa2, fb)
+	_, _, lo3, hi3 := partitionGapSplit(ca, cb, fa2, fb, 0)
 	if lo3 != 160 || hi3 != 150 {
 		t.Fatalf("装不下时该各停在下界(160/150),得到 %v/%v", lo3, hi3)
 	}
@@ -475,7 +475,33 @@ func TestPartitionGapSplit_FloorsFirstThenHalveTheSlack(t *testing.T) {
 		t.Fatalf("残留量该等于差额 10,得到 %v", lo3-hi3)
 	}
 	// 内容两轴都交叠:没有空地可分。
-	if axis, _, _, _ := partitionGapSplit(ca, layoutBBox{50, 50, 150, 150}, fa, fb); axis != "" {
+	if axis, _, _, _ := partitionGapSplit(ca, layoutBBox{50, 50, 150, 150}, fa, fb, 0); axis != "" {
 		t.Fatalf("内容交叠时不该给出可让的轴,得到 %q", axis)
+	}
+}
+
+// User, 2026-10-17: frames that share an edge stop reading as separate
+// modules. Tightening keeps the frame gap (Gutter) between neighbours, and a
+// pair whose contents leave no room for it is a violation, not a shared edge.
+func TestTighten_KeepsAGapBetweenFrames(t *testing.T) {
+	opts := defaultPartitionOpts()
+	sheet := zpSheet()
+	side := func(gap float64) partitionPlan {
+		mods := []partitionModule{
+			{Name: "left", BBox: layoutBBox{200, 400, 400, 600}, CoreBBox: layoutBBox{210, 410, 390, 590}},
+			{Name: "right", BBox: layoutBBox{400 + gap, 400, 600 + gap, 600}, CoreBBox: layoutBBox{410 + gap, 410, 590 + gap, 590}},
+		}
+		return planPartitions(sheet, nil, mods, opts)
+	}
+	roomy := side(40)
+	if roomy.Validation.PartitionOverlap != 0 {
+		t.Fatalf("40 between contents leaves room for the gap: %s", roomy.Validation.counters())
+	}
+	a, b := roomy.Partitions[0].BBox, roomy.Partitions[1].BBox
+	if boxesGapOverlap(a, b, opts.Gutter-acOverlapEps) {
+		t.Fatalf("frames must stay %v apart, got %+v / %+v", opts.Gutter, a, b)
+	}
+	if tight := side(4); tight.Validation.PartitionOverlap != 1 {
+		t.Fatalf("contents 4 apart cannot hold a %v gap: must be reported, got %s", opts.Gutter, tight.Validation.counters())
 	}
 }

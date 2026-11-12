@@ -2,6 +2,9 @@ package app
 
 import (
 	"encoding/json"
+	"fmt"
+	"strings"
+
 	"github.com/zhuangzard/pcbpilot/internal/schguard"
 )
 
@@ -36,5 +39,91 @@ func schWireGeometryFindings(result map[string]any, wires []schGroupWire) []chec
 	b, _ := json.Marshal(findings)
 	var out []checkFinding
 	_ = json.Unmarshal(b, &out)
+	for i := range out {
+		out[i].Level = strings.ToLower(out[i].Level)
+	}
 	return out
+}
+
+func zeroLengthIdentity(f checkFinding) string {
+	if f.Type != "zero-length-wire" {
+		return ""
+	}
+	if f.WirePrimitiveId != "" {
+		return "id:" + f.WirePrimitiveId
+	}
+	if f.At != nil {
+		return fmt.Sprintf("at:%.4f,%.4f", f.At.X, f.At.Y)
+	}
+	return ""
+}
+
+// checkLevelRank orders finding levels for duplicate merging. Unknown levels
+// rank with warn, matching checkLevelBlocks (they block only under strict).
+func checkLevelRank(level string) int {
+	switch strings.ToLower(level) {
+	case "fatal":
+		return 3
+	case "error":
+		return 2
+	case "info":
+		return 0
+	default:
+		return 1
+	}
+}
+
+// mergeDuplicateZeroLengthFindings folds the geometry guard's findings (extra)
+// into the connector's (existing) without reporting one zero-length wire
+// twice. A duplicate keeps the HIGHEST severity together with that finding's
+// own evidence: a guard ERROR for a primitive the connector only warned about
+// replaces the WARN in place, so the blocking finding is never lost. It
+// returns the possibly upgraded existing findings and the extra findings that
+// are still new.
+func mergeDuplicateZeroLengthFindings(existing, extra []checkFinding) (merged, added []checkFinding) {
+	merged = append([]checkFinding(nil), existing...)
+	type slot struct {
+		inAdded bool
+		index   int
+	}
+	seen := map[string]slot{}
+	for i, f := range merged {
+		k := zeroLengthIdentity(f)
+		if k == "" {
+			continue
+		}
+		if prev, ok := seen[k]; ok {
+			// existing already holds a duplicate; point at its most severe copy.
+			if checkLevelRank(f.Level) <= checkLevelRank(merged[prev.index].Level) {
+				continue
+			}
+		}
+		seen[k] = slot{index: i}
+	}
+	added = make([]checkFinding, 0, len(extra))
+	for _, f := range extra {
+		k := zeroLengthIdentity(f)
+		if k == "" {
+			added = append(added, f)
+			continue
+		}
+		prev, ok := seen[k]
+		if !ok {
+			seen[k] = slot{inAdded: true, index: len(added)}
+			added = append(added, f)
+			continue
+		}
+		// Pick the slice before indexing: an index into added is not a valid
+		// index into merged (it is out of range whenever existing is shorter).
+		var held *checkFinding
+		if prev.inAdded {
+			held = &added[prev.index]
+		} else {
+			held = &merged[prev.index]
+		}
+		if checkLevelRank(f.Level) > checkLevelRank(held.Level) {
+			*held = f
+		}
+	}
+	return merged, added
 }

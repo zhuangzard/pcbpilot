@@ -1,5 +1,71 @@
 # Changelog
 
+## [0.12.8] — 2026-11-11
+
+**CLI, daemon, Skills, MCP and the connector move to 0.12.8. The connector runtime CHANGED: import the 0.12.8
+`pcbpilot-connector.eext` — the daemon pauses design actions until the versions match.**
+
+Summary: a stability release. It ports the fixes the upstream project made to the EasyEDA path since the fork (schematic
+readbacks, connector queue, PCB clear and rules), lets `pcbpilot update` and the install scripts fetch releases from a private
+repository, and adds Freerouting as a third `kicad route` backend. **Routing completion on large boards is
+unchanged from 0.12.7.** The ported EasyEDA fixes pass their unit tests and seven review rounds by Codex and Kimi; none of
+them was run against a live EasyEDA window.
+
+**Private release repositories (`pcbpilot update`, `install.sh`, `install.ps1`)**
+- A private repository answers anonymous release downloads with 404. The updater and both install scripts then fetch release
+  assets through the GitHub API with `GITHUB_TOKEN`, `GH_TOKEN` or the `gh` CLI's login. The token goes to `api.github.com`
+  only. Checksums are verified as before; a private repository has no mirror fallback.
+- A public repository is fetched as before, with no token.
+
+**Freerouting backend (`kicad route --router freerouting|all`)**
+- Freerouting reads the same DSN and its session is imported like fastroute's; every gate judges the board as usual. Use the
+  official package that bundles its Java runtime (`--freerouting-bin`, `$FREEROUTING_BIN` or
+  `~/.pcbpilot/freerouting/current`). The 2.5.0 native CLI package crashes and must not be used.
+- Every run is headless with usage reporting off, so no board data leaves the machine.
+- `--freerouting-passes` (default 100) bounds the router; `--freerouting-time` (default 30 min) kills it. Freerouting writes
+  its session only at the end, so a run stopped by the limit has no result. Stopping it also stops its Java child process.
+- `all` races fastroute, TraceMaker and Freerouting the way `both` races two.
+- **What to expect:** fastroute and Freerouting are the same routing engine — on the small test board both gave 7 unrouted
+  and 11 violations. On the 1443-part test board Freerouting did not leave its fanout stage in 65 minutes and produced
+  nothing, where fastroute reached 1460 unrouted in 60 minutes on the same input. It is not a second opinion; TraceMaker is.
+- Freerouting is GPL-3.0 and, like fastroute, only ever runs as a separate program you install yourself: pcbpilot does not
+  bundle, download or link it.
+
+**Schematic (EasyEDA)**
+- `sch list --include-pins`: a block instance missing from the netlist gets its pin nets from the wires that touch it, with
+  the reason when none resolves. A netlist record is shared between placements only for parts of the same multi-unit device;
+  a stale designator, a record of another component or a record whose owner cannot be inspected no longer lends its nets.
+  A zero-length wire on a pin lends it no net.
+- `sch page-delete` decides by reading the page list back; a host that reports success without deleting is no longer
+  believed, and a malformed page inventory fails the command.
+- Zone frames: clearing waits for the readback, frames keep a gutter between them, and a malformed rectangle or text entry
+  fails the frame readback.
+- `sch autoconnect` refuses a label position outside the sheet's usable area, whether or not title-block avoidance is on.
+- `sch export-image` takes the format from the `--out` extension and refuses a conflict; it no longer writes SVG into a
+  `.png`. `sch clear` and `export-image` get a 120 s / 90 s budget.
+- No-connect on a same-page multi-unit part resolves the unit by the requested pins and refuses when ambiguous.
+- `sch check`: a duplicate zero-length-wire finding keeps the highest severity. Page clear no longer treats attributes owned
+  by wires and graphics as orphans.
+- Known gap: with several schematics in one project, `--all-pages` can still attribute nets to the wrong schematic for
+  multi-unit parts that share a designator.
+
+**PCB (EasyEDA)**
+- `pcb clear` and `pcb.route.delete` skip tracks, arcs and vias that belong to a footprint.
+- Rule readback compares in the host's own form (mil, four decimals), so a field the host normalised is not reported as a
+  change. `pcb modify` maps a layer name to the side id.
+- An import that changes nothing says "already in sync" instead of warning that it is unconfirmed. The decap-too-far message
+  states the threshold actually used. Batch checks no longer reopen the active document.
+
+**Connector and daemon**
+- Placing a part first confirms the device exists in the library; an unknown device is refused at once instead of hanging
+  the host's create call and blocking the queue.
+- No active document, or the wrong document type, is a precondition failure with a `--doc` hint; the connector is no longer
+  marked DEGRADED for it.
+- Long operations release the message callback, so the heartbeat and action order hold. `health` carries the last failure's
+  code and message. The audit log records the CLI subcommand that made each call.
+- A browser window and a desktop window on the same document are both listed instead of one being picked silently; a host
+  that changed version is still the same host.
+
 ## [0.12.7] — 2026-11-09
 
 **CLI, daemon, Skills and MCP move to 0.12.7. The connector runtime is UNCHANGED (only its version number moves); import the

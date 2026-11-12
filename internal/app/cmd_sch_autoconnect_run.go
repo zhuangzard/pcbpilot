@@ -211,6 +211,10 @@ func buildScene(result map[string]any) acScene {
 	}
 	scene.Wires = buildWireSegments(result)
 	scene.TitleBlock, scene.TitleBlockProvisional = titleBlockKeepout(sheet)
+	if sheet != nil {
+		u := schUsableArea(*sheet)
+		scene.Usable = &u
+	}
 	return scene
 }
 

@@ -19,19 +19,37 @@ const positive = (v: unknown, field: string): number => {
 };
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 
+/**
+ * The host stores every rule length as mil rounded to 4 decimals, whatever the
+ * displayed unit (#258: an untouched 0.3 mm hole spacing reads back
+ * 0.2999994 mm = 11.811 mil the first time a preset becomes custom; 17/19 live
+ * mm values on a custom rule set sit exactly on that grid). This maps a value
+ * onto that grid — the host's own canonical form, not a tolerance.
+ */
+export function pcbRuleCanonicalLength(value: number, unit: 'mm' | 'mil'): number {
+	const mil = unit === 'mm' ? value / 0.0254 : value;
+	const rounded = Math.round(mil * 1e4) / 1e4;
+	return unit === 'mm' ? rounded * 0.0254 : rounded;
+}
+
 /** Host mm/raw conversions may shift the last IEEE-754 bits. This is NOT a
- * design tolerance: only relative machine roundoff is allowed, even near zero.
- * All keys, arrays, units and nonnumeric fields must still match exactly. */
-export function pcbRulesEqual(a: unknown, b: unknown): boolean {
+ * design tolerance: only relative machine roundoff is allowed, even near zero,
+ * after both sides are put in the host's canonical length form when the
+ * enclosing rule declares its unit. All keys, arrays, units and nonnumeric
+ * fields must still match exactly. */
+export function pcbRulesEqual(a: unknown, b: unknown, unit?: 'mm' | 'mil'): boolean {
 	if (typeof a === 'number' && typeof b === 'number') {
-		return Number.isFinite(a) && Number.isFinite(b)
-			&& (a === b || Math.abs(a - b) <= 8 * Number.EPSILON * Math.max(Math.abs(a), Math.abs(b)));
+		if (!Number.isFinite(a) || !Number.isFinite(b)) return false;
+		const x = unit ? pcbRuleCanonicalLength(a, unit) : a, y = unit ? pcbRuleCanonicalLength(b, unit) : b;
+		return x === y || Math.abs(x - y) <= 8 * Number.EPSILON * Math.max(Math.abs(x), Math.abs(y));
 	}
 	if (a === b) return true;
 	if (!a || !b || typeof a !== 'object' || typeof b !== 'object' || Array.isArray(a) !== Array.isArray(b)) return false;
-	if (Array.isArray(a) && Array.isArray(b)) return a.length === b.length && a.every((v, i) => pcbRulesEqual(v, b[i]));
+	if (Array.isArray(a) && Array.isArray(b)) return a.length === b.length && a.every((v, i) => pcbRulesEqual(v, b[i], unit));
 	const keys = Object.keys(a);
-	return keys.length === Object.keys(b).length && keys.every(k => Object.hasOwn(b, k) && pcbRulesEqual((a as Obj)[k], (b as Obj)[k]));
+	const own = (a as Obj).unit;
+	const scope = own === 'mm' || own === 'mil' ? own : unit;
+	return keys.length === Object.keys(b).length && keys.every(k => Object.hasOwn(b, k) && pcbRulesEqual((a as Obj)[k], (b as Obj)[k], scope));
 }
 
 // Web 3.2.203 reads {name, config}, but overwrite accepts only bare config.
@@ -65,7 +83,7 @@ export function planPcbConfig(before: Obj, payload: Obj): { ruleConfiguration: O
 	const group = (section: string, category: string): Obj => object(own(object(own(ruleConfiguration, section), section), category), `${section}.${category}`);
 	const change = (target: Obj | any[], key: string | number, value: any, path: string, unit?: string) => {
 		const old = (target as Obj)[key];
-		if (pcbRulesEqual(old, value)) return;
+		if (pcbRulesEqual(old, value, unit === 'mm' || unit === 'mil' ? unit : undefined)) return;
 		changes.push({ path, before: old ?? null, after: value, ...(unit ? { unit } : {}) });
 		(target as Obj)[key] = value;
 	};

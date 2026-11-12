@@ -57,7 +57,7 @@ func ReleaseAssetURL(version, asset string) string {
 	if b := releaseBase(); b != "" {
 		return fmt.Sprintf("%s/download/v%s/%s", b, strings.TrimPrefix(version, "v"), asset)
 	}
-	return fmt.Sprintf("https://github.com/%s/releases/download/v%s/%s", Repo(), strings.TrimPrefix(version, "v"), asset)
+	return fmt.Sprintf("%s/%s/releases/download/v%s/%s", githubWebBase, Repo(), strings.TrimPrefix(version, "v"), asset)
 }
 
 // ReleasePageURL is the human release page of a version.
@@ -96,13 +96,13 @@ var (
 		if b := releaseBase(); b != "" {
 			return b + "/latest"
 		}
-		return fmt.Sprintf("https://api.github.com/repos/%s/releases/latest", Repo())
+		return fmt.Sprintf("%s/repos/%s/releases/latest", githubAPIBase, Repo())
 	}
 	latestWebURL = func() string {
 		if b := releaseBase(); b != "" {
 			return b + "/latest"
 		}
-		return fmt.Sprintf("https://github.com/%s/releases/latest", Repo())
+		return fmt.Sprintf("%s/%s/releases/latest", githubWebBase, Repo())
 	}
 )
 
@@ -246,17 +246,21 @@ func readMarker(dir string) string {
 // GitHub's public releases/latest redirect when anonymous API quota is exhausted.
 func LatestReleaseVersion(ctx context.Context) (string, error) {
 	url := latestAPIURL()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-	if token := githubToken(); token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err == nil {
+	// ask sends one API request; retry is true when another token could help.
+	ask := func(token string) (core string, retry bool, err error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return "", false, err
+		}
+		req.Header.Set("Accept", "application/vnd.github+json")
+		req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return "", false, err
+		}
 		defer resp.Body.Close()
 		if resp.StatusCode == http.StatusOK {
 			var body struct {
@@ -264,14 +268,30 @@ func LatestReleaseVersion(ctx context.Context) (string, error) {
 			}
 			if decodeErr := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&body); decodeErr == nil {
 				if core := SemverCore(body.TagName); core != "" {
-					return core, nil
+					return core, false, nil
 				}
 			}
 		}
+		denied := resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden
+		return "", denied, fmt.Errorf("github releases/latest: %s", resp.Status)
 	}
-	apiErr := err
+	env := githubToken()
+	core, retry, apiErr := ask(env)
 	if apiErr == nil {
-		apiErr = fmt.Errorf("github releases/latest: %s", resp.Status)
+		return core, nil
+	}
+	// A private repository hides its releases from an anonymous caller: ask
+	// again with the gh CLI's token. Only GitHub's own API ever sees it.
+	if retry && env == "" && strings.HasPrefix(url, githubAPIBase+"/") {
+		if token := authToken(); token != "" {
+			if core, _, err := ask(token); err == nil {
+				return core, nil
+			} else {
+				apiErr = err
+			}
+		} else {
+			apiErr = fmt.Errorf("%v (%s)", apiErr, privateRepoHint)
+		}
 	}
 
 	webReq, err := http.NewRequestWithContext(ctx, http.MethodGet, latestWebURL(), nil)
@@ -302,11 +322,7 @@ func githubToken() string {
 
 func downloadBytesWithFallback(ctx context.Context, primary string, limit int64, expected string, allowMirror bool) ([]byte, error) {
 	download := func(url string) ([]byte, error) {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-		if err != nil {
-			return nil, err
-		}
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := releaseGet(ctx, url)
 		if err != nil {
 			return nil, err
 		}

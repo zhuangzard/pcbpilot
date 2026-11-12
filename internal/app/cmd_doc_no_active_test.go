@@ -189,3 +189,14 @@ func TestDocOpenRequiresFreshCurrentAfterNoActiveRecovery(t *testing.T) {
 		t.Fatalf("opened=%d probed=%d; settle must not run before identity confirmation", opened, probed)
 	}
 }
+
+func TestIsNoActiveDocumentAcceptsRefusalAndLegacyCodes(t *testing.T) {
+	for code, want := range map[string]bool{"PRECONDITION_REFUSED": true, "EDA_CALL_FAILED": true, "DISPATCH_FAILED": false} {
+		if got := isNoActiveDocument(&actionResult{errorCode: code, errorMsg: "No active document."}); got != want {
+			t.Errorf("%s: got %v want %v", code, got, want)
+		}
+	}
+	if isNoActiveDocument(&actionResult{errorCode: "PRECONDITION_REFUSED", errorMsg: "board must be all or none"}) {
+		t.Error("other refusals are not the no-document state")
+	}
+}
