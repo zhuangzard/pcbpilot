@@ -279,7 +279,11 @@ func reviewGate(vs []reviewVerdict, want []string) gateResult {
 			n++
 		}
 	}
-	g.Detail = fmt.Sprintf("%d of %d reviewers (%s) answered; every requirement met and no blocking finding required", n, len(want), strings.Join(want, ", "))
+	g.Detail = fmt.Sprintf("%d of %d reviewers (%s) answered; every requirement met and no blocking finding", n, len(want), strings.Join(want, ", "))
+	if !g.Pass {
+		// the pass wording on a failed gate read as "every requirement met"
+		g.Detail = fmt.Sprintf("%d of %d reviewers (%s) answered; %d item(s) stand against a pass (a pass needs every requirement met and no blocking finding)", n, len(want), strings.Join(want, ", "), len(g.Items))
+	}
 	return g
 }
 

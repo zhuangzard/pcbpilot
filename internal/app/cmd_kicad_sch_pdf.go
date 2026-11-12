@@ -83,7 +83,7 @@ func runSchPdf(root, out string) (*schPdfResult, error) {
 	defer cancel()
 	cmd.Stdout, cmd.Stderr = &buf, &buf
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("kicad-cli sch export pdf: %v: %s", err, strings.TrimSpace(buf.String()))
+		return nil, fmt.Errorf("kicad-cli sch export pdf: %s", kicad.SchCLIFail(cmd, err, buf.String()))
 	}
 	data, err := os.ReadFile(part)
 	if err != nil || len(data) == 0 {

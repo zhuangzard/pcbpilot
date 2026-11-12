@@ -72,7 +72,7 @@ func ExportSyncNetlist(cli, sch, format string) ([]byte, error) {
 	defer cancel()
 	cmd.Stdout, cmd.Stderr = &buf, &buf
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("kicad-cli sch export netlist: %v: %s", err, strings.TrimSpace(buf.String()))
+		return nil, fmt.Errorf("kicad-cli sch export netlist: %s", SchCLIFail(cmd, err, buf.String()))
 	}
 	data, err := os.ReadFile(out)
 	if err != nil {
@@ -266,11 +266,10 @@ func (t *Tools) RunParity(pcb, pro string, sheets []string, expected func(Violat
 	runErr := cmd.Run()
 	data, rerr := os.ReadFile(out)
 	if runErr != nil || rerr != nil {
-		why := runErr
-		if why == nil {
-			why = rerr
+		if runErr == nil {
+			return cc("kicad-cli pcb drc --schematic-parity wrote no report: %v: %s", rerr, strings.TrimSpace(buf.String()))
 		}
-		return cc("kicad-cli pcb drc --schematic-parity: %v: %s", why, strings.TrimSpace(buf.String()))
+		return cc("kicad-cli pcb drc --schematic-parity: %s", SchCLIFail(cmd, runErr, buf.String()))
 	}
 	rep, err := ParseDRCWith(data, DRCParseOptions{SchematicParity: true})
 	if err != nil {

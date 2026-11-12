@@ -282,14 +282,29 @@ var sbBomReqRE = regexp.MustCompile(`\d|(?i:\b(drawing|dwg|mating|mates with)\b)
 // sbBomCustomReq: a custom part says what it must meet. Any field counts
 // (Description, Inductance, TurnsRatio, Isolation …) except the bookkeeping
 // ones; a description that only repeats "custom transformer" does not.
+//
+// The value counts only for a quantity (a number with a unit, a ratio): a
+// core or series name in it ("EE16 custom") is no requirement. A field whose
+// name says drawing / mating part counts with any content.
 func sbBomCustomReq(p *sbRPart) bool {
+	if sbBomQtyRE.MatchString(p.Value) {
+		return true
+	}
 	for k, v := range p.Fields {
-		if !sbBomSkipField(k) && sbBomReqRE.MatchString(v) {
+		if sbBomSkipField(k) || strings.TrimSpace(v) == "" {
+			continue
+		}
+		if sbBomReqRE.MatchString(v) || sbBomRefKeyRE.MatchString(k) {
 			return true
 		}
 	}
 	return false
 }
+
+var (
+	sbBomQtyRE    = regexp.MustCompile(`\d\s*:\s*\d|\d\s*(?:[pnuµμmkM]?(?:H|F|V|A|W|Hz|Ω)|[kM]?ohm|[munµμ]H|Vrms|kV|mm)\b`)
+	sbBomRefKeyRE = regexp.MustCompile(`(?i)drawing|dwg|mating|mates|图纸|图号|对插`)
+)
 
 // sbBomCustom: the part's own text says it is made or sourced by the owner.
 func sbBomCustom(p *sbRPart) bool {

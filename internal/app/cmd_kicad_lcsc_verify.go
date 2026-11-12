@@ -311,7 +311,11 @@ func runLcscVerify(stdout, stderr io.Writer, pcb, sch string, asJSON bool) error
 	var cacheErr error
 	catalog, err := lcscLookup(ctx, numbers, func(ctx context.Context, n string) (kicad.EasyEDAPart, bool, error) {
 		part, found, err := kicad.LookupEasyEDAPart(ctx, n)
-		if err == nil && found && part.LCSC == n { // for the BOM sheets
+		if err == nil && found && part.LCSC != n {
+			// an answer about another number proves nothing about this one
+			return kicad.EasyEDAPart{}, false, fmt.Errorf("the catalogue answered %s with a record for %q", n, part.LCSC)
+		}
+		if err == nil && found { // for the BOM sheets
 			if serr := kicad.CatalogStore(part); serr != nil {
 				cacheMu.Lock()
 				if cacheErr == nil {

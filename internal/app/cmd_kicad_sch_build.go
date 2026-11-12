@@ -1594,6 +1594,10 @@ func finishSbRun(res *sbReport, err error, reportPath string, stdout, stderr io.
 		}
 		return errActionFailed
 	}
+	if res != nil && res.Plan != nil {
+		fmt.Fprintln(stderr, "sch-build: dry run — a plan only, nothing written and nothing verified")
+		return nil
+	}
 	if res != nil && !res.Complete {
 		for _, w := range res.Warnings {
 			if strings.Contains(w, "agent-signed waiver") {
@@ -1610,6 +1614,12 @@ func finishSbRun(res *sbReport, err error, reportPath string, stdout, stderr io.
 // one.
 func sbIncomplete(res *sbReport) []string {
 	out := []string{}
+	if res.Plan != nil {
+		// a dry run writes nothing, so the gates that read the written
+		// schematic never ran: its ok:true is "the plan stands", never
+		// "complete" (a dry run used to report complete:true with no gates)
+		out = append(out, "dry-run plan: nothing was written and no gate checked a schematic; run without --dry-run")
+	}
 	for _, g := range res.Gates {
 		if g.Status != "pass" {
 			out = append(out, fmt.Sprintf("%s %s: %s", g.Name, g.Status, clipReason(g.Detail)))

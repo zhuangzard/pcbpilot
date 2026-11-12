@@ -110,7 +110,7 @@ SOT-23 还是 SOIC-8。文字由封装名推出：`R_0603_1608Metric` → `0603`
 推得不合意时在件上写 `fields.Package` 覆盖。封装文字参与布局的文字占位计算（与值同一行放得下就同一行，否则另起一行），
 不会压到导线或相邻器件。没有封装的件不显示文字，并在 `warnings` 和 `bom.noPackage` 里列出。测试点、安装孔、
 基准点、焊接跳线、网络连接件、标志（位号前缀 `TP` `H` `MH` `FID` `JP` `SJ` `NT` `LOGO` `G`）默认不画封装文字
-（写了 `fields.Package` 才画），BOM 里仍有它们的封装。`--no-package-text` 整体关闭。
+（写了 `fields.Package` 才画），BOM 里仍有它们的封装。`--no-package-text` 整体关闭。`Package` 是普通的符号字段：`kicad pcb-sync` 把它和其他字段一样同步到封装上（KiCad 的原理图一致性检查会比对它）。
 
 **BOM 页。** 每个原理图页后面跟一张 BOM 图纸 `<页文件名>-bom.kicad_sch`（图纸名 `<页标题> BOM`），页码排成
 “页、它的 BOM、下一页、它的 BOM …”，导出的 PDF 就是这个顺序。单页工程（根图就是图本身）的 BOM 图纸符号画在图的旁边。表格列：

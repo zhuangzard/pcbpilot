@@ -60,9 +60,14 @@ func (mk sbMarker) sbJogs() (float64, bool) {
 // used to go right unconditionally: beside a pin 2.54 mm to the right (a
 // potentiometer's lug next to its track pin, a pin header) it ended exactly
 // on that pin's wire and joined the two nets, the drawing was rejected as a
-// short, and the zone fell back to a much larger legacy drawing. A side is
-// free when the jog segment touches no wire, pin or other marker anchor.
-func sbFixJogs(zl *sbZoneLayout, pinNet map[kicad.Pt]string) {
+// short, and the zone fell back to a much larger legacy drawing.
+//
+// A side is usable when the jog segment touches no wire, pin or other marker
+// anchor. Of two usable sides the one whose symbol + value text covers no
+// part body and no other marker wins (right on a tie). With no usable side
+// the marker is returned as unresolved: the caller must not accept the
+// drawing, because either jog would touch foreign copper.
+func sbFixJogs(zl *sbZoneLayout, pinNet map[kicad.Pt]string, bodies []kicad.Box) (unresolved []sbBadStub) {
 	wires := append([][]kicad.Pt(nil), zl.Wires...)
 	free := func(mi int, a, j kicad.Pt) bool {
 		if sbTouchesWires(a, j, wires, a) {
@@ -81,6 +86,20 @@ func sbFixJogs(zl *sbZoneLayout, pinNet map[kicad.Pt]string) {
 		}
 		return true
 	}
+	clear := func(mi int, mk sbMarker) bool {
+		box := sbMarkerBox(mk)
+		for _, b := range bodies {
+			if sbOverlap(box, b) {
+				return false
+			}
+		}
+		for oi, o := range zl.Markers {
+			if oi != mi && sbOverlap(box, sbMarkerBox(o)) {
+				return false
+			}
+		}
+		return true
+	}
 	for mi := range zl.Markers {
 		mk := &zl.Markers[mi]
 		if _, ok := mk.sbJogs(); !ok {
@@ -89,12 +108,22 @@ func sbFixJogs(zl *sbZoneLayout, pinNet map[kicad.Pt]string) {
 		mk.JogLeft = false
 		r := sbRoundPt(kicad.Pt{X: mk.At.X + 2.54, Y: mk.At.Y})
 		l := sbRoundPt(kicad.Pt{X: mk.At.X - 2.54, Y: mk.At.Y})
+		right, left := *mk, *mk
+		left.JogLeft = true
+		okR, okL := free(mi, mk.At, r), free(mi, mk.At, l)
 		j := r
-		if !free(mi, mk.At, r) && free(mi, mk.At, l) {
+		switch {
+		case okR && (!okL || clear(mi, right) || !clear(mi, left)):
+		case okL:
 			mk.JogLeft, j = true, l
+		default:
+			unresolved = append(unresolved, sbBadStub{
+				Desc: fmt.Sprintf("the %s symbol of %s at (%.2f, %.2f) has no free side to stand on", mk.Kind, mk.Net, mk.At.X, mk.At.Y),
+				A:    mk.At, B: r})
 		}
 		wires = append(wires, []kicad.Pt{mk.At, j})
 	}
+	return unresolved
 }
 
 // sbZoneLayout is one zone drawn relative to its core.
@@ -759,6 +788,18 @@ func planZone(d *sbDesign, zi *sbZoneIn, m *sbMeasure, budget int) (*sbZoneLayou
 				zl.NoConnects = append(zl.NoConnects, sbXform(q.At, pose))
 			}
 		}
+	}
+	// the planner's supply / ground symbols jog like the grid's do
+	pinNet, bodies := map[kicad.Pt]string{}, []kicad.Box(nil)
+	for _, p := range zi.Parts {
+		for _, pose := range zl.Parts[p.Ref] {
+			for _, q := range syms[p.Ref].Pins {
+				pinNet[sbRoundPt(sbXform(q.At, pose))] = d.PinNet[sbPinKey(p.Ref, q.Number)] + "#" + p.Ref + "." + q.Number
+			}
+		}
+	}
+	if bad := sbFixJogs(zl, pinNet, bodies); len(bad) > 0 {
+		return nil, fmt.Errorf("planner: %s", bad[0].Desc)
 	}
 	zl.Box = zoneBox(zl, zi, syms, m)
 	return zl, nil
@@ -2347,7 +2388,7 @@ func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, excl
 		}
 	}
 	bad := sbFixStubs(zl, pinNet, bodies, tied)
-	sbFixJogs(zl, pinNet)
+	bad = append(bad, sbFixJogs(zl, pinNet, bodies)...)
 	if len(bad) > 0 {
 		var refs, desc []string
 		for _, b := range bad {

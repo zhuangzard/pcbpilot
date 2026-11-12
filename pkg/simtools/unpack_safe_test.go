@@ -127,29 +127,103 @@ func TestUnpackZipConcurrentInstalls(t *testing.T) {
 	}
 }
 
-// A lock left by a killed process is taken over; a live one makes the second
-// install wait and then say so.
+// A running install makes the second one wait and then say so; a lock file
+// left behind by a killed process holds nobody up (the lock is the operating
+// system's, not the file's existence).
 func TestUnpackZipLock(t *testing.T) {
-	oldWait, oldStale := unpackLockWait, unpackLockStale
-	defer func() { unpackLockWait, unpackLockStale = oldWait, oldStale }()
+	oldWait := unpackLockWait
+	defer func() { unpackLockWait = oldWait }()
+	unpackLockWait = 300 * time.Millisecond
 	dest := filepath.Join(t.TempDir(), "elmer", "rel1")
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	lock := filepath.Join(filepath.Dir(dest), ".lock-rel1")
-	if err := os.WriteFile(lock, []byte("1\n"), 0o644); err != nil {
+	unlock, err := lockDest(dest)
+	if err != nil {
 		t.Fatal(err)
 	}
-	unpackLockWait = 300 * time.Millisecond
 	if err := UnpackZip(writeZip(t, fakeElmerZip()), dest, nil, elmerExpect); err == nil || !strings.Contains(err.Error(), "another install") {
 		t.Fatalf("err = %v", err)
 	}
 	if _, err := os.Stat(dest); !os.IsNotExist(err) {
 		t.Fatal("installed without the lock")
 	}
-	unpackLockStale = 0 // any lock is stale
+	unlock()
+	// a leftover lock file nobody holds
+	if err := os.WriteFile(filepath.Join(filepath.Dir(dest), ".lock-rel1"), []byte("1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if err := UnpackZip(writeZip(t, fakeElmerZip()), dest, nil, elmerExpect); err != nil {
 		t.Fatal(err)
+	}
+	if l := leftovers(t, dest); len(l) != 0 {
+		t.Fatalf("left %v", l)
+	}
+}
+
+// Many waiters on one lock: never two holders at once.
+func TestLockDestIsExclusive(t *testing.T) {
+	dest := filepath.Join(t.TempDir(), "rel1")
+	var mu sync.Mutex
+	holders, worst := 0, 0
+	var wg sync.WaitGroup
+	for i := 0; i < 12; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for k := 0; k < 5; k++ {
+				unlock, err := lockDest(dest)
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				mu.Lock()
+				holders++
+				if holders > worst {
+					worst = holders
+				}
+				mu.Unlock()
+				time.Sleep(time.Millisecond)
+				mu.Lock()
+				holders--
+				mu.Unlock()
+				unlock()
+			}
+		}()
+	}
+	wg.Wait()
+	if worst != 1 {
+		t.Fatalf("%d installs held the lock at once", worst)
+	}
+}
+
+// The new tree cannot be promoted and the old one is briefly held too: it is
+// put back on a later attempt.
+func TestUnpackZipRetriesTheRestore(t *testing.T) {
+	old := unpackRetryStep
+	unpackRetryStep = time.Millisecond
+	defer func() { unpackRetryStep = old }()
+	dest := filepath.Join(t.TempDir(), "elmer", "rel1")
+	if err := UnpackZip(writeZip(t, fakeElmerZip()), dest, nil, elmerExpect); err != nil {
+		t.Fatal(err)
+	}
+	restores := 0
+	flaky := func(from, to string) error {
+		if strings.Contains(filepath.Base(from), ".stage-") {
+			return errors.New("access denied (synthetic)")
+		}
+		if to == dest {
+			if restores++; restores < 3 {
+				return errors.New("held by a scanner (synthetic)")
+			}
+		}
+		return os.Rename(from, to)
+	}
+	if err := unpackZip(writeZip(t, fakeElmerZip()), dest, nil, elmerExpect, flaky); err == nil || !strings.Contains(err.Error(), "access denied") {
+		t.Fatalf("err = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "bin", "ElmerSolver.exe")); err != nil {
+		t.Fatalf("the old install was not put back: %v", err)
 	}
 	if l := leftovers(t, dest); len(l) != 0 {
 		t.Fatalf("left %v", l)
@@ -159,7 +233,7 @@ func TestUnpackZipLock(t *testing.T) {
 // Windows resolves "..  " and "..." like "..", and NUL / COM1.txt are
 // devices: such entries are refused on every platform.
 func TestCleanZipNameRefusesWin32Aliases(t *testing.T) {
-	for _, n := range []string{"top/.. /x", "top/.../x", "top/..  ./x", "top/dir./x", "top/dir /x", "top/NUL", "top/nul.txt", "top/COM1.log", "top/a/LPT9", `top\.. \x`} {
+	for _, n := range []string{"top/.. /x", "top/.../x", "top/..  ./x", "top/dir./x", "top/dir /x", "top/NUL", "top/nul.txt", "top/COM1.log", "top/a/LPT9", "top/CONIN$", "top/conout$.txt", "top/COM¹", `top\.. \x`} {
 		if _, err := cleanZipName(n); err == nil {
 			t.Errorf("%q accepted", n)
 		}

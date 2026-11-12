@@ -53,30 +53,21 @@ func UnpackZip(archive, dest string, skip, expect []string) error {
 	return unpackZip(archive, dest, skip, expect, os.Rename)
 }
 
-// unpackLockWait / unpackLockStale: how long a second install waits for the
-// first, and after how long a lock left by a killed process is taken over.
-var (
-	unpackLockWait  = 3 * time.Minute
-	unpackLockStale = 30 * time.Minute
-)
+// unpackLockWait: how long a second install waits for the first.
+var unpackLockWait = 3 * time.Minute
 
-// lockDest takes the per-destination install lock.
+// lockDest takes the per-destination install lock (tryLock: held by the
+// operating system for this process, released when it ends).
 func lockDest(dest string) (unlock func(), err error) {
 	lock := filepath.Join(filepath.Dir(dest), ".lock-"+filepath.Base(dest))
 	deadline := time.Now().Add(unpackLockWait)
 	for {
-		f, err := os.OpenFile(lock, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
-		if err == nil {
-			fmt.Fprintln(f, os.Getpid())
-			f.Close()
-			return func() { os.Remove(lock) }, nil
+		release, busy, err := tryLock(lock)
+		if err != nil {
+			return nil, fmt.Errorf("install lock %s: %w", lock, err)
 		}
-		if !os.IsExist(err) {
-			return nil, err
-		}
-		if fi, serr := os.Stat(lock); serr == nil && time.Since(fi.ModTime()) > unpackLockStale {
-			os.Remove(lock)
-			continue
+		if !busy {
+			return release, nil
 		}
 		if time.Now().After(deadline) {
 			return nil, fmt.Errorf("another install into %s is still running (lock %s)", dest, lock)
@@ -182,7 +173,14 @@ func unpackZip(archive, dest string, skip, expect []string, rename func(from, to
 	}
 	if err != nil {
 		if backup != "" {
-			if rerr := rename(backup, dest); rerr != nil {
+			var rerr error
+			for try := 0; ; try++ { // the same scanner may hold the old tree
+				if rerr = rename(backup, dest); rerr == nil || try >= 5 {
+					break
+				}
+				time.Sleep(time.Duration(try+1) * unpackRetryStep)
+			}
+			if rerr != nil {
 				return fmt.Errorf("%w; the previous install is kept in %s (could not be put back: %v)", err, backup, rerr)
 			}
 			os.RemoveAll(filepath.Dir(backup))
@@ -200,7 +198,7 @@ var unpackRetryStep = 300 * time.Millisecond
 
 // winReserved are the Win32 device names: a file called NUL, COM1.txt …
 // opens the device, not a file.
-var winReserved = map[string]bool{"CON": true, "PRN": true, "AUX": true, "NUL": true,
+var winReserved = map[string]bool{"CON": true, "PRN": true, "AUX": true, "NUL": true, "CONIN$": true, "CONOUT$": true, "CLOCK$": true,
 	"COM1": true, "COM2": true, "COM3": true, "COM4": true, "COM5": true, "COM6": true, "COM7": true, "COM8": true, "COM9": true,
 	"LPT1": true, "LPT2": true, "LPT3": true, "LPT4": true, "LPT5": true, "LPT6": true, "LPT7": true, "LPT8": true, "LPT9": true}
 
@@ -215,7 +213,10 @@ func unsafeSegment(seg string) bool {
 		return true
 	}
 	stem, _, _ := strings.Cut(seg, ".")
-	return winReserved[strings.ToUpper(strings.TrimSpace(stem))]
+	stem = strings.ToUpper(strings.TrimSpace(stem))
+	// COM¹ … LPT³ (superscript digits) are devices too
+	stem = strings.NewReplacer("¹", "1", "²", "2", "³", "3").Replace(stem)
+	return winReserved[stem]
 }
 
 // cleanZipName returns the slash-separated, cleaned entry name, refusing any

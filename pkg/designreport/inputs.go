@@ -183,6 +183,8 @@ type DRCResult struct {
 	CreatedAt  string
 	Project    string
 	Document   string
+	// Tool names the DRC that produced the result ("KiCad"); "" = EasyEDA.
+	Tool string
 }
 
 // ParseDRC reads `pcb drc` JSON: the daemon envelope {ok,result:{passed,violations}}
@@ -206,6 +208,7 @@ func ParseDRC(raw []byte) (*DRCResult, error) {
 	var r struct {
 		Passed     *bool             `json:"passed"`
 		Violations []json.RawMessage `json:"violations"`
+		Tool       string            `json:"tool"`
 	}
 	if err := json.Unmarshal(body, &r); err != nil {
 		return nil, err
@@ -213,7 +216,7 @@ func ParseDRC(raw []byte) (*DRCResult, error) {
 	if r.Passed == nil {
 		return nil, fmt.Errorf("no passed field — not a pcb drc result")
 	}
-	out := &DRCResult{Passed: *r.Passed, CreatedAt: env.CreatedAt, Project: env.Context.ProjectName, Document: env.Context.DocumentUUID}
+	out := &DRCResult{Passed: *r.Passed, CreatedAt: env.CreatedAt, Project: env.Context.ProjectName, Document: env.Context.DocumentUUID, Tool: r.Tool}
 	kinds := map[string]bool{}
 	var walk func(json.RawMessage)
 	walk = func(m json.RawMessage) {
@@ -222,8 +225,14 @@ func ParseDRC(raw []byte) (*DRCResult, error) {
 			List      []json.RawMessage `json:"list"`
 			ErrorType string            `json:"errorType"`
 			ObjType   string            `json:"errorObjType"`
+			Rule      string            `json:"rule"` // flat form (KiCad DRC)
 		}
 		if json.Unmarshal(m, &node) != nil {
+			return
+		}
+		if node.Rule != "" && node.ErrorType == "" {
+			out.Violations++
+			kinds[node.Rule] = true
 			return
 		}
 		if node.ErrorType != "" || node.ObjType != "" {

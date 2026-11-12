@@ -2,9 +2,11 @@ package kicad
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -98,5 +100,35 @@ func SchCLICommand(cli string, args ...string) (*exec.Cmd, context.CancelFunc) {
 	ctx, cancel := context.WithTimeout(context.Background(), SchCLITimeout)
 	cmd := exec.CommandContext(ctx, cli, args...)
 	cmd.Env = SchCLIEnv()
-	return cmd, cancel
+	cmd.Cancel = func() error {
+		schCLITimedOut.Store(cmd, true)
+		return cmd.Process.Kill()
+	}
+	return cmd, func() { cancel(); schCLITimedOut.Delete(cmd) }
+}
+
+// schCLITimedOut: the commands SchCLICommand killed at SchCLITimeout.
+var schCLITimedOut sync.Map
+
+// SchCLIFail words a failed SchCLICommand run. A run killed at the timeout
+// exits with a bare "exit status 1" and no output, which reads like a tool
+// crash; it is named as what it is. text is the captured output.
+func SchCLIFail(cmd *exec.Cmd, err error, text string) string {
+	text = strings.TrimSpace(text)
+	if _, ok := schCLITimedOut.Load(cmd); ok {
+		msg := fmt.Sprintf("timed out after %s and was stopped (a busy machine makes kicad-cli slow: run it again, or with fewer jobs in parallel)", SchCLITimeout)
+		if cmd.Env == nil {
+			// not isolated: kicad-cli loads the user's global library
+			// tables, the usual cause of a run that never ends
+			msg += "; kicad-cli ran with the user's own KiCad configuration (" + EnvIsolateConfig + "=0 or KICAD_CONFIG_HOME set) — a hang there usually ends with the default isolated configuration"
+		}
+		if text != "" {
+			msg += ": " + text
+		}
+		return msg
+	}
+	if text == "" {
+		return fmt.Sprintf("%v (kicad-cli printed nothing)", err)
+	}
+	return fmt.Sprintf("%v: %s", err, text)
 }

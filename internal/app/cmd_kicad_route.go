@@ -644,6 +644,14 @@ func (r *kicadRun) run() error {
 		}
 		r.summary["inputDrc"] = map[string]any{"total": rep.Total, "counts": rep.Counts}
 		fmt.Fprintf(r.stderr, "input board DRC (before routing): %d error(s) %v\n", rep.Total, rep.Counts)
+		// Said before the routing time is spent: errors inside a footprint
+		// or of its pads against the board edge are on the board already
+		// and no routing removes them (they used to surface only in the
+		// kicad-drc gate at the end).
+		if o := drcOrigins(rep.Violations); o.FootprintInternal+o.EdgePad > 0 {
+			r.summary["inputDrcOrigin"] = o
+			fmt.Fprintln(r.stderr, "WARNING: "+inputDRCOriginNote(o))
+		}
 	} else {
 		// No baseline: every routed-board violation then counts as new.
 		r.summary["inputDrc"] = map[string]any{"error": err.Error()}

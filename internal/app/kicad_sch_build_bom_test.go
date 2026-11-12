@@ -559,7 +559,11 @@ func TestSbBomIdentityFromFields(t *testing.T) {
 	t4 := sbTestPart("T4", "EE16 custom", "My:XFMR", map[string]string{"Inductance": "450 uH", "TurnsRatio": "1:2.5", "Sourcing": "custom"})
 	t5 := sbTestPart("T5", "EE16 custom", "My:XFMR", map[string]string{"Description": "per drawing in the project folder"})
 	t6 := sbTestPart("T6", "EE16 custom", "My:XFMR", map[string]string{"Sourcing": "vendor 2", "Datasheet": "t6-rev3.pdf"})
-	parts := []*sbRPart{u1, u2, u3, t1, t2, t3, t4, t5, t6}
+	// a quantity in the value, and a drawing / mating field named as such
+	t7 := sbTestPart("T7", "custom transformer 1:2.5, 400 uH", "My:XFMR", nil)
+	t8 := sbTestPart("T8", "EE16 custom", "My:XFMR", map[string]string{"Drawing": "housing-A"})
+	t9 := sbTestPart("T9", "EE16 custom", "My:XFMR", map[string]string{"MatingPart": "plug-B"})
+	parts := []*sbRPart{u1, u2, u3, t1, t2, t3, t4, t5, t6, t7, t8, t9}
 	_, _, missing := sbBomCheck(parts)
 	got := map[string]string{}
 	for _, m := range missing {

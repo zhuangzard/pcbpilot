@@ -545,7 +545,7 @@ func runRenderCLI(cli string, exempt *regexp.Regexp, args ...string) ([]string, 
 	}
 	if err != nil {
 		return msgs, renderErr("RENDER_KICAD_FAILED", "open the file in KiCad 10 once to check it loads; for a hang keep the default isolated config",
-			"%s: %v: %s", what, err, strings.Join(msgs, " | "))
+			"%s: %s", what, SchCLIFail(cmd, err, strings.Join(msgs, " | ")))
 	}
 	if len(missing) > 0 {
 		return msgs, renderErr("RENDER_KICAD_DIAGNOSTIC", "fix what kicad-cli could not load (or make it reachable from the project) and render again",

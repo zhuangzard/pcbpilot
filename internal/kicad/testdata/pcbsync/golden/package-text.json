@@ -1,5 +1,25 @@
 {
-  "ops": [],
+  "ops": [
+    {
+      "op": "setField",
+      "fp": "fp-R1",
+      "ref": "R1",
+      "key": "/00000000-0000-0000-0000-0000000000a1",
+      "value": "0603",
+      "field": "Package",
+      "matchedBy": "path"
+    },
+    {
+      "op": "removeField",
+      "fp": "fp-C1",
+      "ref": "C1",
+      "key": "/00000000-0000-0000-0000-0000000000c1",
+      "from": "mine",
+      "field": "Package",
+      "matchedBy": "path",
+      "reason": "the symbol has no such field"
+    }
+  ],
   "match": {
     "byPath": 5,
     "byRef": 0,
@@ -9,7 +29,7 @@
   "counts": {
     "add": 0,
     "swap": 0,
-    "update": 0,
+    "update": 2,
     "padNet": 0,
     "renameNet": 0,
     "orphanFlag": 0,

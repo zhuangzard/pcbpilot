@@ -2,6 +2,28 @@
 
 ## [Unreleased]
 
+- **`kicad pcb-sync`: a schematic built with package text passes the schematic-parity gate.** 0.12.9 kept the `Package`
+  field out of the board, and KiCad's own parity check then reported "Missing symbol field 'Package' in footprint" for
+  every part: `pcb-sync --create` failed its parity gate on every design built with the default options (the workaround
+  was `--no-package-text`). `Package` is now synced like every other symbol field. A board synced before shows one
+  `setField` per part on the next `pcb-sync`; nothing else moves.
+- `kicad sch-build`: of the two sides of a stub end the ground / supply symbol takes the one where it overlaps no symbol
+  body and no other power symbol; a symbol with wires on both sides is a finding of that drawing (the drawing is
+  rejected) and is never drawn onto a foreign wire.
+- A kicad-cli run stopped at the time limit says so ("timed out after 10m0s and was stopped", with the hint that a
+  non-isolated KiCad configuration is the usual cause of a hang). It used to read `exit status 1:` with no text, like a
+  crash. A run that fails without printing anything says that too.
+- `kicad sch-build --dry-run` no longer reports `complete: true`: a plan checks no schematic, and `incomplete[]` says so.
+- `kicad route`: errors that are on the input board already and that no routing removes — inside one footprint, or a
+  footprint's pads against the board edge — are named with their footprints before the routing starts
+  (`summary.inputDrcOrigin`), not only in the `kicad-drc` gate at the end. The `copper-to-edge`, `isolation` and
+  `via-current` gates name the warnings they pass with (count in the reason, text in `info`): a connector at the board
+  edge that this gate passes with a warning and KiCad's DRC fails no longer reads as "0 error(s)" against "2 errors".
+- A failed `design-review` gate no longer says "every requirement met"; the design report names KiCad's DRC as KiCad's
+  (it was labelled EasyEDA) and counts its violations (it showed 0).
+- Per-user Elmer install: the install lock is held by the operating system for the installing process (released when it
+  ends, however it ends) instead of a lock file that a second install could take over after a time limit; `kicad lcsc
+  --verify` never caches or reports a catalogue answer about a different number.
 - **BOM sheets (`kicad sch-build`): parts identified through fields are no longer reported as unidentified.** The BOM read
   only the spec's `mpn` / `lcsc`. A part whose number sits in a field — `LCSC Part #`, `LCSC`, `JLCPCB Part #`, `MPN`,
   `Mfr Part`, `Manufacturer Part Number` … as a schematic read back from another tool carries it — had empty MPN / LCSC
