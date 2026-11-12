@@ -192,6 +192,11 @@ type sbRPart struct {
 	ZoneID    string         `json:"zone"`
 	PageID    string         `json:"page"`
 	PowerPins []string       `json:"-"`
+	// Package is the short package name (fields.Package, else from the
+	// footprint; "" = no footprint). Pkg is the text drawn next to the
+	// symbol: Package, or "" with --no-package-text.
+	Package string `json:"-"`
+	Pkg     string `json:"-"`
 }
 
 // sbDesign is the expanded, resolved spec the builder draws.
@@ -567,6 +572,8 @@ type sbResolveOpts struct {
 	// NoFootprintCheck skips footprint file resolution and its diagnostics
 	// (sch-edit reading its stored base design; the rebuild checks).
 	NoFootprintCheck bool
+	// NoPackageText: no package text next to the symbols (--no-package-text).
+	NoPackageText bool
 }
 
 type sbResolveStats struct {
@@ -1349,6 +1356,16 @@ func buildDesign(s *sbSpec, opts sbResolveOpts) (*sbDesign, sbResolveStats, erro
 		return nil, st, fmt.Errorf("unusedPins %q: want nc or open", s.UnusedPins)
 	}
 	for _, p := range d.Parts {
+		p.Package = sbPackageText(p)
+		// drawn next to the symbol — except on board features nobody orders
+		// (test points, mounting holes, fiducials …): their footprint name
+		// is no package, so they show one only when the spec writes
+		// fields.Package
+		if !opts.NoPackageText && (!sbBomNoOrder(p) || sbFieldCI(p.Fields, "Package") != "") {
+			p.Pkg = p.Package
+		}
+	}
+	for _, p := range d.Parts {
 		if p.Multi && len(p.Units) > 0 {
 			d.Warnings = append(d.Warnings, fmt.Sprintf("%s: multi-unit symbol — units %v placed as the spec lists (grid layout)", p.Ref, sbUnits(p)))
 		} else if p.Multi {
@@ -1433,6 +1450,7 @@ type sbOptions struct {
 	SchReview                      string // off | advisory | strict
 	LayoutQuality                  string // strict | advisory (signed waiver)
 	ZoneTimeout                    time.Duration
+	NoPackageText, NoBomPages      bool
 }
 
 // sbFlags registers the options sch-build and sch-edit share.
@@ -1458,6 +1476,8 @@ func sbFlags(c *cobra.Command, o *sbOptions) {
 	f.StringVar(&o.LayoutQuality, "layout-quality", "strict", "layout watchdog (gate layout-quality): strict fails the build when a zone is labels-only, its passives float loose, a wire runs past 100 mm, a sheet is mostly blank or the board is label-heavy (error LAYOUT_QUALITY with per-zone/page fixes, nothing written); advisory only reports and needs a signed waiver {\"gate\":\"layout-quality\",\"match\":\"--layout-quality advisory\"} in --waivers")
 	f.DurationVar(&o.ZoneTimeout, "zone-timeout", 60*time.Second, "layout time limit per zone (grid variants and retries; a started planner run keeps its own --planner-budget): past it the best drawing so far is kept and the zone is reported in the layout-quality gate (0 = no limit)")
 	f.BoolVar(&o.DiscardExternal, "discard-external-edits", false, "overwrite edits made in --out outside pcbpilot since its last build (refused by default: EXTERNAL_EDIT); the current files are checkpointed first")
+	f.BoolVar(&o.NoPackageText, "no-package-text", false, "do not draw the package (0603, SOIC-8 … from the footprint, or fields.Package) next to every symbol's value")
+	f.BoolVar(&o.NoBomPages, "no-bom-pages", false, "do not add the BOM sheet after every schematic page (<page>-bom.kicad_sch: refs, qty, value, package, MPN, LCSC, spec / requirements, sourcing)")
 	f.BoolVar(&o.Render, "render", false, "also export one normalised SVG per sheet to <out>/render (the kicad render plotter; diff two with kicad render --compare)")
 }
 

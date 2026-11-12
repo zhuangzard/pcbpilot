@@ -242,6 +242,14 @@ func contentItems(root *sexp) (Box, []Box, bool) {
 			if at, sz := n.child("at"), n.child("size"); at != nil && sz != nil {
 				item(Box{at.num(1), at.num(2), at.num(1) + sz.num(1), at.num(2) + sz.num(2)})
 			}
+		case "table": // its cells
+			if cells := n.child("cells"); cells != nil {
+				for _, c := range cells.list {
+					if at, sz := c.child("at"), c.child("size"); c.head() == "table_cell" && at != nil && sz != nil {
+						item(Box{at.num(1), at.num(2), at.num(1) + sz.num(1), at.num(2) + sz.num(2)})
+					}
+				}
+			}
 		case "rectangle", "text_box", "image", "circle", "arc":
 			ib := emptyBox()
 			for _, k := range []string{"start", "end", "at", "center", "mid"} {
@@ -394,7 +402,7 @@ var coordRe = regexp.MustCompile(`\((at|xy|start|end|center|mid) (-?[0-9.]+) (-?
 func shiftTopLevel(src string, root *sexp, dx, dy float64) string {
 	moved := map[string]bool{"symbol": true, "wire": true, "bus": true, "polyline": true, "bus_entry": true, "label": true,
 		"global_label": true, "hierarchical_label": true, "text": true, "junction": true, "no_connect": true, "sheet": true,
-		"rectangle": true, "text_box": true, "image": true, "circle": true, "arc": true, "netclass_flag": true}
+		"rectangle": true, "text_box": true, "table": true, "image": true, "circle": true, "arc": true, "netclass_flag": true}
 	var b strings.Builder
 	last := 0
 	for _, n := range root.list {

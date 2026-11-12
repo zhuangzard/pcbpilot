@@ -1,0 +1,65 @@
+{
+  "schema": "pcbpilot.kicad.sch-build/1",
+  "name": "bomdemo",
+  "title": {"title": "synthetic two page", "rev": "A", "company": "pcbpilot", "date": "2026-11-12"},
+  "pages": [{"id": "power", "title": "Power"}, {"id": "logic", "title": "Logic"}],
+  "zones": [
+    {"id": "ldo", "title": "3V3 LDO", "page": "power"},
+    {"id": "iso", "title": "Isolated supply", "page": "power"},
+    {"id": "mcu", "title": "MCU", "page": "logic"},
+    {"id": "led", "title": "Status LED", "page": "logic"}
+  ],
+  "parts": [
+    {"ref": "J1", "value": "5V IN", "zone": "ldo", "symbol": "Connector_Generic:Conn_01x02", "footprint": "Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical",
+     "fields": {"Description": "2-pin header, 2.54 mm", "Current": "3 A", "Sourcing": "any"}},
+    {"ref": "U1", "value": "LDO-3V3", "zone": "ldo", "mpn": "AP2112K-3.3TRG1", "footprint": "Package_TO_SOT_SMD:SOT-23-5", "pins": [
+      {"number": "1", "name": "VIN", "type": "power_in"},
+      {"number": "2", "name": "GND", "type": "power_in"},
+      {"number": "3", "name": "EN", "type": "input"},
+      {"number": "5", "name": "VOUT", "type": "power_out"}],
+     "fields": {"Description": "LDO 3.3 V 600 mA", "Voltage": "6 V max in"}},
+    {"ref": "C1", "value": "10uF", "zone": "ldo", "symbol": "Device:C", "footprint": "Capacitor_SMD:C_0805_2012Metric", "fields": {"Voltage": "16 V", "Dielectric": "X5R"}},
+    {"ref": "C2", "value": "10uF", "zone": "ldo", "symbol": "Device:C", "footprint": "Capacitor_SMD:C_0805_2012Metric", "fields": {"Voltage": "16 V", "Dielectric": "X5R"}},
+    {"ref": "T1", "value": "EE16 1:1.2", "zone": "iso", "footprint": "Transformer_SMD:Transformer_Coilcraft_CST1", "pins": [
+      {"number": "1", "name": "P1", "type": "passive"},
+      {"number": "2", "name": "P2", "type": "passive"},
+      {"number": "3", "name": "S1", "type": "passive"},
+      {"number": "4", "name": "S2", "type": "passive"}],
+     "fields": {"Description": "Flyback transformer, custom wound", "Sourcing": "custom / self-sourced", "Inductance": "450 uH primary", "TurnsRatio": "1:1.2", "Isat": "0.8 A", "Isolation": "1.5 kV", "Core": "EE16 PC40"}},
+    {"ref": "D2", "value": "SS14", "zone": "iso", "symbol": "Device:D", "footprint": "Diode_SMD:D_SMA"},
+    {"ref": "C4", "value": "22uF", "zone": "iso", "symbol": "Device:C", "footprint": "Capacitor_SMD:C_1206_3216Metric", "fields": {"Voltage": "25 V"}},
+    {"ref": "L1", "value": "10uH", "zone": "iso", "symbol": "Device:L"},
+    {"ref": "U2", "value": "MCU-8", "zone": "mcu", "lcsc": "", "footprint": "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm", "pins": [
+      {"number": "1", "name": "VDD", "type": "power_in"},
+      {"number": "2", "name": "PA0", "type": "bidirectional"},
+      {"number": "3", "name": "PA1", "type": "bidirectional"},
+      {"number": "4", "name": "NRST", "type": "input"},
+      {"number": "5", "name": "SWDIO", "type": "bidirectional"},
+      {"number": "6", "name": "SWCLK", "type": "input"},
+      {"number": "7", "name": "PA2", "type": "bidirectional"},
+      {"number": "8", "name": "VSS", "type": "power_in"}]},
+    {"ref": "C3", "value": "100nF", "zone": "mcu", "symbol": "Device:C", "footprint": "Capacitor_SMD:C_0603_1608Metric"},
+    {"ref": "R1", "value": "10k", "zone": "mcu", "symbol": "Device:R", "footprint": "Resistor_SMD:R_0603_1608Metric"},
+    {"ref": "R2", "value": "330", "zone": "led", "symbol": "Device:R", "footprint": "Resistor_SMD:R_0603_1608Metric"},
+    {"ref": "R3", "value": "330", "zone": "led", "symbol": "Device:R", "footprint": "Resistor_SMD:R_0603_1608Metric"},
+    {"ref": "R4", "value": "330", "zone": "led", "symbol": "Device:R", "footprint": "Resistor_SMD:R_0603_1608Metric"},
+    {"ref": "D1", "value": "RED", "zone": "led", "symbol": "Device:D", "footprint": "LED_SMD:LED_0603_1608Metric", "fields": {"Description": "red LED 2 V 20 mA"}},
+    {"ref": "D3", "value": "RED", "zone": "led", "symbol": "Device:D", "footprint": "LED_SMD:LED_0603_1608Metric", "fields": {"Description": "red LED 2 V 20 mA"}},
+    {"ref": "D4", "value": "RED", "zone": "led", "symbol": "Device:D", "footprint": "LED_SMD:LED_0603_1608Metric", "dnp": true, "fields": {"Description": "red LED 2 V 20 mA"}}
+  ],
+  "nets": [
+    {"name": "+5V", "pins": ["J1:1", "U1:VIN", "U1:EN", "C1:1", "T1:P1"], "voltage": 5, "currentA": 0.3},
+    {"name": "+3V3", "pins": ["U1:VOUT", "C2:1", "U2:VDD", "C3:1", "R1:1"], "voltage": 3.3, "currentA": 0.1},
+    {"name": "GND", "pins": ["J1:2", "U1:GND", "C1:2", "C2:2", "U2:VSS", "C3:2", "D1:K", "D3:K", "D4:K", "T1:P2", "C4:2", "T1:S2"]},
+    {"name": "SEC", "pins": ["T1:S1", "D2:A"]},
+    {"name": "VISO_RAW", "pins": ["D2:K", "L1:1"]},
+    {"name": "VISO", "pins": ["L1:2", "C4:1"]},
+    {"name": "NRST", "pins": ["U2:NRST", "R1:2"]},
+    {"name": "LED1", "pins": ["U2:PA0", "R2:1"]},
+    {"name": "LED2", "pins": ["U2:PA1", "R3:1"]},
+    {"name": "LED3", "pins": ["U2:PA2", "R4:1"]},
+    {"name": "LA1", "pins": ["R2:2", "D1:A"]},
+    {"name": "LA2", "pins": ["R3:2", "D3:A"]},
+    {"name": "LA3", "pins": ["R4:2", "D4:A"]}
+  ]
+}

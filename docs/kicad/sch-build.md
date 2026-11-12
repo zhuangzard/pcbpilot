@@ -17,6 +17,7 @@ pcbpilot kicad sch-build --from-connectivity p1.json [--from-connectivity p2.jso
 pcbpilot kicad sch-edit --project build/ --spec delta.json [--dry-run]
 pcbpilot kicad sch-read --project build/ [--out spec.json]      # 或 --sch root.kicad_sch
 pcbpilot kicad sch-checkpoint list|restore N --project build/
+pcbpilot kicad sch-pdf --project build/ --out build/schematic.pdf   # 整套图一个 PDF：每页后面跟它的 BOM 页
 ```
 
 常用开关：`--no-intent`（不跑 intent derive）、`--analog`（intent derive 内含模拟仿真）、`--no-planner`（全部区用
@@ -24,11 +25,13 @@ pcbpilot kicad sch-checkpoint list|restore N --project build/
 一个截止点，含自动分页/拆区的重排；过点后不再启动 planner、直接走网格；已启动的 planner 跑完自己的候选上限，
 不能中途截断，所以阶段可能超时——超时会在 `warnings` 里写明实际耗时、启动 planner 的区数、最长一次和走网格的区数）、`--jobs`（并行 LCSC 导入 / 区布局）、`--fresh`（忽略已有的布局/uuid 状态）、
 `--parts`（块用的 standard-parts.json）、`--layout-quality strict|advisory`（布局看门狗，默认 strict，见下文）、
-`--zone-timeout`（每区布局墙钟上限，默认 60 s，0 = 不限）。
+`--zone-timeout`（每区布局墙钟上限，默认 60 s，0 = 不限）、`--no-package-text`（符号旁不画封装文字）、
+`--no-bom-pages`（不生成每页后面的 BOM 页）；后两项见“封装文字与 BOM 页”一节。
 
 输出为一个 JSON 报告（stdout，另存 `--report`）：`ok`、`gates[]`、`timingsMs[]`（每阶段毫秒）、`totalMs`、
 `zones[]`（每区方法、绝对包围盒、是否复用/移动、该区的质量问题）、`partBoxes`（每件所在页与包围盒，供 AI 规划
-下一块而不必再查询）、`symbols`（符号来源统计）、`outputs`、`checkpoint`、`undo`、出错时 `error{code,message,fix}`。
+下一块而不必再查询）、`symbols`（符号来源统计）、`bom`（BOM 页与缺项，见下文）、`outputs`、`checkpoint`、`undo`、
+出错时 `error{code,message,fix}`。
 
 ## spec（`pcbpilot.kicad.sch-build/1`）
 
@@ -80,7 +83,7 @@ AI 只写这一份数据。**没有坐标**：位置全部由确定性布局算�
 
 | 字段 | 含义 |
 |---|---|
-| `parts[]` | `ref`、`value`、`lcsc`（C 号）、`mpn`、`symbol`（可选 `Lib:Name` 或 `path/lib.kicad_sym:Name`）、`footprint`、`zone`、`page`、`fields{}`（隐藏字段）、`pins[]`（无符号/离线时按此生成方框符号）、`near`（关系提示 `REF:PIN`：放在该脚旁，同网时用短导线连上）。 |
+| `parts[]` | `ref`、`value`、`lcsc`（C 号）、`mpn`、`symbol`（可选 `Lib:Name` 或 `path/lib.kicad_sym:Name`）、`footprint`、`zone`、`page`、`fields{}`（隐藏字段；`Description`、额定值、`Sourcing`、`Package` 进 BOM 页，见“封装文字与 BOM 页”）、`pins[]`（无符号/离线时按此生成方框符号）、`near`（关系提示 `REF:PIN`：放在该脚旁，同网时用短导线连上）。 |
 | 封装库 | `footprint` 写 `Lib:Name` 时，工程目录或任一 `libDirs` 目录下的 `<Lib>.pretty`（`libDirs` 也可直接列 `<Lib>.pretty` 目录）随工程复制并登记进工程 `fp-lib-table`（`${KIPRJMOD}/<Lib>.pretty`），**不论符号来自哪里**（LCSC、KiCad 自带、`pins` 生成、本地库；v0.12.0 只在符号来自同目录 `.kicad_sym` 时才带上，其余静默丢掉，pcb-sync 再报 `E_FP_LIB_UNRESOLVED`）。都找不到、也不是 KiCad 自带库、也不在用户全局 `fp-lib-table` 里 → `FOOTPRINT_LIB_NOT_FOUND`；库找到了但没有该封装 → `FOOTPRINT_NOT_FOUND`。相对 `libDirs` 按 spec 文件所在目录解析（v0.12.1 及以前按当前目录）。 |
 | 符号来源顺序 | 显式 `symbol`（工程目录 → `libDirs` → KiCad 自带库）→ LCSC（`kicad lcsc --import` 同一转换，缓存于 `~/.pcbpilot/cache/kicad-lcsc/<C号>`，重复构建离线且瞬时，多件并行导入）→ `pins` 生成。KiCad `extends` 派生符号不支持（用父符号、C 号或 pins）。EasyEDA 转来的电阻/电容/电感/二极管/开关/连接器等被动类引脚统一改为 passive（EasyEDA 的引脚类型不可信，电阻常被标成 input）。 |
 | `blocks[]` | 电路块库（`pcbpilot blocks ls`），用 block-apply 的同一规划器展开为器件 + 网（standard-parts.json 的器件、位号、internal_nets、端口绑定）。`refs`：role → 位号；`lcsc` / `values` / `symbols`：按 role 覆盖。块内部网自动取可读名（`USB_DP`、`BUCK_SW`、`BUCK_FB`、`Q1_BASE`、`LED1_A`），不会出现 `_N3`。块里的焊盘别名（`EP*`、`EPAD`、`EH`、`SHELL` …）映射到符号真实脚号；对不上就是硬错误。 |
@@ -98,6 +101,47 @@ AI 只写这一份数据。**没有坐标**：位置全部由确定性布局算�
 
 `--from-connectivity`：EasyEDA 连接 IR 1.4（`pcbpilot sch connectivity`，每页一个文件）→ spec：器件（C 号 →
 LCSC 符号，否则按 IR 的引脚表生成）、网、不连接、模块 → 区，每个文件一页。
+
+## 封装文字与 BOM 页（v0.12.9，默认都开）
+
+**封装文字。** 每个符号在值的旁边多一行可见的 `Package` 属性，读图的人不用点开属性就知道是 0603 还是 0805、
+SOT-23 还是 SOIC-8。文字由封装名推出：`R_0603_1608Metric` → `0603`，`SOIC-8_3.9x4.9mm_P1.27mm` → `SOIC-8`，
+`QFN-32-1EP_5x5mm_P0.5mm` → `QFN-32`，`R_Array_Convex_4x0603` → `4x0603`，认不出的取封装名的第一段（最长 16 字符）。
+推得不合意时在件上写 `fields.Package` 覆盖。封装文字参与布局的文字占位计算（与值同一行放得下就同一行，否则另起一行），
+不会压到导线或相邻器件。没有封装的件不显示文字，并在 `warnings` 和 `bom.noPackage` 里列出。测试点、安装孔、
+基准点、焊接跳线、网络连接件、标志（位号前缀 `TP` `H` `MH` `FID` `JP` `SJ` `NT` `LOGO` `G`）默认不画封装文字
+（写了 `fields.Package` 才画），BOM 里仍有它们的封装。`--no-package-text` 整体关闭。
+
+**BOM 页。** 每个原理图页后面跟一张 BOM 图纸 `<页文件名>-bom.kicad_sch`（图纸名 `<页标题> BOM`），页码排成
+“页、它的 BOM、下一页、它的 BOM …”，导出的 PDF 就是这个顺序。单页工程（根图就是图本身）的 BOM 图纸符号画在图的旁边。表格列：
+
+| 列 | 来源 |
+|---|---|
+| Refs / Qty | 值、封装、MPN、C 号、规格、来源都相同的件合成一行，位号压缩（`R1-R4, R7`）；DNP 的件单独成行并标 `DNP` |
+| Value / Package / MPN / LCSC | `value`、封装文字、`mpn`、`lcsc` |
+| Spec / requirements | `fields.Description` 在前，然后 `Rating` `Power` `Voltage` `Current` `Tolerance` `Dielectric` `Note(s)` `Spec` `Requirements`，再是其余字段（`键: 值`）。变压器、电感这类件把 `Inductance`、`TurnsRatio`、`Isat`、`Isolation`、`Core` 等写成字段就会出现在这里 |
+| Sourcing | `fields.Sourcing`（如 `custom / self-sourced`、`any`、指定厂家）；没写而有 C 号 → `LCSC`；都没有 → `—` |
+
+表格放不下一张纸时依次用 A4 → A3 → A2 横向，再放不下就续页（`<页>-bom-2.kicad_sch` …）。一行不拆页；单元格内容超过半张纸高时截断并以“… (cut: see the spec)”结尾。没有任何 BOM 行的页（只有电源符号、测试点之类）不生成 BOM 图纸。BOM 图纸里没有符号、
+导线和标签，不进网表；页面填充率、`page-fit`、布局看门狗等按页测量的门禁不计 BOM 图纸。原地重建时 BOM 图纸的
+uuid 由页和行内容确定，内容不变文件就不变。`--no-bom-pages` 关闭。 `kicad sch-pdf --out` 必须是 `.pdf` 文件。
+
+报告的 `bom`：`sheets` / `packageText`（两个开关的实际状态）、`pages[]`（`page`、`file`、`sheet`、`paper`、
+`pageNumber`、`rows`）、`rows`、`parts`、`noPackage[]`、`noSpec[]`（不是普通阻容、规格格为空的件）和
+`missing[]`（`ref`、`reason`、`fix`）。**`bom.missing` 是警告而不是门禁失败**：列出读者认不出来的件——没有封装，
+或者既没有 MPN、也没有 C 号、也没有 `Description`。每条的 `fix` 是一句话的改法；交付前应为空。
+
+spec 作者对每个**不是普通阻容**的件要写：`fields.Description`（这是什么）、关键额定值（功率、电压、电流、容差；
+磁性件：电感量 / 匝比 / 饱和电流 / 隔离耐压 / 磁芯）和 `fields.Sourcing`（来源：LCSC、指定厂家、定制 / 自备）。例：
+
+```json
+{"ref": "T1", "value": "EE16 1:1.2", "zone": "iso", "footprint": "Transformer_SMD:Transformer_Coilcraft_CST1",
+ "fields": {"Description": "Flyback transformer, custom wound", "Sourcing": "custom / self-sourced",
+            "Inductance": "450 uH primary", "TurnsRatio": "1:1.2", "Isat": "0.8 A", "Isolation": "1.5 kV", "Core": "EE16 PC40"}}
+```
+
+**PDF。** `pcbpilot kicad sch-pdf --project build/ --out build/schematic.pdf`（或 `--sch root.kicad_sch`）用
+kicad-cli 把根图及其下全部图纸按页码画成一个 PDF，不改原理图；输出 JSON 含 `pages`（PDF 页数）和 `sheets`（图纸顺序）。
 
 ## 流水线（全部在进程内、对文件操作）
 
@@ -267,6 +311,10 @@ delta 只描述意图：
   后全部页中位数 0.60，总图纸面积 12.1 → 6.3 m²。链状块不会折行（很长的分压链仍是一长列）。
 - 看门狗的阈值按 7 块实测板标定；更小的板（< 20 个信号连接）只判区级和页级指标。
 - 多单元符号只走网格方案；KiCad `extends` 派生符号不支持。
+- 封装文字让器件的文字占位变宽：7 块回归板 39 个原理图页里有 4 页（原来填充率 0.74–0.80）因此升了一档纸（A3 → A2），
+  其余页填充率变化在几个点以内。值与封装同行的宽度上限（10.5 mm）是按这 7 块板调出来的经验值。
+- BOM 页的图纸名（`<页标题> BOM`）很长时在标题栏里会超出格子；BOM 表的规格列只有 spec 写了 `fields` 才有内容。
+- `kicad sch-pdf` 的页数是数 PDF 里的页对象得到的，没有用第二个 PDF 工具核对。
 - KiCad 自带 `Device:LED` 的箭头超出引脚端，导线贴着画会被 `wire-through-body` 判中（用 LCSC 的 LED 或 pins）。
 - 层次图的 sheet pin 只按页序分左右（不按信号方向）；电源网一律用全局电源符号，不走 sheet pin。
 - 视觉评审（渲染 PNG 交给 review-panel）尚未接上：review-panel 目前只读文本证据；当前评审证据是 spec、

@@ -1367,6 +1367,10 @@ func TestSchBuildPlannerBudgetHonest(t *testing.T) {
 
 	sbTestGateHook = func(rep *sbReport) { rep.gate("engineer-grade", "fail", "injected EG-08", nil) }
 	defer func() { sbTestGateHook = nil }()
+	// the grid draws first; the planner is the fallback for a zone the grid
+	// cannot draw clean
+	sbTestGridFinding = "injected grid finding"
+	defer func() { sbTestGridFinding = "" }()
 	rep, err = runSchBuild(spec(), sbOptions{OutDir: filepath.Join(t.TempDir(), "b"), NoIntent: true, Jobs: 2, PlannerBudget: 20000, PlannerTimeout: time.Minute}, nil)
 	if err != nil || rep.Error == nil || rep.Error.Code != "GATE_FAILED" {
 		t.Fatalf("injected gate: %v %+v", err, rep.Error)

@@ -51,6 +51,10 @@ type sbState struct {
 	// engine draws the zones differently, so their old page positions are
 	// not kept (the pages are re-packed); uuids are kept regardless.
 	LayoutEngine string `json:"layoutEngine,omitempty"`
+	// NoPackageText / NoBomPages: the build's --no-package-text /
+	// --no-bom-pages, so kicad sch-edit keeps what the build chose.
+	NoPackageText bool `json:"noPackageText,omitempty"`
+	NoBomPages    bool `json:"noBomPages,omitempty"`
 }
 
 type sbZoneState struct {
@@ -157,9 +161,12 @@ type sbReport struct {
 	External   *sbExternalEdits  `json:"externalEdits,omitempty"`
 	Plan       *sbPlan           `json:"plan,omitempty"`
 	PartBoxes  map[string]sbBox  `json:"partBoxes,omitempty"`
-	Error      *sbFailure        `json:"error,omitempty"`
-	Undo       string            `json:"undo,omitempty"`
-	Next       []string          `json:"next,omitempty"`
+	// Bom: the BOM sheets after the schematic pages and what the BOM lacks
+	// (kicad_sch_build_bom.go); Bom.Missing must be empty before hand-over.
+	Bom   *sbBomReport `json:"bom,omitempty"`
+	Error *sbFailure   `json:"error,omitempty"`
+	Undo  string       `json:"undo,omitempty"`
+	Next  []string     `json:"next,omitempty"`
 }
 
 // sbBox is a part's drawn extent on its sheet (mm).
@@ -388,13 +395,16 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 		return rep, nil
 	}
 
-	d, rs, err := buildDesign(spec, sbResolveOpts{OutDir: out, Offline: o.Offline, Jobs: o.Jobs, PartsPath: o.PartsPath})
+	d, rs, err := buildDesign(spec, sbResolveOpts{OutDir: out, Offline: o.Offline, Jobs: o.Jobs, PartsPath: o.PartsPath, NoPackageText: o.NoPackageText})
 	rep.Resolve = rs
 	if err != nil {
 		return rep, err
 	}
 	tm.mark("resolve")
 	rep.Warnings = append(rep.Warnings, d.Warnings...)
+	var bomWarn []string
+	rep.Bom, bomWarn = sbBomSummary(d, o)
+	rep.Warnings = append(rep.Warnings, bomWarn...)
 	// EG-22: a complete title block (defaults are reported)
 	var defs []string
 	if spec.Title.Title == "" {
@@ -545,6 +555,9 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 
 	if o.DryRun {
 		rep.Plan = sbMakePlan(d, zis, layouts, trans)
+		if !o.NoBomPages {
+			rep.Plan.Files = append(rep.Plan.Files, "<page>-bom.kicad_sch (one BOM sheet after every page)")
+		}
 		tm.mark("plan")
 		rep.Timings, rep.TotalMs = tm.Steps, tm.total()
 		return rep, nil
@@ -556,7 +569,11 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 		return rep, err
 	}
 	defer os.RemoveAll(stage)
-	files, sheetTexts, err := writeSbProject(stage, d, st, zis, layouts, trans)
+	var bomSheets *sbBomReport
+	if !o.NoBomPages {
+		bomSheets = rep.Bom
+	}
+	files, sheetTexts, err := writeSbProject(stage, d, st, zis, layouts, trans, bomSheets)
 	if err != nil {
 		return rep, err
 	}
@@ -814,6 +831,7 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 
 	// state, spec, checkpoint
 	st.LayoutEngine = sbLayoutEngineVersion
+	st.NoPackageText, st.NoBomPages = o.NoPackageText, o.NoBomPages
 	for _, zi := range zis {
 		st.Zones[zi.Zone.ID] = &sbZoneState{Page: zi.Zone.Page, T: trans[zi.Zone.ID], Layout: layouts[zi.Zone.ID]}
 	}
@@ -1012,7 +1030,11 @@ func sbSafeJoin(base, rel string) (string, error) {
 
 // writeSbProject renders every sheet and writes the project into dir.
 // Returns the written files (relative) and each sheet's fit result.
-func writeSbProject(dir string, d *sbDesign, st *sbState, zis []*sbZoneIn, layouts map[string]*sbZoneLayout, trans map[string]kicad.Pt) ([]string, map[string]kicad.FitResult, error) {
+//
+// bom non-nil: every page is followed by its BOM sheet(s) (a table only,
+// kicad_sch_build_bom.go), listed in bom.Pages. They are not in the fit
+// results: the page gates measure schematic pages.
+func writeSbProject(dir string, d *sbDesign, st *sbState, zis []*sbZoneIn, layouts map[string]*sbZoneLayout, trans map[string]kicad.Pt, bom *sbBomReport) ([]string, map[string]kicad.FitResult, error) {
 	name := st.Name
 	multi := len(d.Pages) > 1
 	if st.RootUUID == "" {
@@ -1042,6 +1064,82 @@ func writeSbProject(dir string, d *sbDesign, st *sbState, zis []*sbZoneIn, layou
 		no            int
 	}
 	var sheets []sheetRef
+	// BOM sheets: bomOf[page id] in sheet order
+	type bomRef struct {
+		file, name, symUUID string
+		no                  int
+	}
+	bomOf := map[string][]bomRef{}
+	pageFiles := map[string]bool{strings.ToLower(name + ".kicad_sch"): true}
+	for _, pg := range d.Pages {
+		pageFiles[strings.ToLower(sbSheetFile(pg.ID))] = true
+	}
+	writeBom := func(pg sbPage, pageFile string, tb kicad.TitleBlock) error {
+		if bom == nil {
+			return nil
+		}
+		var parts []*sbRPart
+		for _, zi := range zis {
+			if zi.Zone.Page == pg.ID {
+				parts = append(parts, zi.Parts...)
+			}
+		}
+		rows := sbBomRows(parts)
+		if len(rows) == 0 {
+			return nil
+		}
+		title := pg.Title
+		if title == "" && multi {
+			title = pg.ID
+		}
+		lay := sbBomLayout(rows)
+		for i, sh := range lay {
+			key := fmt.Sprintf("%s#bom#%d", pg.ID, i+1)
+			ref := bomRef{file: sbBomFile(pageFile, i+1, pageFiles), name: sbBomSheetName(title, i+1),
+				symUUID: st.uuid(st.SheetSymUUIDs, key), no: pageNo}
+			pageNo++
+			uuid := st.uuid(st.PageUUIDs, key)
+			btb := tb
+			btb.Title = tb.Title + " — BOM"
+			if len(lay) > 1 {
+				btb.Title = fmt.Sprintf("%s — BOM %d/%d", tb.Title, i+1, len(lay))
+			}
+			e, err := sbNewSheet(uuid, false, btb)
+			if err != nil {
+				return err
+			}
+			e.SetPaper(sh.Paper)
+			e.AddRaw(sbBomHeading(uuid, fmt.Sprintf("%s — %d part(s), %d line(s)", btb.Title, len(parts), len(rows))))
+			e.AddRaw(sbBomTable(sh, uuid))
+			text, err := e.Render()
+			if err != nil {
+				return fmt.Errorf("page %s BOM: %w", pg.ID, err)
+			}
+			if err := write(ref.file, []byte(text)); err != nil {
+				return err
+			}
+			bomOf[pg.ID] = append(bomOf[pg.ID], ref)
+			bom.Pages = append(bom.Pages, sbBomPage{Page: pg.ID, File: ref.file, Sheet: ref.name, Paper: sh.Paper, No: ref.no, Rows: sh.Rows})
+		}
+		bom.Rows += len(rows)
+		return nil
+	}
+	// bomSheetSym is the sheet symbol of a BOM sheet (no pins).
+	bomSheetSym := func(b bomRef, x, y float64) string {
+		w := sbBomSymW(b.name, b.file)
+		return fmt.Sprintf(`(sheet
+		(at %s %s)
+		(size %s %s)
+		(exclude_from_sim yes) (in_bom no) (on_board no) (dnp no)
+		(stroke (width 0.1524) (type solid))
+		(fill (color 0 0 0 0.0000))
+		(uuid %s)
+		(property "Sheetname" %s (at %s %s 0) (effects (font (size 1.27 1.27)) (justify left bottom)))
+		(property "Sheetfile" %s (at %s %s 0) (effects (font (size 1.27 1.27)) (justify left top)))
+		(instances (project %s (path %s (page %s))))
+	)`, kicad.F(x), kicad.F(y), kicad.F(w), kicad.F(sbBomSymH), kicad.Q(b.symUUID), kicad.Q(b.name), kicad.F(x), kicad.F(y-0.7),
+			kicad.Q(b.file), kicad.F(x), kicad.F(y+sbBomSymH+0.6), kicad.Q(name), kicad.Q("/"+st.RootUUID), kicad.Q(strconv.Itoa(b.no)))
+	}
 	for _, pg := range d.Pages {
 		file := name + ".kicad_sch"
 		uuid := st.RootUUID
@@ -1080,6 +1178,24 @@ func writeSbProject(dir string, d *sbDesign, st *sbState, zis []*sbZoneIn, layou
 		text, err := e.Render()
 		if err != nil {
 			return nil, nil, fmt.Errorf("page %s: %w", pg.ID, err)
+		}
+		if err := writeBom(pg, file, tb); err != nil {
+			return nil, nil, err
+		}
+		if bs := bomOf[pg.ID]; !multi && len(bs) > 0 {
+			// one schematic page: it is the root, so the BOM sheets hang
+			// off it — small sheet symbols next to the drawing
+			_, fr0, err := kicad.FitSheet(text)
+			if err != nil {
+				return nil, nil, err
+			}
+			x, y := sbBomSymSpot(fr0, bs[0].name, bs[0].file, len(bs))
+			for i, b := range bs {
+				e.AddRaw(bomSheetSym(b, x, y+float64(i)*sbBomSymPitch))
+			}
+			if text, err = e.Render(); err != nil {
+				return nil, nil, fmt.Errorf("page %s: %w", pg.ID, err)
+			}
 		}
 		flg = max(flg, kicad.MaxFlagRef(text)+1)
 		text, fr, err := kicad.FitSheet(text)
@@ -1158,6 +1274,9 @@ func writeSbProject(dir string, d *sbDesign, st *sbState, zis []*sbZoneIn, layou
 			// the symbol's left edge — Codex review)
 			sp[i].w = math.Max(50.8, sbSnap(math.Max(math.Max(sbTextW(sp[i].title), sbTextW(sheets[i].file)), lw+rw+10.16)))
 			sp[i].h = sbSnap(math.Max(15.24, float64(max(len(sp[i].left), len(sp[i].right))+1)*2.54+2.54))
+			for _, b := range bomOf[sheets[i].page.ID] { // its BOM sheet symbols sit under it
+				sp[i].w = math.Max(sp[i].w, sbBomSymW(b.name, b.file))
+			}
 			if len(sp[i].left) > 0 {
 				lroom[i] = sbSnap(lw + 7.62 + 2.54)
 			}
@@ -1169,7 +1288,11 @@ func writeSbProject(dir string, d *sbDesign, st *sbState, zis []*sbZoneIn, layou
 		// row reached x = 3383 mm). Reading order first; if those rows are too
 		// tall, shelves by decreasing height. Sheet numbers keep the order.
 		sy, rowOf, order := sbRootRows(len(sp), func(i int) (float64, float64, float64, float64) {
-			return lroom[i], sp[i].w, rroom[i], sp[i].h
+			h := sp[i].h
+			if n := len(bomOf[sheets[i].page.ID]); n > 0 {
+				h += sbBomSymGap + float64(n)*sbBomSymPitch - 5.08
+			}
+			return lroom[i], sp[i].w, rroom[i], h
 		}, func(i int, x float64) { sp[i].x = x })
 		next, prevOf := make([]int, len(sp)), make([]int, len(sp))
 		for i := range next {
@@ -1230,6 +1353,9 @@ func writeSbProject(dir string, d *sbDesign, st *sbState, zis []*sbZoneIn, layou
 		(instances (project %s (path %s (page %s))))
 	)`, kicad.F(sp[i].x), kicad.F(y), kicad.F(sp[i].w), kicad.F(sp[i].h), kicad.Q(s.symUUID), kicad.Q(sp[i].title), kicad.F(sp[i].x), kicad.F(y-0.7), kicad.Q(s.file), kicad.F(sp[i].x), kicad.F(y+sp[i].h+0.6),
 				pins.String(), kicad.Q(name), kicad.Q("/"+st.RootUUID), kicad.Q(strconv.Itoa(s.no))))
+			for k, b := range bomOf[s.page.ID] {
+				re.AddRaw(bomSheetSym(b, sp[i].x, y+sp[i].h+sbBomSymGap+float64(k)*sbBomSymPitch))
+			}
 		}
 		rt, err := re.Render()
 		if err != nil {
@@ -1247,11 +1373,19 @@ func writeSbProject(dir string, d *sbDesign, st *sbState, zis []*sbZoneIn, layou
 	// project file
 	pro := map[string]any{"meta": map[string]any{"filename": name + ".kicad_pro", "version": 3},
 		"schematic": map[string]any{"legacy_lib_dir": "", "legacy_lib_list": []any{}}}
-	if multi {
+	if multi || len(bomOf) > 0 {
 		var sh []any
 		sh = append(sh, []any{st.RootUUID, "Root"})
 		for _, s := range sheets {
 			sh = append(sh, []any{s.symUUID, s.page.ID})
+			for _, b := range bomOf[s.page.ID] {
+				sh = append(sh, []any{b.symUUID, b.name})
+			}
+		}
+		if !multi {
+			for _, b := range bomOf[d.Pages[0].ID] {
+				sh = append(sh, []any{b.symUUID, b.name})
+			}
 		}
 		pro["sheets"] = sh
 	}
@@ -1370,14 +1504,20 @@ func renderSbPage(e *kicad.SchEditor, d *sbDesign, st *sbState, pg sbPage, zis [
 					return err
 				}
 				ap := sbPose{At: mv(pose.At), Rot: pose.Rot, Unit: unit}
-				f := sbFields(s, ap, p.Ref, p.Value)
+				f := sbFields(s, ap, p.Ref, p.Value, p.Pkg)
 				ang := 0.0
 				if math.Mod(pose.Rot, 180) == 90 {
 					ang = 90
 				}
 				fields := []kicad.Field{{Name: "Reference", Value: p.Ref, At: &f.Ref, Angle: ang}, {Name: "Value", Value: p.Value, At: &f.Val, Angle: ang}}
+				if p.Pkg != "" { // the package, readable on the print (kicad_sch_build_bom.go)
+					fields = append(fields, kicad.Field{Name: "Package", Value: p.Pkg, At: &f.Pkg, Angle: ang})
+				}
 				extra := map[string]string{}
 				for k, v := range p.Fields {
+					if p.Pkg != "" && strings.EqualFold(k, "Package") {
+						continue // drawn above
+					}
 					extra[k] = v
 				}
 				if p.LCSC != "" {

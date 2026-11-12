@@ -215,6 +215,7 @@
 | `kicad sch-edit` | Change a sch-build project in one call (add/remove/replace parts or blocks, connect by pin name, rename nets, move zones) | [SKILL.md](../SKILL.md), [design-flow.md](design-flow.md), [drc-triage.md](drc-triage.md), [kicad-file-safety.md](kicad-file-safety.md) +3 |
 | `kicad sch-fit` | Size every schematic sheet to its content (smallest A4…A0 that holds it clear of the title block) | [drc-triage.md](drc-triage.md), [kicad-file-safety.md](kicad-file-safety.md), [review-workflow.md](review-workflow.md) |
 | `kicad sch-import` | Convert an EasyEDA Pro schematic (.epro export) into a hierarchical KiCad schematic and check its netlist | [kicad-file-safety.md](kicad-file-safety.md), [project-import.md](project-import.md) |
+| `kicad sch-pdf` | One PDF of the whole schematic (kicad-cli sch export pdf on the root sheet): every page, each followed by its BOM sheet | [kicad-sch-build.md](kicad-sch-build.md) |
 | `kicad sch-read` | Compact parts/nets JSON of a KiCad schematic (a valid sch-build spec; read this, not the S-expression) | [SKILL.md](../SKILL.md), [kicad-file-safety.md](kicad-file-safety.md), [kicad-sch-build.md](kicad-sch-build.md), [review-workflow.md](review-workflow.md) |
 | `kicad snapshot` | Board snapshot JSON (mil, y-up; the pcb dump --include-copper shape) of a .kicad_pcb | [SKILL.md](../SKILL.md), [board-manual.md](board-manual.md), [evidence-and-verdicts.md](evidence-and-verdicts.md), [kicad-file-safety.md](kicad-file-safety.md) +3 |
 
@@ -651,4 +652,4 @@
 | `workflow reset` | Clear deprecated checklist entries (or --all) | — |
 | `workflow status` | Show deprecated checklist state; --reconcile compares it with the live document | [pcb-layout.md](pcb-layout.md) |
 
-共 433 条命令，其中 93 条尚无参考提到。
+共 434 条命令，其中 93 条尚无参考提到。

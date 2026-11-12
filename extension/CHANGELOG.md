@@ -21,6 +21,17 @@ third blank; routing completion on large boards is unchanged.**
 - The grid draws first and the planner is the fallback for a zone the grid cannot draw clean. With the planner first, three
   of the seven field boards failed their page gates and one took ten minutes; all seven now build in 6–40 s.
 - Rebuilding into an existing output with a newer engine redraws the zones in place and keeps symbol UUIDs.
+- A project whose line ends were converted (a git checkout on Windows) is no longer refused as edited outside pcbpilot; a
+  manifest written by an older version on Windows may still need one `--discard-external-edits` rebuild.
+- **Package text on every symbol** (default on, `--no-package-text`): a visible `Package` property next to the value
+  (`0603`, `SOT-23-5`, `SOIC-8`, from the footprint; `fields.Package` overrides). Test points, holes and fiducials show none.
+- **A BOM sheet after every schematic page** (default on, `--no-bom-pages`): `<page>-bom.kicad_sch` with refs, quantity,
+  value, package, MPN, LCSC number, spec / requirements (from `fields`) and sourcing. The report's `bom.missing[]` lists
+  parts a reader cannot identify, each with a one-line fix; it is a warning, and the Skills require it empty at hand-over.
+  New `kicad sch-pdf --project DIR --out FILE` plots the hierarchy as one PDF: page, its BOM, next page.
+  `--out` must be a `.pdf`. A BOM row is never split; a cell taller than half a sheet is cut with a mark.
+  On the seven field boards all builds still pass; 4 of 39 pages (fill 0.74–0.80 before) moved up one paper size because of
+  the wider text. The width limit for value and package on one line (10.5 mm) is tuned on those boards.
 
 **Route flow (`kicad route`, `pcb auto route`)**
 - **A waived gate is `waived`, never `pass`.** `summary.json` carries `pass`, `complete`, `incomplete[]` and `waivers[]`; a run
@@ -35,7 +46,9 @@ third blank; routing completion on large boards is unchanged.**
   signing a waiver for the owner.
 
 **Not verified:** an unwaived `kicad route` run end to end on this build (the reviewer login had expired); the `--analog`
-pass case (the test board has no analog block). EasyEDA paths are unchanged and were not re-run.
+pass case (the test board has no analog block). EasyEDA paths are unchanged and were not re-run. BOM sheets: all seven
+field boards were rebuilt in place and `kicad pcb-sync --check` reports them in sync with their routed boards; the PDFs
+were plotted for all seven, and read closely on one field board and one synthetic design only.
 
 ## [0.12.8] — 2026-11-11
 

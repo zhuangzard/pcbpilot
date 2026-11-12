@@ -37,6 +37,13 @@ spec 字段、门禁细节与 delta 语法以 [kicad-sch-build.md](../pcbpilot/r
    不写“通过”。`--no-review` 的 `design-review` 状态是 `waived`，不是 `pass`；Agent 不写、不签、不代签 waiver。整板的完成
    条件见 [pcbpilot 的完成定义](../pcbpilot/SKILL.md#完成定义硬规则)。
 
+7. **每个件都要让读图的人认得出**（v0.12.9）：sch-build 默认在每个符号旁画封装文字（0603、SOIC-8 …，取自封装，
+   `fields.Package` 可覆盖），并在每个原理图页后面生成一张 BOM 图纸。所以写 spec 时，每个**不是普通阻容**的件必须写
+   `fields.Description`（这是什么）、关键额定值（`Power` / `Voltage` / `Current` / `Tolerance`；磁性件写 `Inductance` /
+   `TurnsRatio` / `Isat` / `Isolation` / `Core`）和 `fields.Sourcing`（`LCSC`、指定厂家、`custom / self-sourced` …）；
+   每个件都要有封装（`footprint`、C 号或 `fields.Package`）。报告的 `bom.missing[]` **交付前必须为空**（每条带一句话的
+   `fix`）；不为空就报“未完成”并照抄。不要用 `--no-package-text` / `--no-bom-pages` 省事，除非用户要求。
+
 ## 工作流
 
 ```bash
@@ -57,6 +64,8 @@ pcbpilot kicad sch-checkpoint list --project build/       # 回退：sch-checkpo
 # 6 构建后独立复查与交接（--review：只读设计评审；0 通过（含 pass-with-warnings）/ 6 有 error / 5 cannot-check）
 pcbpilot kicad sch-check --sch build/<name>.kicad_sch --review --intent build/intent.json [--waivers waivers.json]
 pcbpilot kicad netlist --sch build/<name>.kicad_sch --out conn.json
+# 7 交付 PDF：每个原理图页后面跟它的 BOM 页（值、封装、MPN、C 号、规格/要求、来源）
+pcbpilot kicad sch-pdf --project build/ --out build/schematic.pdf
 ```
 
 - 设计评审（`sch-check --review`，sch-build/sch-edit 默认 advisory 内置为 `sch-review` 门禁，`--sch-review strict`
@@ -146,6 +155,8 @@ identical / changed（变化元素数）/ added / removed（[kicad.md](../pcbpil
   `sch-review.json` 的 error、cannot-check 与 likely warning 项（含 missingEvidence），`pass-with-warnings` 写 WARN，不写“通过”。
 - ERC 只有警告 → `WARN`（列 `byType`），不写“通过”；`design-review` 为 skip（没给 `--requirements`）→ 需求覆盖 `INCOMPLETE`。
 - 构建后状态：`fp-lib-table`、`lcsc.pretty/` 存在且非空、`render/` 文件时间是本次；没看渲染就不说“排版已确认”。
+- BOM：`bom.pages` 的张数、`bom.missing` / `bom.noPackage` / `bom.noSpec` 的条数（`missing` 不为空 → 未完成，逐条列出）、
+  `sch-pdf` 输出的 PDF 路径与页数。
 
 ## 常见失败 → 修法
 
@@ -153,6 +164,7 @@ identical / changed（变化元素数）/ added / removed（[kicad.md](../pcbpil
 |---|---|---|
 | `ok:false`，`BUILD_FAILED`，消息 “N spec problem(s): PIN_TWO_NETS …” | spec 自相矛盾（一脚两网、脚名不存在、网无脚） | 按列表一次改完再建；`PIN_NOT_ON_SYMBOL` 用它给出的真实脚名 |
 | `GATE_FAILED`：`engineer-grade … EG-06` | 去耦电容离所服务电源脚 > 25.4 mm | 给电容 `near` 电源脚；拆区；多单元件见上文；不要删电容过门禁 |
+| `warnings` 里 “BOM: N part(s) a reader cannot identify”，`bom.missing` 不为空 | 件没有封装，或既无 MPN、C 号也无 `Description` | 按每条 `fix` 在 spec 里补 `footprint` / `fields.Description` / `fields.Sourcing`，重建到为空 |
 | `SHEET_NOT_LOADED` | value / MPN 等有 KiCad 不接受的字符 | 改 spec 字符；不是布局问题 |
 | `page … split into N pages` / 某区 “too big” | 页或区超过 A0 | 前者是正常自动分页；后者在 spec 里拆区 |
 | ERC `pin_to_pin`（Unspecified 引脚） | EasyEDA 转来的符号引脚类型不可信 | 记 WARN 并列出；不为消警告改引脚类型 |

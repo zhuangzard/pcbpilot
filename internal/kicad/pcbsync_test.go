@@ -500,6 +500,15 @@ func TestBuildSyncPlan(t *testing.T) {
 				t.Fatalf("%+v", p.Ops)
 			}
 		}},
+		{"package-text", func(nl *SyncNetlist, inv *SyncInventory, _ *SyncOptions) {
+			compByRef(nl, "R1").Fields[SymPackageField] = "0603"
+			fpByRef(inv, "C1").Fields[SymPackageField] = "mine"
+			fpByRef(inv, "R1").Fields["package"] = "other case"
+		}, func(t *testing.T, p *SyncPlan) {
+			if len(p.Ops) != 0 {
+				t.Fatalf("%+v", p.Ops)
+			}
+		}},
 		{"sheet", func(_ *SyncNetlist, inv *SyncInventory, _ *SyncOptions) { fpByRef(inv, "C1").Sheetname = "Racine" },
 			func(t *testing.T, p *SyncPlan) {
 				ops := opsOf(p, "setSheet")

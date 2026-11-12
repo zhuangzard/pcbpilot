@@ -228,14 +228,35 @@ func sbOverlap(a, b kicad.Box) bool {
 // sbTextW estimates a 1.27 mm text width.
 func sbTextW(s string) float64 { return 1.1*float64(len([]rune(s))) + 0.6 }
 
-// sbFieldPlan places Reference / Value next to the body (absolute mm):
-// above/below when those sides carry no pins, else beside it.
+// sbFieldPlan places Reference / Value / Package next to the body (absolute
+// mm): above/below when those sides carry no pins, else beside it. The
+// package text (pkg, "" = none) sits with the value: on the value's line
+// when the two fit there, else on a line of its own under it; beside the
+// body the three texts are three lines. VBox covers the value AND the
+// package text, so every caller that keeps the value text clear keeps the
+// package text clear as well.
 type sbFieldPlan struct {
-	Ref, Val     kicad.Pt
-	RefBox, VBox kicad.Box
+	Ref, Val, Pkg kicad.Pt
+	RefBox, VBox  kicad.Box
+	PkgBox        kicad.Box // zero when there is no package text
 }
 
-func sbFields(sym kicad.SceneSymbol, pose sbPose, ref, value string) sbFieldPlan {
+// sbFieldPitch is the line pitch of stacked field texts (1.27 mm text, on
+// the 0.635 mm field grid).
+const sbFieldPitch = 1.905
+
+// sbTestGridFinding (tests): a finding added to every grid drawing, so the
+// planner fallback runs on a zone the grid draws clean.
+var sbTestGridFinding string
+
+// sbPkgLineMax: value and package share one line under a body narrower than
+// this only up to this width (mm); wider, the package takes a line of its
+// own. A wider shared line under a series resistor pushed the next resistor
+// of a connector's pin row out of reach of its pin on a field board (12.7
+// failed there, the body width alone failed another zone).
+const sbPkgLineMax = 10.5
+
+func sbFields(sym kicad.SceneSymbol, pose sbPose, ref, value, pkg string) sbFieldPlan {
 	box := sbXformBox(sym.Box, pose)
 	sides := map[string]bool{}
 	for _, q := range sym.Pins {
@@ -259,23 +280,54 @@ func sbFields(sym kicad.SceneSymbol, pose sbPose, ref, value string) sbFieldPlan
 		return kicad.Box{MinX: at.X - w/2, MinY: at.Y - 0.9, MaxX: at.X + w/2, MaxY: at.Y + 0.9}
 	}
 	var f sbFieldPlan
+	// under (or over) the body: value and package share a line when that
+	// line is no wider than the body (or sbPkgLineMax)
+	below := func() {
+		f.Ref = kicad.Pt{X: snap(cx), Y: snap(box.MinY - 1.27)}
+		f.Val = kicad.Pt{X: snap(cx), Y: snap(box.MaxY + 1.27)}
+		if pkg == "" {
+			return
+		}
+		wv, wp := sbTextW(value), sbTextW(pkg)
+		if wv+wp+1.905 <= math.Max(box.W(), sbPkgLineMax) {
+			// centres on the field grid, at least the two half widths + a
+			// gap apart (the snap may only widen the gap)
+			gap := math.Ceil(((wv+wp)/2+1.6)/0.635) * 0.635
+			vx := snap(cx - (gap+(wp-wv)/2)/2)
+			f.Val.X, f.Pkg = vx, kicad.Pt{X: vx + gap, Y: f.Val.Y}
+			return
+		}
+		f.Pkg = kicad.Pt{X: f.Val.X, Y: f.Val.Y + sbFieldPitch}
+	}
+	beside := func(dir float64) {
+		w := math.Max(math.Max(sbTextW(ref), sbTextW(value)), sbTextW(pkg))
+		edge := box.MaxX
+		if dir < 0 {
+			edge = box.MinX
+		}
+		x := snap(edge + dir*(0.8+w/2))
+		if pkg == "" {
+			f.Ref, f.Val = kicad.Pt{X: x, Y: snap(cy - 1.27)}, kicad.Pt{X: x, Y: snap(cy + 1.27)}
+			return
+		}
+		y := snap(cy)
+		f.Ref, f.Val, f.Pkg = kicad.Pt{X: x, Y: y - sbFieldPitch}, kicad.Pt{X: x, Y: y}, kicad.Pt{X: x, Y: y + sbFieldPitch}
+	}
 	switch {
 	case !sides["top"] && !sides["bottom"]:
-		f.Ref = kicad.Pt{X: snap(cx), Y: snap(box.MinY - 1.27)}
-		f.Val = kicad.Pt{X: snap(cx), Y: snap(box.MaxY + 1.27)}
+		below()
 	case !sides["right"]:
-		w := math.Max(sbTextW(ref), sbTextW(value))
-		x := snap(box.MaxX + 0.8 + w/2)
-		f.Ref, f.Val = kicad.Pt{X: x, Y: snap(cy - 1.27)}, kicad.Pt{X: x, Y: snap(cy + 1.27)}
+		beside(1)
 	case !sides["left"]:
-		w := math.Max(sbTextW(ref), sbTextW(value))
-		x := snap(box.MinX - 0.8 - w/2)
-		f.Ref, f.Val = kicad.Pt{X: x, Y: snap(cy - 1.27)}, kicad.Pt{X: x, Y: snap(cy + 1.27)}
+		beside(-1)
 	default:
-		f.Ref = kicad.Pt{X: snap(cx), Y: snap(box.MinY - 1.27)}
-		f.Val = kicad.Pt{X: snap(cx), Y: snap(box.MaxY + 1.27)}
+		below()
 	}
 	f.RefBox, f.VBox = tb(f.Ref, ref), tb(f.Val, value)
+	if pkg != "" {
+		f.PkgBox = tb(f.Pkg, pkg)
+		f.VBox = sbBoxUnion(f.VBox, f.PkgBox)
+	}
 	return f
 }
 
@@ -416,7 +468,8 @@ func refLessSB(a, b string) bool {
 // Without the bump a rebuild silently reuses the old drawings (field report
 // 2026-11-12: the field boards rebuilt in place after the compact-layout change kept the
 // 0.12.x zones and 6 of 7 boards failed the layout-quality watchdog).
-const sbLayoutEngineVersion = "v2"
+// v3: package text next to the value (wider zone drawings).
+const sbLayoutEngineVersion = "v3"
 
 // hash covers what shapes the zone: parts, symbols, pin connectivity (nets
 // numbered canonically, so a rename keeps the hash), policies, NC pins, and
@@ -458,7 +511,15 @@ func (zi *sbZoneIn) hash(d *sbDesign, method string) string {
 	return sbShortHash(b.String()) + sbShortHash(b.String()+"#")
 }
 
-func sbFieldText(p *sbRPart) string { return p.Ref + "/" + p.Value }
+// sbFieldText is the text a part shows next to its body; its length is part
+// of the zone hash (a longer text needs more room). The package text counts
+// only when there is one, so a build without it keeps the old hash.
+func sbFieldText(p *sbRPart) string {
+	if p.Pkg != "" {
+		return p.Ref + "/" + p.Value + "/" + p.Pkg
+	}
+	return p.Ref + "/" + p.Value
+}
 
 // markersCurrent reports whether a cached layout's labels and power symbols
 // still name nets this zone's pins connect to, with the same power/ground
@@ -508,7 +569,7 @@ func planZone(d *sbDesign, zi *sbZoneIn, m *sbMeasure, budget int) (*sbZoneLayou
 		}
 		syms[p.Ref] = s
 		meas := SchematicPlacement{Designator: p.Ref, Value: p.Value, BBox: boxToEE(sbPinClampedBox(s))}
-		f := sbFields(s, sbPose{}, p.Ref, p.Value)
+		f := sbFields(s, sbPose{}, p.Ref, p.Value, p.Pkg)
 		meas.TextBBoxes = []layoutBBox{boxToEE(f.RefBox), boxToEE(f.VBox)}
 		states := map[string]string{}
 		seen := map[string]bool{}
@@ -712,7 +773,7 @@ func zoneBox(zl *sbZoneLayout, zi *sbZoneIn, syms map[string]kicad.SceneSymbol, 
 				s, _ = m.get(p, max(pose.Unit, 1))
 			}
 			add(sbXformBox(s.Box, pose))
-			f := sbFields(s, pose, p.Ref, p.Value)
+			f := sbFields(s, pose, p.Ref, p.Value, p.Pkg)
 			add(f.RefBox)
 			add(f.VBox)
 		}
@@ -900,7 +961,7 @@ func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, excl
 	bodyBox := func(it unitRef, pose sbPose) kicad.Box {
 		b := sbGrow(sbXformBox(it.s.Box, pose), 2.54)
 		if !v.Legacy {
-			fl := sbFields(it.s, pose, it.p.Ref, it.p.Value)
+			fl := sbFields(it.s, pose, it.p.Ref, it.p.Value, it.p.Pkg)
 			b = sbBoxUnion(b, sbBoxUnion(fl.RefBox, fl.VBox))
 		}
 		return b
@@ -1179,7 +1240,7 @@ func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, excl
 							}
 							body := sbGrow(sbXformBox(it.s.Box, pose), 0.6)
 							if !v.Legacy { // its texts stay out of that room too
-								fl := sbFields(it.s, pose, it.p.Ref, it.p.Value)
+								fl := sbFields(it.s, pose, it.p.Ref, it.p.Value, it.p.Pkg)
 								body = sbBoxUnion(body, sbBoxUnion(fl.RefBox, fl.VBox))
 							}
 							for k, pa := range pins { // the body stays out of other pins' stub + label room
@@ -1442,7 +1503,7 @@ func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, excl
 		}
 		fb0 := sbXformBox(foot(sbRotScene(it.s, rot), it.p.Ref), sbPose{})
 		if !v.Legacy { // the reference / value texts beside the body too
-			fl := sbFields(it.s, sbPose{Rot: rot}, it.p.Ref, it.p.Value)
+			fl := sbFields(it.s, sbPose{Rot: rot}, it.p.Ref, it.p.Value, it.p.Pkg)
 			fb0 = sbBoxUnion(fb0, sbBoxUnion(fl.RefBox, fl.VBox))
 		}
 		cb := sbGrow(items[0].s.Box, 0)
@@ -1556,6 +1617,10 @@ func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, excl
 				continue
 			}
 			f := foot(it.s, it.p.Ref)
+			// its texts take column room too (a long package text beside a
+			// resistor-array unit lay on the next column's unit)
+			fl := sbFields(it.s, sbPose{}, it.p.Ref, it.p.Value, it.p.Pkg)
+			f = sbBoxUnion(f, sbBoxUnion(fl.RefBox, fl.VBox))
 			own := servesCap(it.s, it.p.Ref)
 			if y > core.MinY && (own || y+f.H() > core.MinY+colH) {
 				x, y, colW = x+colW+2.54, core.MinY, 0
@@ -1631,7 +1696,7 @@ func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, excl
 		for _, p := range zi.Parts {
 			for _, ps := range zl.Parts[p.Ref] {
 				if s, err := m.get(p, max(ps.Unit, 1)); err == nil {
-					fl := sbFields(s, ps, p.Ref, p.Value)
+					fl := sbFields(s, ps, p.Ref, p.Value, p.Pkg)
 					obst = append(obst, fl.RefBox, fl.VBox)
 				}
 			}
@@ -1913,7 +1978,7 @@ func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, excl
 		it := todo[si]
 		rot := sbTwoPinRot(d, it.p, it.s)
 		sf := foot(sbRotScene(it.s, rot), it.p.Ref)
-		fl := sbFields(it.s, sbPose{Rot: rot}, it.p.Ref, it.p.Value)
+		fl := sbFields(it.s, sbPose{Rot: rot}, it.p.Ref, it.p.Value, it.p.Pkg)
 		sf = sbBoxUnion(sf, sbBoxUnion(fl.RefBox, fl.VBox))
 		maxX := math.Max(core.MaxX, roomX)
 		for _, pb := range placed {
@@ -2004,7 +2069,7 @@ func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, excl
 		// the reference / value texts beside the body take column room too:
 		// without them the next column's caps sat under this one's texts
 		// (text-over-symbol on every cap of a decoupling-only zone)
-		fl := sbFields(it.s, sbPose{Rot: rot}, it.p.Ref, it.p.Value)
+		fl := sbFields(it.s, sbPose{Rot: rot}, it.p.Ref, it.p.Value, it.p.Pkg)
 		f = sbBoxUnion(f, sbBoxUnion(fl.RefBox, fl.VBox))
 		if at, ok := hole(f); ok {
 			pose := sbPose{At: at, Rot: rot, Unit: it.unit}
@@ -2196,7 +2261,7 @@ func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, excl
 		for _, ps := range zl.Parts[it.p.Ref] {
 			if ps.Unit == it.unit {
 				bodies = append(bodies, sbXformBox(it.s.Box, ps))
-				f := sbFields(it.s, ps, it.p.Ref, it.p.Value)
+				f := sbFields(it.s, ps, it.p.Ref, it.p.Value, it.p.Pkg)
 				bodies = append(bodies, f.RefBox, f.VBox)
 			}
 		}
@@ -2969,6 +3034,9 @@ func layoutZones(d *sbDesign, zis []*sbZoneIn, reuse map[string]*sbZoneLayout, o
 				zg.Hash = hg
 				zg.Variant = v.name()
 				zg.Findings = sbZoneFindings(d, zi, zg)
+				if sbTestGridFinding != "" {
+					zg.Findings = append(zg.Findings, sbTestGridFinding)
+				}
 				// bounded retry: the parts a finding names are drawn loose
 				// (no attach) and the variant redrawn, at most four times,
 				// while the findings do not grow

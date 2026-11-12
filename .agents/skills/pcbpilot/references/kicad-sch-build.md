@@ -17,7 +17,17 @@
    只放部分单元时在件上写 `"units": [1, 3]`（未列出的单元不画，其脚不能进网）；sch-read 只对**部分放置**的件
    输出 `units`，回读再构建不会多出单元。`set_value` / `set_field` / `remove_part` 作用于该位号的全部单元。
    公共（unit 0）电源脚的件不能只放部分单元：KiCad ERC 报 `missing_power_pin`（错误）。
-5. 一次构建失败时读 `error.code` / `error.fix`；spec 问题是一次全部列出的（例如 `PIN_NOT_ON_SYMBOL` 会给出
+5. **封装文字与 BOM 页（v0.12.9 起默认开）。** 每个符号旁显示封装（0603、0805、SOT-23、SOIC-8 …，由封装名推出，
+   `fields.Package` 覆盖）；每个原理图页后面有一张 BOM 图纸（Refs / Qty / Value / Package / MPN / LCSC /
+   Spec / requirements / Sourcing）。因此每个**不是普通阻容**的件**必须**写：
+   - `fields.Description`：这是什么（“Flyback transformer, custom wound”“LDO 3.3 V 600 mA”）；
+   - 关键额定值：`Power`、`Voltage`、`Current`、`Tolerance`；磁性件 `Inductance`、`TurnsRatio`、`Isat`、
+     `Isolation`、`Core`；其余字段原样以 `键: 值` 进规格列；
+   - `fields.Sourcing`：`LCSC`、指定厂家，或 `custom / self-sourced`（定制 / 自备件写清性能参数）。
+   阻容至少要有封装和值，功率、耐压、介质有要求时也写上。报告的 `bom.missing[]` 交付前**必须为空**（每条有 `fix`）。
+   导出：`pcbpilot kicad sch-pdf --project build/ --out build/schematic.pdf`（页、它的 BOM、下一页 …）。
+   关闭开关 `--no-package-text` / `--no-bom-pages` 只在用户要求时用。
+6. 一次构建失败时读 `error.code` / `error.fix`；spec 问题是一次全部列出的（例如 `PIN_NOT_ON_SYMBOL` 会给出
    符号真实的脚号脚名），一轮改完再跑。门禁失败时 `--out` 不会被改动。
 
 ## 流程
@@ -28,6 +38,7 @@ pcbpilot kicad sch-build --spec design.json --out build/ --requirements 需求.m
 pcbpilot kicad sch-read --project build/                                # 紧凑 JSON（含每件 bbox），代替读 .kicad_sch
 pcbpilot kicad sch-edit --project build/ --spec delta.json              # 之后的每个修改：一次调用一个增量
 pcbpilot kicad sch-checkpoint list --project build/                     # 回退：sch-checkpoint restore N
+pcbpilot kicad sch-pdf --project build/ --out build/schematic.pdf       # 交付 PDF：每页后面跟它的 BOM 页
 ```
 
 门禁（全部硬性）：KiCad 网表 == spec、ERC 无错误、`kicad sch-check` 质量检查、工程级规则（电源朝上/地朝下、
