@@ -89,7 +89,11 @@ func labelCheckBox(l SceneLabel) Box {
 	w := 0.4 + 1.27*0.8*float64(len([]rune(l.Name)))
 	if l.Kind != LabelLocal {
 		w += 2.0 // the shape
-		const h = 1.1
+		// half the height of the drawn shape: 1.27 mm text in a shape of the
+		// same height, plus its outline. 1.1 made a hierarchical label and a
+		// local label on neighbouring pins (2.54 mm apart, the local text
+		// reaching 1.5 mm up from its wire) "overlap" by 0.06 mm.
+		const h = 1.0
 		switch dirOf(l.Angle) {
 		case 1:
 			return Box{l.At.X - h, l.At.Y - w, l.At.X + h, l.At.Y}

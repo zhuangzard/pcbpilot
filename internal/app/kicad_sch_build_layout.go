@@ -126,6 +126,111 @@ func sbFixJogs(zl *sbZoneLayout, pinNet map[kicad.Pt]string, bodies []kicad.Box)
 	return unresolved
 }
 
+// sbFixTees moves a teed label that a later wire runs through. A cross-page
+// net on an attach wire carries its (hierarchical) label on a 2.54 mm tee,
+// chosen against the wires drawn so far; the stubs and attach wires drawn
+// after it can cross its text (three parallel pin wires 5 mm apart: the
+// label teed up from the lowest one lay across the two above). The tee is
+// redrawn on the other side or further along its wire, where the text is
+// clear of every wire, body and other marker; when no such place exists it
+// stays, and the drawing keeps its label-on-wire finding.
+func sbFixTees(zl *sbZoneLayout, pinNet map[kicad.Pt]string, bodies []kicad.Box, teed func(net string) bool) {
+	segBox := func(a, b kicad.Pt) kicad.Box {
+		return kicad.Box{MinX: math.Min(a.X, b.X), MinY: math.Min(a.Y, b.Y), MaxX: math.Max(a.X, b.X), MaxY: math.Max(a.Y, b.Y)}
+	}
+	vec := map[string]kicad.Pt{"up": {Y: -1}, "down": {Y: 1}, "left": {X: -1}, "right": {X: 1}}
+	for mi := range zl.Markers {
+		mk := zl.Markers[mi]
+		if mk.Kind != "label" || mk.OnWire || !teed(mk.Net) {
+			continue
+		}
+		// the tee: a two-point wire from the interior of another wire to the marker
+		ti, hi, hs := -1, -1, -1
+		var tm kicad.Pt
+		for wi, w := range zl.Wires {
+			if len(w) != 2 || (w[0] != mk.At && w[1] != mk.At) {
+				continue
+			}
+			o := w[0]
+			if o == mk.At {
+				o = w[1]
+			}
+			for hj, h := range zl.Wires {
+				for i := 0; hj != wi && i+1 < len(h); i++ {
+					if sbOnInterior(o, [2]kicad.Pt{h[i], h[i+1]}) {
+						ti, hi, hs, tm = wi, hj, i, o
+					}
+				}
+			}
+		}
+		if ti < 0 {
+			continue
+		}
+		var others [][]kicad.Pt // every wire but the tee and its host
+		for wi, w := range zl.Wires {
+			if wi != ti && wi != hi {
+				others = append(others, w)
+			}
+		}
+		ok := func(from, at kicad.Pt, dir string) bool {
+			if sbTouchesWires(from, at, others, kicad.Pt{X: math.NaN()}) {
+				return false
+			}
+			for p := range pinNet {
+				if p == from || p == at || sbOnInterior(p, [2]kicad.Pt{from, at}) {
+					return false
+				}
+			}
+			mb := sbGrow(sbMarkerBox(sbMarker{Kind: mk.Kind, Net: mk.Net, At: at, Dir: dir}), -0.3)
+			for oi, o := range zl.Markers {
+				if oi != mi && (o.At == at || o.At == from || sbOverlap(mb, sbGrow(sbMarkerBox(o), -0.3))) {
+					return false
+				}
+			}
+			for _, bb := range bodies {
+				if sbOverlap(mb, sbGrow(bb, -0.5)) {
+					return false
+				}
+			}
+			for wi, w := range zl.Wires {
+				for i := 0; wi != ti && i+1 < len(w); i++ {
+					if sbOverlap(sbGrow(segBox(w[i], w[i+1]), 0.2), mb) {
+						return false
+					}
+				}
+			}
+			return true
+		}
+		if ok(tm, mk.At, mk.Dir) {
+			continue
+		}
+		a, b := zl.Wires[hi][hs], zl.Wires[hi][hs+1]
+		dirs := []string{"up", "down"}
+		if math.Abs(a.X-b.X) < 1e-6 {
+			dirs = []string{"right", "left"}
+		}
+		n := int(math.Round(math.Hypot(b.X-a.X, b.Y-a.Y) / sbGrid))
+		best, bestD := -1.0, math.Inf(1)
+		var bFrom, bAt kicad.Pt
+		var bDir string
+		for k := 1; k < n; k++ {
+			from := sbRoundPt(kicad.Pt{X: a.X + (b.X-a.X)*float64(k)/float64(n), Y: a.Y + (b.Y-a.Y)*float64(k)/float64(n)})
+			for _, dir := range dirs {
+				at := sbRoundPt(kicad.Pt{X: from.X + vec[dir].X*sbGrid, Y: from.Y + vec[dir].Y*sbGrid})
+				dd := math.Hypot(from.X-tm.X, from.Y-tm.Y)
+				if dd < bestD-1e-9 && ok(from, at, dir) {
+					best, bestD, bFrom, bAt, bDir = 1, dd, from, at, dir
+				}
+			}
+		}
+		if best < 0 {
+			continue
+		}
+		zl.Wires[ti] = []kicad.Pt{bFrom, bAt}
+		zl.Markers[mi].At, zl.Markers[mi].Dir = bAt, bDir
+	}
+}
+
 // sbZoneLayout is one zone drawn relative to its core.
 type sbZoneLayout struct {
 	Hash       string              `json:"hash"`
@@ -1363,7 +1468,9 @@ func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, excl
 							clear := true
 							// keep the stub room of every other pin free: the new wire
 							// crosses no pin ray, the new part's pin rays cross no wire
-							var rays [][]kicad.Pt
+							// labelRays: the same rays over the full stub + label
+							// room, for the text of a teed label (below)
+							var rays, labelRays [][]kicad.Pt
 							for k, pa := range pins {
 								if nn, hasNet := d.PinNet[k]; hasNet && k != tk && !direct[k] && pa.dir != "" {
 									// a pin still to get a label keeps its stub + label
@@ -1375,6 +1482,8 @@ func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, excl
 										rl = math.Max(rl, roomOf(nn))
 									}
 									rays = append(rays, []kicad.Pt{pa.at, {X: pa.at.X + vec[pa.dir].X*rl, Y: pa.at.Y + vec[pa.dir].Y*rl}})
+									ll := math.Max(rl, roomOf(nn))
+									labelRays = append(labelRays, []kicad.Pt{pa.at, {X: pa.at.X + vec[pa.dir].X*ll, Y: pa.at.Y + vec[pa.dir].Y*ll}})
 								}
 							}
 							for i := 0; i+1 < len(wire) && clear; i++ {
@@ -1495,7 +1604,11 @@ func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, excl
 										for _, pb := range placed {
 											hit = hit || sbOverlap(mb, sbGrow(pb, -1.5))
 										}
-										for _, w := range append(append([][]kicad.Pt(nil), zl.Wires...), wire) {
+										// the stubs still to be drawn count as wires: the
+										// label teed up from one pin's wire lay across the
+										// stubs of the pins above it, drawn afterwards, and
+										// no place on that wire was free of them
+										for _, w := range append(append(append([][]kicad.Pt(nil), zl.Wires...), wire), labelRays...) {
 											for i := 0; i+1 < len(w) && !hit; i++ {
 												hit = sbOverlap(mb, sbGrow(kicad.Box{MinX: math.Min(w[i].X, w[i+1].X), MinY: math.Min(w[i].Y, w[i+1].Y), MaxX: math.Max(w[i].X, w[i+1].X), MaxY: math.Max(w[i].Y, w[i+1].Y)}, 0.2))
 											}
@@ -2446,6 +2559,7 @@ func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, excl
 	}
 	bad := sbFixStubs(zl, pinNet, bodies, tied)
 	bad = append(bad, sbFixJogs(zl, pinNet, bodies)...)
+	sbFixTees(zl, pinNet, bodies, func(n string) bool { return len(d.NetPages[n]) > 1 })
 	if len(bad) > 0 {
 		var refs, desc []string
 		for _, b := range bad {

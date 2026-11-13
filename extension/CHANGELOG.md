@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+- `kicad sch-build` / `kicad sch-check`: a hierarchical label and a local label on neighbouring pins (2.54 mm apart) are
+  no longer reported as `label-overlap` — the checker's box of a hierarchical label was 0.06 mm taller than the row
+  pitch allows (half height 1.1 mm, now 1.0 mm: 1.27 mm text in a shape of the same height). Labels on one row still
+  overlap.
+- `kicad sch-build`: the label of a cross-page net, drawn on a short tee off its wire, keeps clear of the stubs of the
+  neighbouring pins that are drawn after it. On a logic IC with a pull-up wired to one pin the label lay across the
+  stubs of the pins above (`label-on-wire`), no drawing of the zone was clean and the build failed its quality gate.
+  A teed label that a later wire still crosses is moved to the free side of its wire or along it.
 - **`kicad pcb-sync`: a schematic built with package text passes the schematic-parity gate.** 0.12.9 kept the `Package`
   field out of the board, and KiCad's own parity check then reported "Missing symbol field 'Package' in footprint" for
   every part: `pcb-sync --create` failed its parity gate on every design built with the default options (the workaround
