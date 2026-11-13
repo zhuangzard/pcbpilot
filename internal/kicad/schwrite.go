@@ -23,6 +23,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode"
 )
 
@@ -176,7 +177,7 @@ func OpenSchematicFile(path string) (*SchEditor, error) {
 		if err != nil {
 			continue
 		}
-		r, err := parseSx(string(ob))
+		r, err := parseSheetCached(ob) // read only
 		if err != nil {
 			continue
 		}
@@ -301,6 +302,39 @@ type sheetID struct {
 	fi  os.FileInfo
 }
 
+// sheetParseCache keeps the parsed text of the hierarchy's sheets by content.
+// Opening one sheet reads every other sheet of its project (scanProject), so
+// a command that opens each sheet of an N-sheet project parsed N×N files: a
+// 38-sheet build spent 88 s of its commit and as long again in its review
+// doing that. The trees of a sheetTree are only read, never edited, so one
+// tree per content is shared. The key is the text itself: hashing it with
+// SHA-256 cost more than the parsing it saved.
+var sheetParseCache struct {
+	sync.Mutex
+	m map[string]*sexp
+}
+
+func parseSheetCached(b []byte) (*sexp, error) {
+	sheetParseCache.Lock()
+	r := sheetParseCache.m[string(b)]
+	sheetParseCache.Unlock()
+	if r != nil {
+		return r, nil
+	}
+	src := string(b)
+	r, err := parseSx(src)
+	if err != nil {
+		return nil, err
+	}
+	sheetParseCache.Lock()
+	if sheetParseCache.m == nil || len(sheetParseCache.m) >= 96 {
+		sheetParseCache.m = map[string]*sexp{}
+	}
+	sheetParseCache.m[src] = r
+	sheetParseCache.Unlock()
+	return r, nil
+}
+
 // walkSheetTree walks every sheet reachable from root, carrying each
 // sheet's instance path (/root-uuid/sheet-uuid/…).
 func walkSheetTree(root, self string) *sheetTree {
@@ -322,7 +356,7 @@ func walkSheetTree(root, self string) *sheetTree {
 			t.broken = append(t.broken, f)
 			return
 		}
-		r, err := parseSx(string(b))
+		r, err := parseSheetCached(b)
 		if err != nil {
 			t.broken = append(t.broken, f)
 			return

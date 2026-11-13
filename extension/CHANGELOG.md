@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- `kicad sch-build`: a passing build of a many-sheet project no longer spends minutes after the gates. Opening one
+  sheet parsed every other sheet of the project, twice, so the design review and the commit of a 38-page build took
+  88 s each; they take 19 s each now (sheets are parsed once per content). Every command that opens the sheets of one
+  project in turn gains the same.
 - `kicad sch-build` / `kicad sch-check`: a hierarchical label and a local label on neighbouring pins (2.54 mm apart) are
   no longer reported as `label-overlap` — the checker's box of a hierarchical label was 0.06 mm taller than the row
   pitch allows (half height 1.1 mm, now 1.0 mm: 1.27 mm text in a shape of the same height). Labels on one row still

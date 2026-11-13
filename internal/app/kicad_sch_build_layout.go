@@ -166,6 +166,19 @@ func sbFixTees(zl *sbZoneLayout, pinNet map[kicad.Pt]string, bodies []kicad.Box,
 		if ti < 0 {
 			continue
 		}
+		// only a leaf moves: a wire that ends on the tee or at the label
+		// would be left behind
+		leaf := true
+		for wi, w := range zl.Wires {
+			for _, p := range w {
+				if wi != ti && (p == mk.At || sbOnInterior(p, [2]kicad.Pt{tm, mk.At})) {
+					leaf = false
+				}
+			}
+		}
+		if !leaf {
+			continue
+		}
 		var others [][]kicad.Pt // every wire but the tee and its host
 		for wi, w := range zl.Wires {
 			if wi != ti && wi != hi {
@@ -215,6 +228,9 @@ func sbFixTees(zl *sbZoneLayout, pinNet map[kicad.Pt]string, bodies []kicad.Box,
 		var bDir string
 		for k := 1; k < n; k++ {
 			from := sbRoundPt(kicad.Pt{X: a.X + (b.X-a.X)*float64(k)/float64(n), Y: a.Y + (b.Y-a.Y)*float64(k)/float64(n)})
+			if !sbOnInterior(from, [2]kicad.Pt{a, b}) {
+				continue // an off-grid host: the snapped point left the wire
+			}
 			for _, dir := range dirs {
 				at := sbRoundPt(kicad.Pt{X: from.X + vec[dir].X*sbGrid, Y: from.Y + vec[dir].Y*sbGrid})
 				dd := math.Hypot(from.X-tm.X, from.Y-tm.Y)

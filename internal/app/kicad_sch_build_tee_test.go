@@ -38,6 +38,31 @@ func TestSbFixTeesMovesACrossedLabel(t *testing.T) {
 		t.Errorf("a clear label moved to %v %s", mk.At, mk.Dir)
 	}
 
+	// a wire that ends at the label would be left behind: it stays
+	branch := []kicad.Pt{tee[1], {X: 15.24, Y: -5.08}}
+	zl = &sbZoneLayout{
+		Wires:   [][]kicad.Pt{host, tee, above, branch},
+		Markers: []sbMarker{{Kind: "label", Net: "SIG_ACROSS", At: tee[1], Dir: "up"}},
+	}
+	sbFixTees(zl, pins, nil, all)
+	if mk := zl.Markers[0]; mk.At != tee[1] || zl.Wires[1][1] != tee[1] {
+		t.Errorf("a tee with a branch moved to %v", mk.At)
+	}
+
+	// a pin of another net where the label would go: that side is not taken
+	blocked := map[kicad.Pt]string{{X: 0, Y: 0}: "SIG_ACROSS#U1.1", {X: 17.78, Y: 0}: "SIG_ACROSS#R1.1"}
+	for x := 2.54; x < 17; x += 2.54 {
+		blocked[sbRoundPt(kicad.Pt{X: x, Y: 2.54})] = "OTHER#J1.1"
+	}
+	zl = &sbZoneLayout{
+		Wires:   [][]kicad.Pt{host, tee, above},
+		Markers: []sbMarker{{Kind: "label", Net: "SIG_ACROSS", At: tee[1], Dir: "up"}},
+	}
+	sbFixTees(zl, blocked, nil, all)
+	if mk := zl.Markers[0]; mk.At != tee[1] {
+		t.Errorf("the label moved onto a foreign pin at %v", mk.At)
+	}
+
 	// both sides crossed: it stays (the drawing keeps its finding)
 	below := []kicad.Pt{{X: 0, Y: 7.62}, {X: 17.78, Y: 7.62}}
 	zl = &sbZoneLayout{
