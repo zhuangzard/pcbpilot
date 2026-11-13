@@ -327,11 +327,16 @@ func parseSheetCached(b []byte) (*sexp, error) {
 		return nil, err
 	}
 	sheetParseCache.Lock()
-	if sheetParseCache.m == nil || len(sheetParseCache.m) >= 96 {
+	defer sheetParseCache.Unlock()
+	if had := sheetParseCache.m[src]; had != nil {
+		return had, nil // parsed by another goroutine meanwhile
+	}
+	// emptied when full: a project of more sheets than this parses as it
+	// did without the cache
+	if sheetParseCache.m == nil || len(sheetParseCache.m) >= 256 {
 		sheetParseCache.m = map[string]*sexp{}
 	}
 	sheetParseCache.m[src] = r
-	sheetParseCache.Unlock()
 	return r, nil
 }
 
