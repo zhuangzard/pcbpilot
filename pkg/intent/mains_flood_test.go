@@ -168,6 +168,13 @@ func TestMainsThroughSeriesParts(t *testing.T) {
 	if isLine(it, "SENSE_S") || !isLine(it, "L_CH") {
 		t.Errorf("declared SELV net behind a fuse: %+v", it.Nets["SENSE_S"])
 	}
+	// Nor is a net that only has the line's name, nor what a fuse behind it
+	// reaches.
+	d = offlineDesign(synPart("J3", "TERM-2P", "", "N", "GND_B"), synPart("F3", "FUSE-50mA", "", "N", "SENSE_U"), synPart("R34", "", "10k", "SENSE_U", "ADC_IN"))
+	it = deriveSyn(t, d, &Spec{Domains: []SpecDomain{{Kind: "SELV", Nets: []string{"N"}}}})
+	if isLine(it, "N") || isLine(it, "SENSE_U") || !isLine(it, "AC_N") {
+		t.Errorf("declared SELV net named like the line: N %+v, SENSE_U %+v", it.Nets["N"], it.Nets["SENSE_U"])
+	}
 	// Declared windings: each winding carries its own conductor.
 	d = offlineDesign(synPart("LF2", "CMC-DATA", "", "L_CH", "SENSE_P", "SENSE_N", "SENSE_Q"))
 	it = deriveSyn(t, d, &Spec{Windings: map[string][][2]string{"LF2": {{"1", "4"}, {"2", "3"}}}})

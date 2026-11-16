@@ -218,8 +218,18 @@ func (c *ctx) setup() error {
 			c.mains[n] = true
 		}
 	}
+	// A name alone does not make a net the line when the spec declares it
+	// in a domain that is not: a sensor's "N", a motor phase "L".
+	notLine := map[string]bool{}
+	for _, sd := range c.spec.Domains {
+		if !lineKind(sd.Kind) {
+			for _, n := range sd.Nets {
+				notLine[n] = true
+			}
+		}
+	}
 	for net := range c.netPins {
-		if reMains.MatchString(strings.ToUpper(strings.TrimSpace(net))) {
+		if !notLine[net] && reMains.MatchString(strings.ToUpper(strings.TrimSpace(net))) {
 			c.mains[net] = true
 		}
 	}
