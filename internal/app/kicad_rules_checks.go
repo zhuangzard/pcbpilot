@@ -1123,6 +1123,11 @@ func (r *rulesRun) probeCheck(board, what string) rulesCheck {
 				}
 			}
 		}
+		for _, c := range r.keep.rep.Carried {
+			if c.Type == "clearance" {
+				maxClr = math.Max(maxClr, float64(c.MinNm)/nmPerMil)
+			}
+		}
 	}
 	for _, e := range r.rep.Nets {
 		for _, l := range []string{"outer", "inner"} {
@@ -1446,6 +1451,7 @@ func (r *rulesRun) effectiveRules() {
 	for _, p := range r.rep.Isolation {
 		chk.Items = append(chk.Items, r.isolationRuleProblems(rules, p)...)
 	}
+	chk.Items = append(chk.Items, r.carryProblems(rules)...)
 	bad, unknown := r.clearanceEdgeProblems(rules)
 	chk.Items = append(chk.Items, bad...)
 	cannot := append(floorCannot, unknown...)
@@ -1907,11 +1913,81 @@ func (r *rulesRun) isolationRuleProblems(rules []kicad.DRURule, p rulesIsoPlan) 
 		if druDisjointPair(later.Condition, sa, sb) {
 			continue
 		}
+		// A carry rule (--keep-stricter: a stricter user minimum written
+		// again after the generated rule) is judged by value; that it is
+		// the planned one is carryProblems' business.
+		carry := later.Block == "route" && strings.HasPrefix(later.Name, keepCarryPrefix)
 		for _, c := range later.Constraints {
-			if c.Type == "clearance" || c.Type == "creepage" {
-				bad = append(bad, fmt.Sprintf("pair %s|%s: the later rule %q may set %s for the pair's items and would win over %q", p.A, p.B, later.Name, c.Type, name))
-				break
+			if c.Type != "clearance" && c.Type != "creepage" {
+				continue
 			}
+			need := p.ClearanceMm
+			if c.Type == "creepage" {
+				need = p.CreepageMm
+			}
+			if carry && c.Min != nil && !c.Unparsed && *c.Min >= int64(math.Round(need*1e6)) && (later.Severity == "" || later.Severity == "error") {
+				continue
+			}
+			bad = append(bad, fmt.Sprintf("pair %s|%s: the later rule %q may set %s for the pair's items and would win over %q", p.A, p.B, later.Name, c.Type, name))
+			break
+		}
+	}
+	return bad
+}
+
+// carryProblems: the carry rules in the .kicad_dru are exactly the ones
+// the keep-stricter plan gives — each right after its generated rule (only
+// carries of that rule between them, in the plan's order), on the user
+// condition AND the generated one, with the planned minimum as an error.
+func (r *rulesRun) carryProblems(rules []kicad.DRURule) []string {
+	var plan []keepCarry
+	if r.keep != nil && r.keepActive() {
+		plan = r.keep.rep.Carried
+	}
+	var bad []string
+	planned := map[string]bool{}
+	for _, c := range plan {
+		planned[c.Rule] = true
+	}
+	prev := map[string]int{}
+	for _, c := range plan {
+		at, gen := -1, -1
+		for i, u := range rules {
+			if u.Block != "route" {
+				continue
+			}
+			switch u.Name {
+			case c.Rule:
+				at = i
+			case c.Generated:
+				gen = i
+			}
+		}
+		if at < 0 || gen < 0 || at < gen {
+			bad = append(bad, fmt.Sprintf("keep-stricter: no rule %q after the generated rule %q (it carries the user rule %q, min %s, where both match)", c.Rule, c.Generated, c.UserRule, kicad.MmOfNm(c.UserMinNm)))
+			continue
+		}
+		u := rules[at]
+		ok := u.Condition == keepCarryCondition(c.Condition, rules[gen].Condition) && u.Layer == c.Layer && (u.Severity == "" || u.Severity == "error") && len(u.Constraints) == 1
+		if ok {
+			k := u.Constraints[0]
+			ok = k.Type == c.Type && k.Min != nil && !k.Unparsed && *k.Min == c.MinNm && hasConstraint(rules[gen], c.Type)
+		}
+		for _, between := range rules[gen+1 : at] {
+			ok = ok && between.Block == "route" && strings.HasPrefix(between.Name, keepCarryPrefix) && planned[between.Name]
+		}
+		key := c.Generated + "\x00" + c.Type
+		if last, seen := prev[key]; seen && last > at {
+			ok = false
+		}
+		prev[key] = at
+		if !ok {
+			bad = append(bad, fmt.Sprintf("keep-stricter: the rule %q is not the planned one (%s min %s on the user rule %q's condition and that of %q, right after it)", c.Rule, c.Type, kicad.MmOfNm(c.MinNm), c.UserRule, c.Generated))
+		}
+	}
+	for _, u := range rules {
+		if u.Block == "route" && strings.HasPrefix(u.Name, keepCarryPrefix) && !planned[u.Name] {
+			bad = append(bad, fmt.Sprintf("keep-stricter: the rule %q is not in the plan (the user rules or the derived minimums changed after it was written)", u.Name))
 		}
 	}
 	return bad

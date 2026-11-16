@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+- **`kicad rules --keep-stricter`: a stricter user rule is kept even when the generated rule must stay last.** A
+  generated minimum that has to stay after a weaker user rule (or that another generated rule overlaps) could not also
+  go before a stricter user rule, so the conflict stayed and the apply was refused. The generated rule now stays last
+  and the user's minimum is written again right after it as a rule `pcbpilot carry …` in the generated block, with the
+  condition "the user's rule AND the generated rule" and the larger of the two values: the stricter value applies
+  exactly where both match and nothing else changes. The user's rule text is not touched. The report lists these
+  rules under `keepStricter.carriedAfter`; `--check` verifies each one (place, condition, layer, value) and
+  `kicad route` writes them back. A conflict still stays when a value cannot be compared or the user's condition
+  cannot be written inside another rule.
 - **`intent derive`: `spec.isolation[].insulation` states a pair's insulation grade.** A pair between a hazardous and
   a touchable domain is derived as reinforced; where the other means of protection exists (mains to protective earth),
   the spec can now say `"insulation": "basic"` with a required `why`. The pair's distances follow the declared grade,

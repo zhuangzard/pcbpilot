@@ -258,13 +258,146 @@ func TestKicadRulesKeepStricterUserWeaker(t *testing.T) {
 	}
 }
 
-// One generated rule would have to be after a weaker user rule and before
-// a stricter one: no order does both, the conflict stays and says which
-// rules and why. Nothing is written.
-func TestKicadRulesKeepStricterImpossibleOrder(t *testing.T) {
+// One generated rule has to be after a weaker user rule while another user
+// rule is stricter than it: the generated rule stays last and the stricter
+// user minimum is written again after it, limited to the items both match.
+func TestKicadRulesKeepStricterCarry(t *testing.T) {
 	f := newRulesFixture(t)
 	keepTestPairOnly(t, f)
-	dru := keepTestWriteDRU(t, f, keepTestRule("iso_low", "1mm"), keepTestRule("iso_high", "4mm"))
+	low, high := keepTestRule("iso_low", "1mm"), keepTestRule("iso_high", "4mm")
+	dru := keepTestWriteDRU(t, f, low, high)
+	f.o.apply, f.o.keepStricter = true, true
+	rep, code, stderr := runRules(t, f.o)
+	hi, ok := keepTestConflict(rep, "iso_high")
+	if code != 0 || !rep.Committed || !ok || hi.open() || hi.Resolved != "keep-stricter" {
+		t.Fatalf("exit %d committed %v %+v\n%s", code, rep.Committed, rep.Conflicts, stderr)
+	}
+	if lo, ok := keepTestConflict(rep, "iso_low"); !ok || lo.open() {
+		t.Fatalf("iso_low: %+v", lo)
+	}
+	carry := "pcbpilot carry clearance isolation PPD_domain_HVD|PPD_domain_LV 1"
+	for _, want := range []string{"iso_low", keepTestPairD, "must stay last", carry} {
+		if !strings.Contains(hi.Detail, want) {
+			t.Fatalf("the conflict does not say %q:\n%s", want, hi.Detail)
+		}
+	}
+	ks := rep.KeepStricter
+	if ks == nil || len(ks.Head) != 0 || len(ks.Unresolved) != 0 || len(ks.Carried) != 1 || ks.Carried[0].Rule != carry || ks.Carried[0].UserRule != "iso_high" ||
+		ks.Carried[0].Generated != keepTestPairD || ks.Carried[0].MinNm != 4000000 || ks.Carried[0].Type != "clearance" {
+		b, _ := json.Marshal(ks)
+		t.Fatalf("report: %s", b)
+	}
+	if !strings.Contains(stderr, "written again after it") || !strings.Contains(stderr, "iso_high") {
+		t.Fatalf("stderr:\n%s", stderr)
+	}
+	text := keepTestRead(t, dru)
+	if !strings.Contains(text, low+high) || !strings.HasPrefix(text, "(version 1)\n"+kicad.DRUHeadBegin) {
+		t.Fatalf("user text changed or no head block:\n%s", text)
+	}
+	rules, err := kicad.ParseDRU(text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gen, at := -1, -1
+	for i, u := range rules {
+		switch u.Name {
+		case keepTestPairD:
+			gen = i
+			if u.Block != "route" || !hasConstraint(u, "clearance") {
+				t.Fatalf("the generated clearance left the end: %+v", u)
+			}
+		case carry:
+			at = i
+			want := "(A.NetName == 'HV' && B.NetName == 'VCC') && (" + isoCondition("PPD_domain_HVD", "PPD_domain_LV") + ")"
+			if u.Block != "route" || u.Condition != want || len(u.Constraints) != 1 || u.Constraints[0].Type != "clearance" || *u.Constraints[0].Min != 4000000 {
+				t.Fatalf("carry rule: %+v", u)
+			}
+		}
+		if u.Block == "head" {
+			t.Fatalf("a head rule although nothing moved: %+v", u)
+		}
+	}
+	if gen < 0 || at != gen+1 {
+		t.Fatalf("carry at %d, generated at %d:\n%s", at, gen, text)
+	}
+	// Idempotent.
+	sum := rulesFileSHA(t, dru)
+	if rep, code, stderr = runRules(t, f.o); code != 0 || len(rep.Files) != 0 || rulesFileSHA(t, dru) != sum {
+		t.Fatalf("re-apply: exit %d files %v\n%s\n%s", code, rep.Files, stderr, keepTestRead(t, dru))
+	}
+	// --check of the board as it is passes; with the carry weakened,
+	// removed or left behind by a changed plan it fails.
+	chk := f.o
+	chk.apply, chk.check, chk.keepStricter = false, true, false
+	rep, _, stderr = runRules(t, chk)
+	if c := checkOf(rep, "effective-rules"); len(c.Items) != 0 {
+		t.Fatalf("--check effective-rules: %+v\n%s", c, stderr)
+	}
+	for _, c := range rep.Conflicts {
+		if c.open() {
+			t.Fatalf("--check: open conflict %+v", c)
+		}
+	}
+	cut := text[strings.Index(text, "(rule \""+carry):]
+	cut = cut[:strings.Index(cut, "(min 4mm)))")+len("(min 4mm)))")]
+	for name, tampered := range map[string]string{
+		"weakened": strings.Replace(text, cut, strings.Replace(cut, "(min 4mm)", "(min 3mm)", 1), 1),
+		"removed":  strings.Replace(text, "\n"+cut, "", 1),
+		"stale":    strings.Replace(text, cut, cut+"\n"+strings.Replace(cut, carry, carry[:len(carry)-1]+"2", 1), 1),
+	} {
+		if tampered == text {
+			t.Fatalf("%s: fixture did not change the text", name)
+		}
+		if err := os.WriteFile(dru, []byte(tampered), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		rep, _, _ = runRules(t, chk)
+		if c := checkOf(rep, "effective-rules"); len(c.Items) == 0 || !strings.Contains(strings.Join(c.Items, "\n"), "keep-stricter") {
+			t.Fatalf("%s carry passed --check: %+v", name, c)
+		}
+	}
+	if err := os.WriteFile(dru, []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// kicad route: bridge netclasses writes the route block again, without
+	// the carry; the re-apply puts it back, byte for byte.
+	in, err := loadDesignIntent(f.o.intent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rerr bytes.Buffer
+	r := &kicadRun{o: kicadRouteOpts{pcb: f.o.pcb, intent: f.o.intent, sim: f.o.sim}, in: in, inRaw: []byte(`{}`), stderr: &rerr, summary: map[string]any{}}
+	full := &kicad.NetclassFull{}
+	full.Domains = map[string][]string{"domain_HVD": {"HV"}, "domain_LV": {"VCC", "GND"}}
+	classed, cdru := f.dir+"/classed.kicad_pcb", f.dir+"/classed.kicad_dru"
+	if err := os.WriteFile(cdru, []byte(strings.Replace(text, "\n"+cut, "", 1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.reapplyKeepStricter(classed, full); err != nil || keepTestRead(t, cdru) != text {
+		t.Fatalf("route re-apply (%v):\n%s", err, keepTestRead(t, cdru))
+	}
+	// The owner drops the stricter rule: the head block is stale.
+	if err := os.WriteFile(cdru, []byte(strings.Replace(text, high, "", 1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.reapplyKeepStricter(classed, full); err == nil || !strings.Contains(err.Error(), "RULES_STALE") {
+		t.Fatalf("stale: %v", err)
+	}
+	// A run without the flag: no head block, no carry rule.
+	f.o.keepStricter, f.o.replace = false, []string{"iso_high"}
+	rep, code, stderr = runRules(t, f.o)
+	if now := keepTestRead(t, dru); code != 6 && (strings.Contains(now, kicad.DRUHeadBegin) || strings.Contains(now, keepCarryPrefix)) {
+		t.Fatalf("without the flag: exit %d\n%s\n%s", code, stderr, now)
+	}
+}
+
+// A user rule whose condition cannot be written again inside a generated
+// rule is not carried: the conflict stays and says why.
+func TestKicadRulesKeepStricterCarryRefused(t *testing.T) {
+	f := newRulesFixture(t)
+	keepTestPairOnly(t, f)
+	odd := "(rule \"iso_high\"\n  (condition \"A.NetName == \\\"HV\\\" && B.NetName == 'VCC'\")\n  (constraint clearance (min 4mm)))\n"
+	dru := keepTestWriteDRU(t, f, keepTestRule("iso_low", "1mm"), odd)
 	before := rulesFileSHA(t, dru)
 	f.o.apply, f.o.keepStricter = true, true
 	rep, code, stderr := runRules(t, f.o)
@@ -272,18 +405,13 @@ func TestKicadRulesKeepStricterImpossibleOrder(t *testing.T) {
 	if code != 6 || rep.Committed || !ok || !hi.open() || rulesFileSHA(t, dru) != before {
 		t.Fatalf("exit %d committed %v %+v\n%s", code, rep.Committed, rep.Conflicts, stderr)
 	}
-	for _, want := range []string{"NOT resolved by --keep-stricter", "iso_low", keepTestPairD, "weaker", "stricter", "--replace"} {
+	for _, want := range []string{"NOT resolved by --keep-stricter", "iso_low", keepTestPairD, "weaker", "stricter", "--replace", "cannot be carried"} {
 		if !strings.Contains(hi.Detail, want) {
 			t.Fatalf("the conflict does not say %q:\n%s", want, hi.Detail)
 		}
 	}
-	// The weaker rule on its own is no problem: the generated rule stays
-	// after it.
-	if lo, ok := keepTestConflict(rep, "iso_low"); !ok || lo.open() {
-		t.Fatalf("iso_low: %+v", lo)
-	}
 	ks := rep.KeepStricter
-	if ks == nil || len(ks.Head) != 0 || len(ks.Unresolved) != 1 || ks.Unresolved[0].UserRule != "iso_high" || ks.Unresolved[0].Generated != keepTestPairD || !strings.Contains(ks.Unresolved[0].Why, "iso_low") {
+	if ks == nil || len(ks.Head) != 0 || len(ks.Carried) != 0 || len(ks.Unresolved) != 1 || ks.Unresolved[0].UserRule != "iso_high" || ks.Unresolved[0].Generated != keepTestPairD {
 		b, _ := json.Marshal(ks)
 		t.Fatalf("report: %s", b)
 	}
@@ -343,9 +471,11 @@ func TestKeepStricterAnalyse(t *testing.T) {
 	// Stricter than the 2 mm pair only, disjoint from LV_C's other net —
 	// but N2 is in both LV domains: the 1 mm pair rule may match the same
 	// items and has no stricter user rule, so it stays last and the 2 mm
-	// one cannot go before the user's rule.
+	// one cannot go before the user's rule: it stays last too, and the
+	// user's 3 mm is written again after it.
 	p := keepStricterAnalyse([]kicad.DRURule{user(0, "iso_gap", "A.hasNetclass('PPD_HV_A') && B.hasNetclass('PPD_LV_B')", "clearance", 3000000)}, gens, env)
-	if len(p.rep.Head) != 0 || len(p.rep.Unresolved) != 1 || !strings.Contains(p.rep.Unresolved[0].Why, "PPD_HV_A|PPD_LV_C") || p.verdicts[keepKey{0, 0}].ok {
+	if len(p.rep.Head) != 0 || len(p.rep.Unresolved) != 0 || len(p.rep.Carried) != 1 || p.rep.Carried[0].Generated != gens[0].rule || p.rep.Carried[0].MinNm != 3000000 ||
+		!p.verdicts[keepKey{0, 0}].ok || !strings.Contains(strings.Join(p.verdicts[keepKey{0, 0}].notes, " "), "PPD_HV_A|PPD_LV_C") {
 		t.Fatalf("overlapping generated rules: %+v", p.rep)
 	}
 	// An edge rule the user's stricter edge rule covers: moved.
@@ -366,12 +496,36 @@ func TestKeepStricterAnalyse(t *testing.T) {
 	}
 	// A warning-only user rule no stricter than the generated edge minimum
 	// keeps it last, whatever stricter rule would have moved it: behind the
-	// warning the minimum would no longer be an error.
+	// warning the minimum would no longer be an error. The stricter rule
+	// is carried after it; the warning rule follows it in the file, so
+	// where all three match the user's own order gives the later rule —
+	// carried as the generated minimum, an error.
 	warn := user(1, "edge_note", "A.hasNetclass('PPD_HV_A')", "edge_clearance", 300000)
 	warn.Severity = "warning"
 	p = keepStricterAnalyse([]kicad.DRURule{user(0, "edge_gap", "A.hasNetclass('PPD_HV_A')", "edge_clearance", 800000), warn}, gens, env)
-	if len(p.rep.Head) != 0 || len(p.rep.Unresolved) != 1 || !strings.Contains(p.rep.Unresolved[0].Why, "edge_note") || p.verdicts[keepKey{0, 0}].ok {
+	if len(p.rep.Head) != 0 || len(p.rep.Unresolved) != 0 || len(p.rep.Carried) != 2 || p.rep.Carried[0].UserRule != "edge_gap" || p.rep.Carried[0].MinNm != 800000 ||
+		p.rep.Carried[1].UserRule != "edge_note" || p.rep.Carried[1].MinNm != 500000 || !p.verdicts[keepKey{0, 0}].ok {
 		t.Fatalf("weaker warning rule: %+v", p.rep)
+	}
+	// The other way round (the warning first): only the stricter rule is
+	// carried.
+	warn.Index = 0
+	p = keepStricterAnalyse([]kicad.DRURule{warn, user(1, "edge_gap", "A.hasNetclass('PPD_HV_A')", "edge_clearance", 800000)}, gens, env)
+	if len(p.rep.Unresolved) != 0 || len(p.rep.Carried) != 1 || p.rep.Carried[0].UserRule != "edge_gap" {
+		t.Fatalf("warning rule first: %+v", p.rep)
+	}
+	// A stricter warning-only rule cannot be compared: nothing is carried.
+	warn.Constraints[0].Min = i64(900000)
+	p = keepStricterAnalyse([]kicad.DRURule{warn, user(1, "edge_gap", "A.hasNetclass('PPD_HV_A')", "edge_clearance", 800000)}, gens, env)
+	if len(p.rep.Carried) != 0 || len(p.rep.Unresolved) != 2 {
+		t.Fatalf("stricter warning rule: %+v", p.rep)
+	}
+	// A layer-limited user rule is carried with its layer.
+	lay := user(1, "iso_top", "A.hasNetclass('PPD_HV_A') && B.hasNetclass('PPD_LV_B')", "clearance", 5000000)
+	lay.Layer = "F.Cu"
+	p = keepStricterAnalyse([]kicad.DRURule{user(0, "iso_low", "A.hasNetclass('PPD_HV_A') && B.hasNetclass('PPD_LV_B')", "clearance", 1500000), lay}, gens, env)
+	if len(p.rep.Carried) != 1 || p.rep.Carried[0].Layer != "F.Cu" || !strings.Contains(keepCarryText(p.rep.Carried[0], "G"), "(layer \"F.Cu\")") {
+		t.Fatalf("layer: %+v", p.rep)
 	}
 	// Equal: nothing to order.
 	p = keepStricterAnalyse([]kicad.DRURule{user(0, "edge_gap", "A.hasNetclass('PPD_HV_A')", "edge_clearance", 500000)}, gens, env)
@@ -388,7 +542,7 @@ func TestKeepHeadBlockIdempotent(t *testing.T) {
 	gen := "pcbpilot isolation PPD_HV_A|PPD_LV_B"
 	text := "(version 1)\n" + user + kicad.DRURouteBegin + "\n(rule \"" + gen + "\"\n  (condition \"" + isoCondition("PPD_HV_A", "PPD_LV_B") + "\")\n  (constraint clearance (min 2mm)))\n" + kicad.DRURouteEnd + "\n"
 	moves := []keepMove{{HeadRule: keepHeadName(gen, "clearance"), Generated: gen, Type: "clearance", MinNm: 2000000, YieldsTo: []keepRef{{Rule: "iso_gap", MinNm: 4000000}}}}
-	once, err := keepHeadBlock(text, moves)
+	once, err := keepHeadBlock(text, moves, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -404,15 +558,15 @@ func TestKeepHeadBlockIdempotent(t *testing.T) {
 	if bridged == once {
 		t.Fatalf("fixture: no emptied route block:\n%s", once)
 	}
-	twice, err := keepHeadBlock(bridged, moves)
+	twice, err := keepHeadBlock(bridged, moves, nil)
 	if err != nil || twice != once {
 		t.Fatalf("not idempotent (%v):\n%s\n---\n%s", err, once, twice)
 	}
-	none, err := keepHeadBlock(bridged, nil)
+	none, err := keepHeadBlock(bridged, nil, nil)
 	if err != nil || none != text {
 		t.Fatalf("no moves (%v):\n%s", err, none)
 	}
-	if _, err := keepHeadBlock(text, []keepMove{{HeadRule: "x", Generated: "pcbpilot isolation PPD_X|PPD_Y", Type: "clearance"}}); err == nil {
+	if _, err := keepHeadBlock(text, []keepMove{{HeadRule: "x", Generated: "pcbpilot isolation PPD_X|PPD_Y", Type: "clearance"}}, nil); err == nil {
 		t.Fatal("a move of a rule the route block does not have is not an error")
 	}
 }

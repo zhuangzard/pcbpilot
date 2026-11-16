@@ -186,5 +186,5 @@ post-layout 仿真 → 签核 → 保存（复制回工程）。板框、层叠�
 | 布线后 `drill_out_of_range` / `via_diameter`（过孔小于 Board Setup 的最小孔/最小过孔） | 已有 `.kicad_pro` 时过孔尺寸没跟板约束对齐（KiCad 演示板实测） | 对照板约束与快照 `rules.viaDrillMil` / `viaDiameterMil`，显式给 `--via-dia-mil` / `--via-drill-mil` 重跑；不降低板约束 |
 | `netclasses.kept` 里很多 “width kept at …” | 用户类（含 Default）比意图更宽，保留用户值 | 预期；报告写明这些网的线宽来自用户类而非意图 |
 | `kicad route` 报 `RULES_STALE` | 板上的 `kicad rules` 规则与 route 的意图/sim/requirements 推导不一致 | 用同样的输入重跑 `kicad rules --apply`，再布线；不要删 `.kicad_dru` 块绕过 |
-| `kicad rules --apply` 退出 6、`E_USER_RULE_CONFLICT` | 用户类/规则会被覆盖或削弱 | 把 `conflicts[]` 原样给用户；用户同意后按名 `--replace <名>`（删用户规则），或改意图；想保留用户的 clearance / creepage / edge_clearance 规则时用 `--keep-stricter`（不删不改用户规则，按顺序让更严的值生效；排不出顺序的冲突仍会拒绝并说明原因） |
+| `kicad rules --apply` 退出 6、`E_USER_RULE_CONFLICT` | 用户类/规则会被覆盖或削弱 | 把 `conflicts[]` 原样给用户；用户同意后按名 `--replace <名>`（删用户规则），或改意图；想保留用户的 clearance / creepage / edge_clearance 规则时用 `--keep-stricter`（不删不改用户规则，按顺序让更严的值生效；生成规则必须留在最后时，在它后面补一条 `pcbpilot carry …` 承接规则让用户更严值继续生效；值无法比较的冲突仍会拒绝并说明原因） |
 | `kicad rules` 退出 5、`plan-coverage` cannot-check | 电源网缺电流证据 | 给 `--sim`（或在意图 / requirements JSON 声明 `peakA` / `rmsA`）后重跑；不猜 |

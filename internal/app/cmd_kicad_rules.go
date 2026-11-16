@@ -174,16 +174,24 @@ last matching rule of a constraint type):
     it matches;
   - user rule weaker than (or equal to) the generated minimum: the generated
     rule stays last and wins where both match (nothing is lowered);
-  - the conflict stays, and blocks the apply, when no order works: the
-    generated rule would have to sit after one user rule and before another,
-    a value cannot be compared (an expression, an unknown unit, no minimum,
-    a severity other than error), the user clearance is below a planned
+  - the generated rule has to stay last (a weaker user rule, or another
+    generated rule, overlaps it) while a user rule is stricter: it stays
+    last and the user's minimum is written again right after it, as a rule
+    "pcbpilot carry ..." in the generated block whose condition is the
+    user's AND the generated rule's — the stricter value applies exactly
+    where both match, the user's rule text is not touched;
+  - the conflict stays, and blocks the apply, when neither works: a value
+    cannot be compared (an expression, an unknown unit, no minimum, a
+    severity other than error), a user condition that cannot be written
+    inside another rule (a double quote or a backslash in it) would have to
+    be carried, the user clearance is below a planned
     netclass clearance (a custom rule replaces the netclass value, whatever
     the order), or it is a track_width rule (not reordered). The message
     names the user rule, the generated rule and the reason.
 Two rules count as overlapping unless their conditions provably never match
 the same items (literal net / netclass names only). The report lists every
-decision under "keepStricter" (headBlock, generatedStaysLast, unresolved) and
+decision under "keepStricter" (headBlock, carriedAfter, generatedStaysLast,
+unresolved) and
 on stderr. A later --apply without --keep-stricter removes the head block and
 reports the conflicts again (it refuses until they are resolved); --check
 judges a board that carries a head block as it is; kicad route keeps the head
@@ -917,10 +925,11 @@ func (r *rulesRun) writeStamp() {
 		// The head block is this run's or none: without --keep-stricter an
 		// earlier one is removed (its conflicts are reported again).
 		var moves []keepMove
+		var carries []keepCarry
 		if r.keep != nil && r.keepActive() {
-			moves = r.keep.rep.Head
+			moves, carries = r.keep.rep.Head, r.keep.rep.Carried
 		}
-		text, err = keepHeadBlock(text, moves)
+		text, err = keepHeadBlock(text, moves, carries)
 	}
 	if err == nil {
 		err = os.WriteFile(dru, []byte(text), 0o644)
