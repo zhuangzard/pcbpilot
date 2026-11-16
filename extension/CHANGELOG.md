@@ -2,6 +2,36 @@
 
 ## [Unreleased]
 
+- **`kicad place`: a domain may be given several zone rectangles.** `--mech` zones that name the same domain more than
+  once used to keep only the last rectangle, so an L-shaped or split domain lost most of its room. Every rectangle now
+  counts: the domain's parts are shared among them by the room each has, and a part is legal inside any of them. The
+  report's `zoneFill` lists each rectangle, and a warning names a zone no part belongs to.
+- **`kicad place --sides`: put parts on the bottom (or the top) before placing.** The placer never changed a part's
+  side, so a board that only fits with parts on both sides could not be placed. `--sides sides.json`
+  (`{"top": [designators], "bottom": [designators]}`) flips each named part that is on the other side first, on a staged
+  copy, and places the result; the input board is not changed. The run is refused, before anything is written, when a
+  named part is unknown, locked, fixed by `--mech`, or named for both sides.
+- **`kicad place`: a rule area on some layers no longer blocks the other side.** A KiCad rule area on the top and inner
+  layers was read as a keep-out on every layer, so nothing could be placed under it on the bottom. Its layer list is
+  now kept: it blocks only the sides it is on.
+- **`kicad place`: `zoneFill` is counted per board side.** The fill of a zone compared all its parts with one side's
+  area, so a zone that is full on top and empty below read the same as one evenly filled. The report now gives the
+  fill of the top and of the bottom (through-hole parts count on both).
+- **`kicad place`: boards of many hundreds of parts are legalised in minutes, not hours.** With 800 or more movable
+  parts the legaliser now finds free room for a part through an occupancy grid of each board side instead of a spiral
+  scan of up to 2.5 million poses per part, and the isolation cost looks up each pad's domain once instead of once per
+  pad pair. Smaller boards are placed exactly as before.
+- **`intent derive`: the mains domain no longer spreads over a large mixed board.** The AC line used to be followed
+  through every resistor, so a sense divider, a pull-up or a bleeder could carry it to nearly every net, and one such
+  net made a whole low-voltage domain "mains". The line is now followed only through real series parts (fuse,
+  thermistor, choke, varistor, a resistor known to be 10 Ω or less, relay contacts), never into a ground, a supply rail
+  or a net the spec declares in a non-mains domain, and a domain is mains only when a conducting part connects it to the
+  line. Two grounds are no longer joined by a Y capacitor (`CX…`/`CY…` are now capacitors), a resistor known to be
+  100 kΩ or more, or an unrecognised two-pin part; a 0 Ω link, ferrite, net-tie or a resistor without a readable value
+  still joins them. `TX…` is a transformer. Domains declared in the spec win: grounds declared in different domains are
+  never joined, and a ground declared SELV, isolated or patient is never tied to the line. A new `domain-flood` warning
+  names the parts responsible when one mains or hazardous domain still holds more than 60 % of the nets of a board that
+  has isolation parts.
 - **`kicad board outline`: a footprint with its own slot or cut-out no longer blocks the board outline.** Any footprint
   that draws on Edge.Cuts (a connector with a slot, for example) made the command refuse every new outline with
   `E_BOARD_OUTLINE_EXISTS`, with or without `--replace`. Closed Edge.Cuts contours inside a footprint that lie wholly
@@ -9,6 +39,17 @@
   warning names the footprints); `--replace` is needed only when the board has its own outline drawings. The command
   still refuses, naming each footprint and the reason, when a footprint's Edge.Cuts is open, crosses or touches the new
   outline, or lies outside it, and when a new cutout lands on a footprint's cut-out. Footprint graphics are never changed.
+- **`kicad rules --keep-stricter`: keep your own clearance rules instead of replacing them.** When a rule you wrote in
+  the `.kicad_dru` overlaps a clearance, creepage or edge-clearance rule pcbpilot generates, `kicad rules` used to offer
+  only `--replace`, which deletes your rule. With the new opt-in `--keep-stricter` your rule text is never changed or
+  removed: where your rule is at least as strict, pcbpilot writes its own minimum in a small block *before* your rules
+  (`# pcbpilot-rules-head:begin … end`), so KiCad applies your stricter value where both match and pcbpilot's minimum
+  everywhere else; where your rule is weaker, pcbpilot's rule stays last as before. If no order can satisfy both (for
+  example one generated rule would have to come after one of your rules and before another), or a value cannot be
+  compared, the conflict stays, nothing is written, and the message names your rule, the generated rule and the reason.
+  The plan and the report list every rule that was moved and which of your rules wins over it. Without the flag nothing
+  changes, except that the conflict message now says whether your rule is stricter or weaker and mentions both options.
+  Width (`track_width`) conflicts are not covered by this mode.
 - **`kicad drc --timeout <duration>`** (for example `--timeout 90m`) sets the time limit of the kicad-cli DRC run;
   `kicad fab --preflight` takes `--drc-timeout`. The flag wins over `PCBPILOT_KICAD_DRC_TIMEOUT`, which wins over the
   computed limit; a zero or negative value is refused. The computed limit now also grows with the project's custom
