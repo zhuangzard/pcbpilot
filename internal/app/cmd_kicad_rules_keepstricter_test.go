@@ -344,6 +344,7 @@ func TestKicadRulesKeepStricterCarry(t *testing.T) {
 		"weakened": strings.Replace(text, cut, strings.Replace(cut, "(min 4mm)", "(min 3mm)", 1), 1),
 		"removed":  strings.Replace(text, "\n"+cut, "", 1),
 		"stale":    strings.Replace(text, cut, cut+"\n"+strings.Replace(cut, carry, carry[:len(carry)-1]+"2", 1), 1),
+		"twice":    strings.Replace(text, cut, strings.NewReplacer("(min 4mm)", "(min 2mm)", "A.NetName == 'HV' && B.NetName == 'VCC'", "A.NetName == 'HV'").Replace(cut)+"\n"+cut, 1),
 	} {
 		if tampered == text {
 			t.Fatalf("%s: fixture did not change the text", name)
@@ -477,6 +478,14 @@ func TestKeepStricterAnalyse(t *testing.T) {
 	if len(p.rep.Head) != 0 || len(p.rep.Unresolved) != 0 || len(p.rep.Carried) != 1 || p.rep.Carried[0].Generated != gens[0].rule || p.rep.Carried[0].MinNm != 3000000 ||
 		!p.verdicts[keepKey{0, 0}].ok || !strings.Contains(strings.Join(p.verdicts[keepKey{0, 0}].notes, " "), "PPD_HV_A|PPD_LV_C") {
 		t.Fatalf("overlapping generated rules: %+v", p.rep)
+	}
+	// The 1 mm pair rule stays last behind a weaker user rule; a 1.5 mm
+	// user rule after it would be carried — but after every generated
+	// rule, where it would lower the overlapping 2 mm pair: refused.
+	lvc := "A.hasNetclass('PPD_HV_A') && B.hasNetclass('PPD_LV_C')"
+	p = keepStricterAnalyse([]kicad.DRURule{user(0, "c_low", lvc, "clearance", 500000), user(1, "c_high", lvc, "clearance", 1500000)}, gens, env)
+	if len(p.rep.Carried) != 0 || len(p.rep.Unresolved) == 0 || !strings.Contains(p.rep.Unresolved[0].Why, "would lower it") || !strings.Contains(p.rep.Unresolved[0].Why, "PPD_HV_A|PPD_LV_B") {
+		t.Fatalf("carry below an overlapping generated rule: %+v", p.rep)
 	}
 	// An edge rule the user's stricter edge rule covers: moved.
 	p = keepStricterAnalyse([]kicad.DRURule{user(0, "edge_gap", "A.hasNetclass('PPD_HV_A')", "edge_clearance", 800000)}, gens, env)

@@ -1951,8 +1951,11 @@ func (r *rulesRun) carryProblems(rules []kicad.DRURule) []string {
 	}
 	prev := map[string]int{}
 	for _, c := range plan {
-		at, gen := -1, -1
+		at, gen, copies := -1, -1, 0
 		for i, u := range rules {
+			if u.Name == c.Rule {
+				copies++ // anywhere in the file: the name is pcbpilot's
+			}
 			if u.Block != "route" {
 				continue
 			}
@@ -1962,6 +1965,10 @@ func (r *rulesRun) carryProblems(rules []kicad.DRURule) []string {
 			case c.Generated:
 				gen = i
 			}
+		}
+		if copies > 1 {
+			bad = append(bad, fmt.Sprintf("keep-stricter: %d rules named %q (one is planned: it carries the user rule %q after %q)", copies, c.Rule, c.UserRule, c.Generated))
+			continue
 		}
 		if at < 0 || gen < 0 || at < gen {
 			bad = append(bad, fmt.Sprintf("keep-stricter: no rule %q after the generated rule %q (it carries the user rule %q, min %s, where both match)", c.Rule, c.Generated, c.UserRule, kicad.MmOfNm(c.UserMinNm)))
@@ -1986,7 +1993,7 @@ func (r *rulesRun) carryProblems(rules []kicad.DRURule) []string {
 		}
 	}
 	for _, u := range rules {
-		if u.Block == "route" && strings.HasPrefix(u.Name, keepCarryPrefix) && !planned[u.Name] {
+		if strings.HasPrefix(u.Name, keepCarryPrefix) && (!planned[u.Name] || u.Block != "route") {
 			bad = append(bad, fmt.Sprintf("keep-stricter: the rule %q is not in the plan (the user rules or the derived minimums changed after it was written)", u.Name))
 		}
 	}

@@ -9,15 +9,17 @@
   condition "the user's rule AND the generated rule" and the larger of the two values: the stricter value applies
   exactly where both match and nothing else changes. The user's rule text is not touched. The report lists these
   rules under `keepStricter.carriedAfter`; `--check` verifies each one (place, condition, layer, value) and
-  `kicad route` writes them back. A conflict still stays when a value cannot be compared or the user's condition
-  cannot be written inside another rule.
+  `kicad route` writes them back. A conflict still stays when a value cannot be compared, the user's condition
+  cannot be written inside another rule, or the carried value would be below another generated minimum that may
+  match the same items.
 - **`intent derive`: `spec.isolation[].insulation` states a pair's insulation grade.** A pair between a hazardous and
   a touchable domain is derived as reinforced; where the other means of protection exists (mains to protective earth),
   the spec can now say `"insulation": "basic"` with a required `why`. The pair's distances follow the declared grade,
   the pair's `why` names the declaration, and a grade below the derived one is reported as the warning
   `declared-insulation-lowered`. The pair's declaration is more specific than the product-level
   `spec.standard.mopCount`: the pair counts one means of protection for basic or supplementary and two for double or
-  reinforced, and both the `why` and the warning state the changed count.
+  reinforced — also when the declared grade is the derived one — and both the `why` and the warning state the
+  changed count.
 - **`intent derive`: a declared net between two isolation parts is in its declared domain.** A net that only
   isolation parts sit on (an isolator's output into an isolated converter) had no part to carry it into a domain, so a
   net declared in a mains domain ended in none and got no insulation pair. It is now in the domain it was declared in.

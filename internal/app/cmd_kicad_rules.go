@@ -184,7 +184,8 @@ last matching rule of a constraint type):
     cannot be compared (an expression, an unknown unit, no minimum, a
     severity other than error), a user condition that cannot be written
     inside another rule (a double quote or a backslash in it) would have to
-    be carried, the user clearance is below a planned
+    be carried, a carried value would be below another generated minimum
+    that may match the same items, the user clearance is below a planned
     netclass clearance (a custom rule replaces the netclass value, whatever
     the order), or it is a track_width rule (not reordered). The message
     names the user rule, the generated rule and the reason.

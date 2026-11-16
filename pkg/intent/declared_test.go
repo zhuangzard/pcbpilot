@@ -2,6 +2,7 @@ package intent
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -212,8 +213,41 @@ func TestDeclaredPairInsulation(t *testing.T) {
 		two(s)
 		s.Isolation = []SpecIsolation{{A: mp.A, B: mp.B, Insulation: mp.Insulation, Why: "as derived"}}
 	})
-	if p = pairOf(it, mp.A, mp.B); p.MOPCount != 2 || p.ClearanceMm != mp.ClearanceMm {
+	// The same grade again: the pair counts what its grade says, whatever
+	// the product-level count is — and says so when that changes it.
+	wantCount := 1
+	if insulRank[mp.Insulation] >= 2 {
+		wantCount = 2
+	}
+	if p = pairOf(it, mp.A, mp.B); p.MOPCount != wantCount || wantCount == 2 && p.ClearanceMm != mp.ClearanceMm {
 		t.Fatalf("same grade under 2 x MOPP: %+v", p)
+	}
+	one := func(s *Spec) { s.Standard.Name, s.Standard.MOP, s.Standard.MOPCount = "IEC60601-1", "MOPP", 1 }
+	obase := mainsIntent(t, one)
+	for _, q := range obase.Pairs {
+		if q.MOPCount == 0 {
+			continue
+		}
+		want := 1
+		if insulRank[q.Insulation] >= 2 {
+			want = 2
+		}
+		it = mainsIntent(t, func(s *Spec) {
+			one(s)
+			s.Isolation = []SpecIsolation{{A: q.A, B: q.B, Insulation: q.Insulation, Why: "as derived"}}
+		})
+		p = pairOf(it, q.A, q.B)
+		if p.MOPCount != want || p.Insulation != q.Insulation {
+			t.Fatalf("same grade %s under 1 x MOPP: count %d, want %d", q.Insulation, p.MOPCount, want)
+		}
+		if changed := want != q.MOPCount; changed != strings.Contains(strings.Join(p.Why, "; "), fmt.Sprintf("%d × MOPP for this pair instead of %d", want, q.MOPCount)) {
+			t.Fatalf("same grade %s under 1 x MOPP: why %v", q.Insulation, p.Why)
+		}
+		for _, f := range it.Findings {
+			if f.Kind == "declared-insulation-lowered" && want >= q.MOPCount {
+				t.Fatalf("nothing was lowered: %+v", f)
+			}
+		}
 	}
 	if _, err := ParseSpec([]byte(`{"isolation":[{"a":"X","b":"Y","insulation":"basic","why":"PE"}]}`)); err != nil {
 		t.Fatal(err)

@@ -390,7 +390,8 @@ edge_clearance（`pcbpilot edge …`）与用户同类型规则的 `dru-weakened
   移动任何规则），用注释行记录每条承接规则。
 - **仍是冲突并拒绝写入**（文本写明哪条用户规则、哪条生成规则、为什么）：用户值无法比较（表达式、未知单位、没有
   `min`）；用户规则 `severity` 不是 error 且更严；需要承接的用户规则条件里有双引号或反斜杠（无法写进另一条规则的
-  条件）；用户 clearance 低于它可能覆盖的计划类间距（自定义规则在匹配处替换网络类间距，换顺序救不了）。
+  条件）；承接值低于另一条可能匹配同样物体的生成规则的最小值（承接规则排在所有生成规则之后，会把它压低）；
+  用户 clearance 低于它可能覆盖的计划类间距（自定义规则在匹配处替换网络类间距，换顺序救不了）。
 
 报告：`conflicts[]` 每条带 `userVsGenerated`（stricter / weaker / equal / mixed / unknown），已按顺序解决的带
 `resolved: "keep-stricter"`；顶层 `keepStricter` = `headBlock[]`（移到前面的生成约束 + `yieldsTo` 让位给哪些用户规则）、

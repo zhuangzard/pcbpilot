@@ -407,6 +407,23 @@ func keepStricterAnalyse(users []kicad.DRURule, gens []keepGen, env keepEnv) *ke
 		if first < 0 {
 			continue
 		}
+		// A carry rule is after every generated rule: where another
+		// generated rule with a larger minimum may match too, the carry
+		// would lower that one.
+		for _, l := range links[gi][first:] {
+			for hi, h := range gens {
+				if hi != gi && h.typ == g.typ && h.min > max(l.min, g.min) && env.genOverlap(g, h) {
+					first, noCarry[gi] = -1, fmt.Sprintf("the user rule %q cannot be carried after the generated rule: the generated rule %q (min %s) may match the same items and the carried minimum (%s) would lower it", l.u.Name, h.rule, mm(h.min), mm(max(l.min, g.min)))
+					break
+				}
+			}
+			if first < 0 {
+				break
+			}
+		}
+		if first < 0 {
+			continue
+		}
 		carried[gi] = map[int]string{}
 		for i, l := range links[gi][first:] {
 			c := keepCarry{Rule: keepCarryName(g.rule, g.typ, i+1), Generated: g.rule, Type: g.typ, MinNm: max(l.min, g.min),
