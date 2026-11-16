@@ -603,8 +603,8 @@ func (c *Circuit) buildDomains(b *Board, an *Analysis) {
 		return false
 	}
 	passive := func(ref string) bool {
-		if safety(ref) {
-			return false
+		if safety(ref) || len(partNets[ref]) != 2 {
+			return false // a network or an array is no one part's word
 		}
 		switch c.Kinds[ref] {
 		case KindCapacitor:
