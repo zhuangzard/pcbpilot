@@ -173,7 +173,11 @@ func (c *ctx) buildVerification() {
 		if d.CreatedAt != "" {
 			det += "；" + d.CreatedAt
 		}
-		add("原生 DRC（EasyEDA）", "drc", st, det)
+		tool := "EasyEDA"
+		if d.Tool != "" {
+			tool = d.Tool
+		}
+		add("原生 DRC（"+tool+"）", "drc", st, det)
 	} else {
 		add("原生 DRC（EasyEDA）", "drc", StatusNA, "未提供 pcb drc 结果（--drc）")
 	}

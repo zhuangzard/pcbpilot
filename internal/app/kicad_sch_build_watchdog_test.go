@@ -173,7 +173,7 @@ func TestSbWatchdogReportsSlowZone(t *testing.T) {
 	d, zi, zl := sbWatchdogZone(t, sbGridVariants[0])
 	zl.TimedOut, zl.Skipped, zl.Ms, zl.Variant = true, 7, 61234, sbGridVariants[0].name()
 	g, _ := sbLayoutQualityGate(d, []*sbZoneIn{zi}, map[string]*sbZoneLayout{"io": zl}, nil, nil, "strict", 60e9, sbLayoutQualityLimits)
-	if !strings.Contains(g.Detail, "zone io took 61.2 s (limit 60 s): kept compact r1 o0, 7 variant(s) not tried") {
+	if !strings.Contains(g.Detail, "zone io took 61.2 s (limit 60 s): kept compact-node r1 o0, 7 variant(s) not tried") {
 		t.Errorf("slow zone not reported: %s", g.Detail)
 	}
 }

@@ -85,7 +85,7 @@ func RunERC(root string) (*ERCReport, error) {
 	defer cancel()
 	cmd.Stdout, cmd.Stderr = &buf, &buf
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("kicad-cli sch erc: %v: %s", err, strings.TrimSpace(buf.String()))
+		return nil, fmt.Errorf("kicad-cli sch erc: %s", SchCLIFail(cmd, err, buf.String()))
 	}
 	data, err := os.ReadFile(out)
 	if err != nil {

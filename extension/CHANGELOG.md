@@ -1,5 +1,94 @@
 # Changelog
 
+## [Unreleased]
+
+## [0.12.10] — 2026-11-15
+
+**CLI, daemon, Skills, MCP and the connector move to 0.12.10. The connector runtime is unchanged from 0.12.9; import the
+0.12.10 `pcbpilot-connector.eext` so the versions match.**
+
+Summary: fixes found by using 0.12.9 on real boards. `kicad pcb-sync --create` failed its parity gate on every schematic
+built with the default options; a large multi-page schematic could fail `kicad sch-build` on label findings that no
+spec change removed, and a passing build of many sheets spent minutes after its gates. The schematic layout wires more
+nodes (engine v5) and the BOM sheets read part numbers from fields and, on request, from the LCSC catalogue. **Not
+changed: routing completion on large boards; power stages are still partly joined by labels.**
+
+- `kicad sch-build`: a passing build of a many-sheet project no longer spends minutes after the gates. Opening one
+  sheet parsed every other sheet of the project, twice, so the design review and the commit of a 38-page build took
+  88 s each; they take 19 s each now (sheets are parsed once per content). Every command that opens the sheets of one
+  project in turn gains the same.
+- `kicad sch-build` / `kicad sch-check`: a hierarchical label and a local label on neighbouring pins (2.54 mm apart) are
+  no longer reported as `label-overlap` — the checker's box of a hierarchical label was 0.06 mm taller than the row
+  pitch allows (half height 1.1 mm, now 1.0 mm: 1.27 mm text in a shape of the same height). Labels on one row still
+  overlap.
+- `kicad sch-build`: the label of a cross-page net, drawn on a short tee off its wire, keeps clear of the stubs of the
+  neighbouring pins that are drawn after it. On a logic IC with a pull-up wired to one pin the label lay across the
+  stubs of the pins above (`label-on-wire`), no drawing of the zone was clean and the build failed its quality gate.
+  A teed label that a later wire still crosses is moved to the free side of its wire or along it.
+- **`kicad pcb-sync`: a schematic built with package text passes the schematic-parity gate.** 0.12.9 kept the `Package`
+  field out of the board, and KiCad's own parity check then reported "Missing symbol field 'Package' in footprint" for
+  every part: `pcb-sync --create` failed its parity gate on every design built with the default options (the workaround
+  was `--no-package-text`). `Package` is now synced like every other symbol field. A board synced before shows one
+  `setField` per part on the next `pcb-sync`; nothing else moves.
+- `kicad sch-build`: of the two sides of a stub end the ground / supply symbol takes the one where it overlaps no symbol
+  body and no other power symbol; a symbol with wires on both sides is a finding of that drawing (the drawing is
+  rejected) and is never drawn onto a foreign wire.
+- A kicad-cli run stopped at the time limit says so ("timed out after 10m0s and was stopped", with the hint that a
+  non-isolated KiCad configuration is the usual cause of a hang). It used to read `exit status 1:` with no text, like a
+  crash. A run that fails without printing anything says that too.
+- `kicad sch-build --dry-run` no longer reports `complete: true`: a plan checks no schematic, and `incomplete[]` says so.
+- `kicad route`: errors that are on the input board already and that no routing removes — inside one footprint, or a
+  footprint's pads against the board edge — are named with their footprints before the routing starts
+  (`summary.inputDrcOrigin`), not only in the `kicad-drc` gate at the end. The `copper-to-edge`, `isolation` and
+  `via-current` gates name the warnings they pass with (count in the reason, text in `info`): a connector at the board
+  edge that this gate passes with a warning and KiCad's DRC fails no longer reads as "0 error(s)" against "2 errors".
+- A failed `design-review` gate no longer says "every requirement met"; the design report names KiCad's DRC as KiCad's
+  (it was labelled EasyEDA) and counts its violations (it showed 0).
+- Per-user Elmer install: the install lock is held by the operating system for the installing process (released when it
+  ends, however it ends) instead of a lock file that a second install could take over after a time limit; `kicad lcsc
+  --verify` never caches or reports a catalogue answer about a different number.
+- **Schematic layout (`kicad sch-build`, layout engine v5): more real wires, fewer net labels inside a zone.** A node that
+  sits on no IC pin and joins several 2-/3-pin parts (a divider tap, an RC filter node, a feedback node) used to get one
+  label per member. The new `compact-node` variants chain parts along signal nets first, leave room on the first wire of
+  such a net for the other members to tap it, and draw the node as a wired T off the part already attached. The existing
+  clash checks still decide: a member whose wire would clash keeps its label. Supply and ground nets keep their symbols.
+  Node and plain variants are ranked together per zone; a page that would be left under-filled is packed from the zones'
+  alternative shapes on the same paper.
+- **BOM sheets (`kicad sch-build`): parts identified through fields are no longer reported as unidentified.** The BOM read
+  only the spec's `mpn` / `lcsc`. A part whose number sits in a field — `LCSC Part #`, `LCSC`, `JLCPCB Part #`, `MPN`,
+  `Mfr Part`, `Manufacturer Part Number` … as a schematic read back from another tool carries it — had empty MPN / LCSC
+  columns and was listed in `bom.missing`. The fields now fill the columns and count as identity.
+- **New `--bom-catalog`**: for a part that has only an LCSC number, the BOM takes the MPN from the LCSC catalogue record and
+  puts `[LCSC catalogue] manufacturer, description` in the spec cell (not when the design has its own `Description`). Records
+  are cached per user; a default build reads only the cache and never uses the network. `kicad lcsc --verify` fills the same
+  cache. The report's `bom.catalog` counts the numbers and lists `unknown[]` — LCSC numbers the catalogue has no record of.
+- A custom part (value or description says custom / self-wound / 定制) that states no requirement gets its own `bom.missing`
+  reason and a fix that names what to write; its sourcing column reads `custom / self-sourced`. It is judged on content: a
+  number or a drawing / mating-part reference in any field counts (`Inductance`, `TurnsRatio` … without a `Description` is
+  fine), a description that only says "custom transformer" does not.
+- `--bom-catalog`: a catalogue answer about a different LCSC number is treated as a failed lookup (never attached, never
+  cached); a record that cannot be cached is a warning (`bom.catalog.cacheError`); `--bom-catalog --offline` says that
+  nothing was fetched.
+- **`kicad sch-build`: a ground / supply symbol no longer shorts the pin beside it.** A ground stub leaving upwards (or a
+  supply stub leaving downwards) is drawn with the symbol upright, 2.54 mm beside the stub end — always to the right. Next
+  to a pin on a 2.54 mm pitch (a potentiometer lug beside its track pin, a pin header) the jog ended on that pin's wire,
+  every compact drawing of the zone was rejected as a short, and the zone fell back to the old spread-out drawing (more
+  than twice the area on a field board, one paper size up for the page). The symbol now goes to the free side. Layout
+  engine `v5`: an in-place rebuild redraws every zone once.
+- Per-user Elmer unpack (`sim tools install`, `pcbpilot update` on Windows): each install stages in a folder of its own
+  and takes a per-destination lock, so two installs at once cannot delete each other's files; an existing install is moved
+  aside and put back if the new tree cannot take its place (it used to be deleted first); staging and moved-aside folders
+  are never taken for an install; archive entries Windows would resolve differently from their spelling (`.. `, `...`,
+  `NUL`, `COM1.txt`) are refused.
+- **Elmer FEM installs on Windows without administrator rights.** `pcbpilot sim tools install` and `pcbpilot update` used
+  to run the official installer, which a standard account cannot finish ("requires elevation"), so Elmer stayed `missing`
+  on every update. They now download the official `.zip` of the same release from the same mirror, check its SHA-256, and
+  unpack it into `%USERPROFILE%\.pcbpilot\elmer\rel26.1` for the current user only: no installer, no elevation, PATH
+  unchanged. pcbpilot finds ElmerSolver and ElmerGrid there and sets `ELMER_HOME` for the solver run. The bundled gfortran
+  toolchain (about 340 MB, only for compiling your own solver code) is not unpacked.
+- When an optional simulator cannot be installed, `pcbpilot update` prints the reason and the manual step once (it was
+  printed twice) and still does not count it as an error.
+
 ## [0.12.9] — 2026-11-12
 
 **CLI, daemon, Skills, MCP and the connector move to 0.12.9. The connector runtime is unchanged from 0.12.8; import the

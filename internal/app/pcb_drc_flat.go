@@ -68,6 +68,9 @@ type drcFlatReport struct {
 	Counts     map[string]int     `json:"counts"`
 	Violations []drcFlatViolation `json:"violations"`
 	Binding    map[string]any     `json:"binding,omitempty"` // Netlist-Error board-binding diagnostic, passed through
+	// Tool: the DRC behind the result when it is not EasyEDA's ("KiCad");
+	// the design report names it.
+	Tool string `json:"tool,omitempty"`
 }
 
 // suffixNetRe extracts the net name from an object suffix like "(+3V3): C2_2".

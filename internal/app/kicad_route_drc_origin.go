@@ -7,6 +7,7 @@ package app
 // footprint, with the part's evidence.
 
 import (
+	"fmt"
 	"regexp"
 	"sort"
 	"strings"
@@ -64,4 +65,16 @@ func drcOrigins(vs []kicad.Violation) drcOrigin {
 		}
 	}
 	return o
+}
+
+// inputDRCOriginNote words the footprint-origin errors of the board handed
+// to the router.
+func inputDRCOriginNote(o drcOrigin) string {
+	var fps []string
+	for ref, n := range o.Footprints {
+		fps = append(fps, fmt.Sprintf("%s (%d)", ref, n))
+	}
+	sort.Strings(fps)
+	return fmt.Sprintf("%d error(s) of the input board are inside one footprint and %d are a footprint's pads against the board edge — %s. Routing cannot remove them and the kicad-drc gate will fail on them: change the footprint, move the part, or change the board rule they break (Board Setup: hole clearance / copper to edge) before routing",
+		o.FootprintInternal, o.EdgePad, strings.Join(fps, ", "))
 }
