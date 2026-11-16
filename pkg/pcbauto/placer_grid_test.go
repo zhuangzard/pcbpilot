@@ -89,7 +89,7 @@ func TestFreeGridCountsPerSide(t *testing.T) {
 				if fg.cnt[side][y*fg.nx+x] != 0 {
 					n++
 				}
-				if (fg.cnt[side][y*fg.nx+x] != 0) == fg.free(side, x, y, 1, 1, true) {
+				if (fg.cnt[side][y*fg.nx+x] != 0) == fg.free(side, x, y, 1, 1, true, false) {
 					t.Fatalf("cell %d,%d: count and bit disagree", x, y)
 				}
 			}
@@ -104,7 +104,7 @@ func TestFreeGridCountsPerSide(t *testing.T) {
 	}
 	// Far from the corner: across a word boundary of the bit rows.
 	bx := Rect{fg.x0 + 62*fg.g, fg.y0 + 2*fg.g, fg.x0 + 66.5*fg.g, fg.y0 + 4*fg.g}
-	wasFree := fg.free(LayerBottom, 62, 2, 5, 2, true)
+	wasFree := fg.free(LayerBottom, 62, 2, 5, 2, true, false)
 	fg.put(smd, bx)
 	if n := count(LayerTop, 0, 0, fg.nx-1, fg.ny-1); n != base[LayerTop] {
 		t.Fatalf("a bottom part takes %d top cells", n-base[LayerTop])
@@ -113,7 +113,7 @@ func TestFreeGridCountsPerSide(t *testing.T) {
 	if n := count(LayerBottom, 62, 2, 66, 3); n != 10 {
 		t.Fatalf("the box takes %d of its 10 cells", n)
 	}
-	if fg.free(LayerBottom, 60, 1, 8, 4, true) || fg.free(LayerBottom, 66, 3, 1, 1, true) {
+	if fg.free(LayerBottom, 60, 1, 8, 4, true, false) || fg.free(LayerBottom, 66, 3, 1, 1, true, false) {
 		t.Fatal("cells under the box read free")
 	}
 	if n := count(LayerBottom, 0, 0, fg.nx-1, fg.ny-1) - base[LayerBottom]; n < 0 || n > 10 {
@@ -123,7 +123,7 @@ func TestFreeGridCountsPerSide(t *testing.T) {
 	if n := count(LayerBottom, 0, 0, fg.nx-1, fg.ny-1); n != base[LayerBottom] {
 		t.Fatalf("taking the part out left %d cells", n-base[LayerBottom])
 	}
-	if fg.free(LayerBottom, 62, 2, 5, 2, true) != wasFree {
+	if fg.free(LayerBottom, 62, 2, 5, 2, true, false) != wasFree {
 		t.Fatal("the cells did not return to what they were")
 	}
 }
@@ -304,5 +304,37 @@ func TestGridFullCacheForgetsOnAMove(t *testing.T) {
 	}
 	if p.Body().Center().Dist(at) > 3*fg.g {
 		t.Fatalf("the part went from %v to %v with its own spot free", at, p.Body().Center())
+	}
+}
+
+// A parts-only keep-out on the top bars the parts mounted there and no
+// others: a part on the bottom, through-hole or not, may stand under it
+// (noPartsOn). With copper kept out too it bars both.
+func TestFreeGridPartsOnlyKeepoutIsPerMountedSide(t *testing.T) {
+	pl := testPlacer(t, "reference-4stage-compact.json")
+	g := pl.region
+	sq := []Point{{g.MinX + 100, g.MinY + 100}, {g.MinX + 300, g.MinY + 100}, {g.MinX + 300, g.MinY + 300}, {g.MinX + 100, g.MinY + 300}}
+	for _, cu := range []bool{false, true} {
+		k := Keepout{Poly: sq, Layers: []int{LayerTop}, NoParts: true, NoCopper: cu}
+		kept := pl.b.Keepouts
+		pl.b.Keepouts = append(append(kept[:0:0], kept...), &k)
+		fg := pl.newFreeGrid()
+		pl.b.Keepouts = kept
+		for _, p := range pl.b.Parts {
+			fg.take(p)
+		}
+		ix0, iy0, ix1, iy1, ok := fg.cells(PolyBounds(sq))
+		if !ok {
+			t.Fatal("the keep-out lies off the grid")
+		}
+		kw, kh := ix1-ix0+1, iy1-iy0+1
+		if fg.free(LayerTop, ix0, iy0, kw, kh, true, true) {
+			t.Fatalf("noCopper %v: a part mounted on top found room in the keep-out", cu)
+		}
+		// A through-hole part mounted on the bottom asks the top without np.
+		under := fg.free(LayerTop, ix0, iy0, kw, kh, true, false) && fg.free(LayerBottom, ix0, iy0, kw, kh, true, true)
+		if under == cu {
+			t.Fatalf("noCopper %v: room under the keep-out for a bottom part: %v", cu, under)
+		}
 	}
 }

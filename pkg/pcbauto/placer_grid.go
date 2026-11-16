@@ -33,6 +33,7 @@ type freeGrid struct {
 	cnt       [3][]uint16 // by side (LayerTop, LayerBottom)
 	bits      [3][]uint64 // cnt != 0, a row of wpr words per grid row
 	cu        [3][]uint64 // copper-only keep-outs: they bar all but bridges
+	np        [3][]uint64 // parts-only keep-outs: they bar the parts mounted on that side
 	filed     map[*Part]Rect
 	// full[zone and sides] are the boxes (cells, wider side first; as they
 	// stand when parts may not turn) the grid had no room for: a box at
@@ -70,6 +71,7 @@ func (pl *placer) newFreeGrid() *freeGrid {
 		fg.cnt[s] = make([]uint16, fg.nx*fg.ny)
 		fg.bits[s] = make([]uint64, fg.wpr*fg.ny)
 		fg.cu[s] = make([]uint64, fg.wpr*fg.ny)
+		fg.np[s] = make([]uint64, fg.wpr*fg.ny)
 	}
 	for _, k := range pl.b.Keepouts {
 		if !(k.NoParts || k.NoCopper) || k.Owner != "" {
@@ -79,15 +81,21 @@ func (pl *placer) newFreeGrid() *freeGrid {
 			if len(k.Layers) != 0 && !k.onLayer(s) {
 				continue
 			}
-			if k.NoParts {
+			if k.NoParts && k.NoCopper {
 				fg.mark(PolyBounds(k.Poly), s, 1)
 				continue
 			}
-			// A bridge may straddle a copper-only keep-out (repelsPart).
+			// A bridge may straddle a copper-only keep-out, and a part
+			// mounted on the other side may stand under a parts-only one,
+			// through-hole or not (repelsPart, noPartsOn).
+			bits := fg.cu[s]
+			if k.NoParts {
+				bits = fg.np[s]
+			}
 			if ix0, iy0, ix1, iy1, ok := fg.cells(PolyBounds(k.Poly)); ok {
 				for y := iy0; y <= iy1; y++ {
 					for x := ix0; x <= ix1; x++ {
-						fg.cu[s][y*fg.wpr+x>>6] |= 1 << (x & 63)
+						bits[y*fg.wpr+x>>6] |= 1 << (x & 63)
 					}
 				}
 			}
@@ -160,15 +168,18 @@ func (fg *freeGrid) take(p *Part) {
 
 // free reports whether the kw x kh cells from (ix0, iy0) are all empty on
 // side; cu counts the copper-only keep-outs as taken (all parts but
-// bridges).
-func (fg *freeGrid) free(side, ix0, iy0, kw, kh int, cu bool) bool {
+// bridges), np the parts-only ones (the side the part is mounted on).
+func (fg *freeGrid) free(side, ix0, iy0, kw, kh int, cu, np bool) bool {
 	ix1 := ix0 + kw - 1
 	w0, w1 := ix0>>6, ix1>>6
 	m0, m1 := ^uint64(0)<<(ix0&63), ^uint64(0)>>(63-ix1&63)
 	if w0 == w1 {
 		m0, m1 = m0&m1, 0
 	}
-	for _, bits := range [2][]uint64{fg.bits[side], fg.cu[side]} {
+	for i, bits := range [3][]uint64{fg.bits[side], fg.cu[side], fg.np[side]} {
+		if i == 1 && !cu || i == 2 && !np {
+			continue
+		}
 		for y := iy0; y < iy0+kh; y++ {
 			row := bits[y*fg.wpr : (y+1)*fg.wpr]
 			if row[w0]&m0 != 0 || row[w1]&m1 != 0 {
@@ -179,9 +190,6 @@ func (fg *freeGrid) free(side, ix0, iy0, kw, kh int, cu bool) bool {
 					return false
 				}
 			}
-		}
-		if !cu {
-			break
 		}
 	}
 	return true
@@ -270,7 +278,7 @@ func (pl *placer) gridSeat(fg *freeGrid, p *Part) bool {
 	if ix0, iy0, ix1, iy1, ok := fg.cells(bx); ok {
 		own = true
 		for _, s := range sides {
-			own = own && fg.free(s, ix0, iy0, ix1-ix0+1, iy1-iy0+1, !bridge)
+			own = own && fg.free(s, ix0, iy0, ix1-ix0+1, iy1-iy0+1, !bridge, s == p.Side)
 		}
 	}
 	if !own {
@@ -303,7 +311,7 @@ func (pl *placer) gridSeat(fg *freeGrid, p *Part) bool {
 			}
 		}
 		for _, s := range sides {
-			if !fg.free(s, ix, iy, t.kw, t.kh, !bridge) {
+			if !fg.free(s, ix, iy, t.kw, t.kh, !bridge, s == p.Side) {
 				return false
 			}
 		}
