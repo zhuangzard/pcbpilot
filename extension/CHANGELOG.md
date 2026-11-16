@@ -6,7 +6,9 @@
   a touchable domain is derived as reinforced; where the other means of protection exists (mains to protective earth),
   the spec can now say `"insulation": "basic"` with a required `why`. The pair's distances follow the declared grade,
   the pair's `why` names the declaration, and a grade below the derived one is reported as the warning
-  `declared-insulation-lowered`.
+  `declared-insulation-lowered`. The pair's declaration is more specific than the product-level
+  `spec.standard.mopCount`: the pair counts one means of protection for basic or supplementary and two for double or
+  reinforced, and both the `why` and the warning state the changed count.
 - **`intent derive`: a declared net between two isolation parts is in its declared domain.** A net that only
   isolation parts sit on (an isolator's output into an isolated converter) had no part to carry it into a domain, so a
   net declared in a mains domain ended in none and got no insulation pair. It is now in the domain it was declared in.

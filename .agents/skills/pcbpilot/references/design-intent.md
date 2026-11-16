@@ -159,7 +159,9 @@ max(标准推导, 声明)，爬电不低于间隙；只在有声明时多出 `de
 没有声明的 intent 与以前逐字节相同。声明对不上任何绝缘对 → `declared-isolation-unmatched` warn（不静默失效）。
 `spec.isolation[].insulation`（`basic` / `supplementary` / `double` / `reinforced`，必须同时写 `why`）按对声明绝缘等级，
 取代推导的等级：危险域对可触及域默认 reinforced，另一重保护已存在时（市电对保护地）由设计负责人声明 `basic`；距离随
-声明的等级走，低于推导等级时报 `declared-insulation-lowered` warn（负责人的决定，agent 不得代写）。
+声明的等级走，低于推导等级时报 `declared-insulation-lowered` warn（负责人的决定，agent 不得代写）。按对声明比产品级
+`spec.standard.mopCount` 更具体：该对的 `mopCount` 随声明的等级（basic/supplementary = 1，double/reinforced = 2），
+`why` 与 warn 里写明"N × MOPP for this pair instead of M"。
 `kicad rules` / `kicad route` / `signoff-safety` 都用这个取大后的值。电路理解调用 `pcbauto.Understand`（核心/外围、转换器、域与隔离桥）。
 
 ## 3. 正例：ESP32 mini（`pkg/powersim/testdata/esp32mini`，offline-verified）

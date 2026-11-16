@@ -459,7 +459,7 @@ func (c *ctx) applyDeclaredInsulation(p *Pair, a, b *Domain) {
 	if at < 0 || grade == p.Insulation {
 		return
 	}
-	si, was := c.spec.Isolation[at], p.Insulation
+	si, was, wasCount := c.spec.Isolation[at], p.Insulation, p.MOPCount
 	p.Insulation = grade
 	if p.MOP != "" || c.out.Standard.MOP != "" {
 		p.MOP, p.MOPCount = c.out.Standard.MOP, 1
@@ -467,9 +467,15 @@ func (c *ctx) applyDeclaredInsulation(p *Pair, a, b *Domain) {
 			p.MOPCount = 2
 		}
 	}
-	p.Why = append(p.Why, fmt.Sprintf("spec.isolation[%d] (%s|%s) declares %s insulation (derived: %s): %s", at, si.A, si.B, grade, was, si.Why))
+	// The pair's declaration is the more specific one: it also sets how
+	// many means of protection this pair counts, and says so.
+	means := ""
+	if p.MOPCount != wasCount && p.MOP != "" {
+		means = fmt.Sprintf(", %d × %s for this pair instead of %d", p.MOPCount, p.MOP, wasCount)
+	}
+	p.Why = append(p.Why, fmt.Sprintf("spec.isolation[%d] (%s|%s) declares %s insulation (derived: %s)%s: %s", at, si.A, si.B, grade, was, means, si.Why))
 	if insulRank[grade] < insulRank[was] {
-		c.add("warn", "declared-insulation-lowered", fmt.Sprintf("%s ↔ %s: %s insulation by spec.isolation[%d], where %s is derived — the distances are those of %s insulation", a.ID, b.ID, grade, at, was, grade), nil, []string{si.A, si.B},
+		c.add("warn", "declared-insulation-lowered", fmt.Sprintf("%s ↔ %s: %s insulation by spec.isolation[%d], where %s is derived%s — the distances are those of %s insulation", a.ID, b.ID, grade, at, was, means, grade), nil, []string{si.A, si.B},
 			"the owner's declaration ("+si.Why+"): confirm the other means of protection it relies on")
 	}
 }

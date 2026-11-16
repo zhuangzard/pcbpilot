@@ -179,6 +179,42 @@ func TestDeclaredPairInsulation(t *testing.T) {
 			t.Fatalf("no grade was lowered: %+v", f)
 		}
 	}
+	// An explicit product-level count of two means: the pair's declaration
+	// is the more specific one, and both the why and the warning say that
+	// this pair counts one.
+	two := func(s *Spec) { s.Standard.Name, s.Standard.MOP, s.Standard.MOPCount = "IEC60601-1", "MOPP", 2 }
+	mbase := mainsIntent(t, two)
+	var mp *Pair
+	for _, q := range mbase.Pairs {
+		if q.MOPCount == 2 {
+			mp = q
+		}
+	}
+	if mp == nil {
+		t.Fatalf("fixture has no 2 x MOPP pair: %+v", mbase.Pairs)
+	}
+	it = mainsIntent(t, func(s *Spec) {
+		two(s)
+		s.Isolation = []SpecIsolation{{A: mp.A, B: mp.B, Insulation: "basic", Why: "earthed screen"}}
+	})
+	p = pairOf(it, mp.A, mp.B)
+	if p.Insulation != "basic" || p.MOPCount != 1 || !strings.Contains(strings.Join(p.Why, "; "), "1 × MOPP for this pair instead of 2") {
+		t.Fatalf("declared basic under 2 x MOPP: %s %d %v", p.Insulation, p.MOPCount, p.Why)
+	}
+	said := false
+	for _, f := range it.Findings {
+		said = said || f.Kind == "declared-insulation-lowered" && strings.Contains(f.Message, "1 × MOPP for this pair instead of 2")
+	}
+	if !said {
+		t.Fatal("the lowered count of means was not reported")
+	}
+	it = mainsIntent(t, func(s *Spec) {
+		two(s)
+		s.Isolation = []SpecIsolation{{A: mp.A, B: mp.B, Insulation: mp.Insulation, Why: "as derived"}}
+	})
+	if p = pairOf(it, mp.A, mp.B); p.MOPCount != 2 || p.ClearanceMm != mp.ClearanceMm {
+		t.Fatalf("same grade under 2 x MOPP: %+v", p)
+	}
 	if _, err := ParseSpec([]byte(`{"isolation":[{"a":"X","b":"Y","insulation":"basic","why":"PE"}]}`)); err != nil {
 		t.Fatal(err)
 	}
