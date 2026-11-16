@@ -272,6 +272,9 @@ func TestDomainDeclaredWithoutGroundSeedsItsOwn(t *testing.T) {
 			tiePart("E2", "GAP", "", "RTN_P", "GND_B"),
 			hvPart("RN2", "1k", Point{1300, 1200}, smdPad("1", "RTN_P", -40, 0, 30, 30), smdPad("2", "GND_B", 0, 0, 30, 30), smdPad("3", "SIG_B", 40, 0, 30, 30)),
 			hvPart("RN3", "1k", Point{1300, 1200}, smdPad("1", "RTN_P", -40, 20, 30, 30), smdPad("2", "SIG_P", -40, -20, 30, 30), smdPad("3", "GND_B", 40, 20, 30, 30), smdPad("4", "SIG_B", 40, -20, 30, 30)),
+			hvPart("RN4", "1k", Point{1300, 1200}, smdPad("1", "RTN_P", -40, 20, 30, 30), smdPad("2", "RTN_P", -40, -20, 30, 30), smdPad("3", "GND_B", 40, 20, 30, 30), smdPad("4", "GND_B", 40, -20, 30, 30)),
+			hvPart("RN5", "1k", Point{1300, 1200}, smdPad("1", "GND_B", -60, 0, 30, 30), smdPad("2", "RTN_P", -20, 0, 30, 30), smdPad("3", "RTN_P", 20, 0, 30, 30), smdPad("4", "RTN_P", 60, 0, 30, 30)),
+			hvPart("CN1", "100nF", Point{1300, 1200}, smdPad("1", "RTN_P", -40, 20, 30, 30), smdPad("2", "RTN_P", -40, -20, 30, 30), smdPad("3", "GND_B", 40, 20, 30, 30), smdPad("4", "GND_B", 40, -20, 30, 30)),
 			hvPart("RN1", "1M", Point{1300, 1200}, smdPad("1", "RTN_P", -40, 0, 30, 30), smdPad("2", "GND_B", 0, 0, 30, 30), smdPad("3", "SIG_B", 40, 0, 30, 30)),
 		} {
 			b = tieBoard(tieFixture()[3], cy)
