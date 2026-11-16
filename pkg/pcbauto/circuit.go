@@ -325,6 +325,11 @@ func (c *Circuit) tiesGrounds(p *Part) (tie, sure bool) {
 }
 
 var (
+	// A safety (X / Y class) capacitor by its designator or its device /
+	// value text: it stands across a barrier and says nothing about which
+	// side a net belongs to.
+	reSafetyCapRef = regexp.MustCompile(`^C[XY]\d`)
+	reSafetyCapDev = regexp.MustCompile(`(?i)(^|[^A-Z0-9])[XY][12]([^A-Z0-9]|$)|safety`)
 	// Mains is recognised only by unambiguous names. An "HV_" prefix is NOT
 	// mains: boards name the feed of an on-board HV converter HV_N5 or the
 	// ±24 V pulser rail +HV (real case: pic0rick, A0524S). DC high voltage is
@@ -568,16 +573,35 @@ func (c *Circuit) buildDomains(b *Board, an *Analysis) {
 	// circuit carried that circuit's domain over all of it.) When most
 	// of the parts on its nets sit on one ground, it is that ground's
 	// domain — a rail declared to give its domain a kind — and nothing
-	// changes. The parts that count are those with three pads or more
-	// (a controller, a transistor: a part with a reference pin), never an
-	// isolation part, which belongs to no side; a two-pad part — the Y
+	// changes. The parts that count are those on three nets or more that
+	// are no capacitor (a controller, a transistor: a part with a reference
+	// pin), never an isolation part, which belongs to no side. The Y
 	// capacitor or the bleeder across the barrier looks just like a rail's
-	// decoupling capacitor — counts only where no other part does and the
-	// declaration is not the line's.
+	// decoupling capacitor, so the other parts count only where no such
+	// part does and the declaration is not the line's — and then never a
+	// safety capacitor by its name, nor a resistor that would not tie two
+	// grounds.
 	declOf := map[string]string{}
-	padCount := map[string]int{}
+	partOf := map[string]*Part{}
 	for _, p := range b.Parts {
-		padCount[p.Ref] = len(p.Pads)
+		partOf[p.Ref] = p
+	}
+	// refPin: the part has a reference pin; passive: it may stand for one
+	// in the fallback.
+	refPin := func(ref string) bool {
+		return c.Kinds[ref] != KindCapacitor && len(partNets[ref]) >= 3
+	}
+	passive := func(ref string) bool {
+		p := partOf[ref]
+		switch c.Kinds[ref] {
+		case KindCapacitor:
+			return !reSafetyCapRef.MatchString(upper(ref)) && !reSafetyCapDev.MatchString(p.Device) && !reSafetyCapDev.MatchString(p.Value)
+		case KindResistor:
+			tie, _ := c.tiesGrounds(p)
+			v, ok := partOhms(p)
+			return tie && ok && v < BleederOhms
+		}
+		return true
 	}
 	if an != nil {
 		for _, dd := range an.declared {
@@ -602,10 +626,10 @@ func (c *Circuit) buildDomains(b *Board, an *Analysis) {
 			if busiest == "" {
 				continue
 			}
-			vote := func(minPads int, groundedOnly bool) (map[string]int, int) {
+			vote := func(counts func(string) bool, groundedOnly bool) (map[string]int, int) {
 				byGround, sided := map[string]int{}, 0
 				for ref := range on {
-					if c.Kinds[ref].Bridges() || padCount[ref] < minPads {
+					if c.Kinds[ref].Bridges() || !counts(ref) {
 						continue
 					}
 					seen := map[string]bool{}
@@ -621,10 +645,11 @@ func (c *Circuit) buildDomains(b *Board, an *Analysis) {
 				}
 				return byGround, sided
 			}
-			byGround, sided := vote(3, false)
+			byGround, sided := vote(refPin, false)
 			if sided == 0 && !dd.Line {
-				// Two-pad parts only: those on a ground decide among themselves.
-				byGround, sided = vote(0, true)
+				// No part with a reference pin: the others that sit on a
+				// ground decide among themselves.
+				byGround, sided = vote(passive, true)
 			}
 			id := busiest
 			for _, g := range grounds {

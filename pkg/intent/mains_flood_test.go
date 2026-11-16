@@ -255,18 +255,18 @@ func TestDomainFloodWarning(t *testing.T) {
 }
 
 // groundlessDesign is offlineDesign with the primary's return on a bus net
-// that is no ground (HV_RTN), and a Y capacitor from it to the control ground.
+// that is no ground (RTN_P), and a Y capacitor from it to the control ground.
 func groundlessDesign(extra ...*powersim.Part) *powersim.Design {
 	d := offlineDesign(extra...)
 	delete(d.NetRole, "GND_A")
 	for _, p := range d.Parts {
 		for i := range p.Pins {
 			if p.Pins[i].Net == "GND_A" {
-				p.Pins[i].Net = "HV_RTN"
+				p.Pins[i].Net = "RTN_P"
 			}
 		}
 	}
-	d.Parts = append(d.Parts, synPart("C9", "Y1-CAP", "2.2nF", "HV_RTN", "GND_B"))
+	d.Parts = append(d.Parts, synPart("C9", "Y1-CAP", "2.2nF", "RTN_P", "GND_B"))
 	return d
 }
 
@@ -276,7 +276,7 @@ func groundlessDesign(extra ...*powersim.Part) *powersim.Design {
 // mains nets, none of them a ground; the derived mains domain then held
 // nearly every net of the board, referenced to the secondary's ground.)
 func TestDeclaredDomainWithoutGroundIsItsOwn(t *testing.T) {
-	spec := &Spec{Domains: []SpecDomain{{Kind: "mains", Nets: []string{"AC_L", "AC_N", "HV_BUS", "HV_RTN"}}}}
+	spec := &Spec{Domains: []SpecDomain{{Kind: "mains", Nets: []string{"AC_L", "AC_N", "HV_BUS", "RTN_P"}}}}
 	it := deriveSyn(t, groundlessDesign(), spec)
 	pri, ctl := domainWith(it, "DB1"), domainWith(it, "U1")
 	if pri == nil || ctl == nil || pri == ctl {
@@ -288,7 +288,7 @@ func TestDeclaredDomainWithoutGroundIsItsOwn(t *testing.T) {
 	if ctl.Kind == "mains" || ctl.Kind == "hazardous" || ctl.Reference != "GND_B" {
 		t.Errorf("control domain %+v", ctl)
 	}
-	for _, n := range []string{"HV_RTN", "HV_BUS", "VCC_A", "SIG_A"} {
+	for _, n := range []string{"RTN_P", "HV_BUS", "VCC_A", "SIG_A"} {
 		if np := it.Nets[n]; np == nil || np.Domain != pri.ID {
 			t.Errorf("net %s: %+v, want domain %s", n, np, pri.ID)
 		}

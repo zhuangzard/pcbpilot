@@ -188,12 +188,12 @@ func TestClassifyResistorOhms(t *testing.T) {
 func TestDomainDeclaredWithoutGroundSeedsItsOwn(t *testing.T) {
 	tieFixture := func() []*Part {
 		return []*Part{
-			hvPart("U3", "CTRL-P", Point{300, 1500}, smdPad("1", "VCC_P", 0, 50, 40, 40), smdPad("2", "HV_RTN", 0, -50, 40, 40), smdPad("3", "SIG_P", 50, 0, 40, 40)),
-			hvPart("C3", "100nF", Point{300, 1800}, smdPad("1", "VCC_P", 0, 30, 40, 40), smdPad("2", "HV_RTN", 0, -30, 40, 40)),
-			hvPart("Q1", "NMOS", Point{600, 1500}, smdPad("1", "SIG_P", 0, 50, 40, 40), smdPad("2", "HV_POS", 0, -50, 40, 40), smdPad("3", "HV_RTN", 50, 0, 40, 40)),
-			hvPart("U_ISO2", "PC817", Point{1300, 1500}, smdPad("1", "SIG_P", -100, 50, 40, 40), smdPad("2", "HV_RTN", -100, -50, 40, 40),
+			hvPart("U3", "CTRL-P", Point{300, 1500}, smdPad("1", "VCC_P", 0, 50, 40, 40), smdPad("2", "RTN_P", 0, -50, 40, 40), smdPad("3", "SIG_P", 50, 0, 40, 40)),
+			hvPart("C3", "100nF", Point{300, 1800}, smdPad("1", "VCC_P", 0, 30, 40, 40), smdPad("2", "RTN_P", 0, -30, 40, 40)),
+			hvPart("Q1", "NMOS", Point{600, 1500}, smdPad("1", "SIG_P", 0, 50, 40, 40), smdPad("2", "POS_P", 0, -50, 40, 40), smdPad("3", "RTN_P", 50, 0, 40, 40)),
+			hvPart("U_ISO2", "PC817", Point{1300, 1500}, smdPad("1", "SIG_P", -100, 50, 40, 40), smdPad("2", "RTN_P", -100, -50, 40, 40),
 				smdPad("3", "GND_B", 100, -50, 40, 40), smdPad("4", "SIG_B", 100, 50, 40, 40)),
-			tiePart("CY1", "2.2nF Y1", "", "HV_RTN", "GND_B"),
+			tiePart("CY1", "2.2nF Y1", "", "RTN_P", "GND_B"),
 		}
 	}
 	parts := tieFixture()
@@ -202,7 +202,7 @@ func TestDomainDeclaredWithoutGroundSeedsItsOwn(t *testing.T) {
 	if free.DomainOf["U3"] != free.DomainOf["U2"] {
 		t.Fatalf("fixture: undeclared, the Y capacitor no longer carries GND_B over the bus side: %v", free.DomainOf)
 	}
-	decl := PowerSpec{Declared: []DeclaredDomain{{Nets: []string{"HV_POS", "HV_RTN", "NOT_ON_BOARD"}, Line: true}}}
+	decl := PowerSpec{Declared: []DeclaredDomain{{Nets: []string{"POS_P", "RTN_P", "NOT_ON_BOARD"}, Line: true}}}
 	c := Understand(b, Analyze(b, decl, nil))
 	own := c.DomainOf["U3"]
 	if own == "" || own == c.DomainOf["U2"] || own == c.DomainOf["U1"] {
@@ -216,7 +216,7 @@ func TestDomainDeclaredWithoutGroundSeedsItsOwn(t *testing.T) {
 	if c.DomainOf["C2"] != c.DomainOf["U2"] || c.DomainOf["U2"] == own {
 		t.Errorf("the grounded side changed: %v", c.DomainOf)
 	}
-	if c.DeclaredNet["HV_RTN"] != own || c.DeclaredNet["HV_POS"] != own {
+	if c.DeclaredNet["RTN_P"] != own || c.DeclaredNet["POS_P"] != own {
 		t.Errorf("DeclaredNet %v, want both bus nets in %q", c.DeclaredNet, own)
 	}
 	if _, ok := c.DeclaredNet["NOT_ON_BOARD"]; ok {
@@ -255,8 +255,26 @@ func TestDomainDeclaredWithoutGroundSeedsItsOwn(t *testing.T) {
 		}
 		b = tieBoard(few...)
 		c = Understand(b, Analyze(b, decl, nil))
-		if d := c.DeclaredNet["HV_RTN"]; d == "" || d == c.DomainOf["U2"] || d == c.DomainOf["U1"] {
+		if d := c.DeclaredNet["RTN_P"]; d == "" || d == c.DomainOf["U2"] || d == c.DomainOf["U1"] {
 			t.Errorf("%v: a Y capacitor carried the declared return into %q: %v", keep, d, c.DomainOf)
+		}
+	}
+	// The same Y capacitor on a footprint with doubled pads, under any
+	// name, beside an isolator only: it has no reference pin, and off the
+	// line it is still a safety capacitor by its text.
+	for _, line := range []bool{true, false} {
+		for _, cy := range []*Part{
+			hvPart("CY1", "2.2nF", Point{1300, 1200}, smdPad("1", "RTN_P", -40, 20, 40, 40), smdPad("2", "RTN_P", -40, -20, 40, 40), smdPad("3", "GND_B", 40, 20, 40, 40), smdPad("4", "GND_B", 40, -20, 40, 40)),
+			tiePart("C9", "2.2nF Y1", "", "RTN_P", "GND_B"),
+			tiePart("C9", "CAP-SAFETY-Y2", "2.2nF", "RTN_P", "GND_B"),
+			tiePart("R9", "", "4M7", "RTN_P", "GND_B"),
+		} {
+			b = tieBoard(tieFixture()[3], cy)
+			one := PowerSpec{Declared: []DeclaredDomain{{Nets: []string{"RTN_P"}, Line: line}}}
+			c = Understand(b, Analyze(b, one, nil))
+			if d := c.DeclaredNet["RTN_P"]; d == "" || d == c.DomainOf["U2"] || d == c.DomainOf["U1"] {
+				t.Errorf("line %v, %s %q: carried the declared return into %q", line, cy.Ref, cy.Device, d)
+			}
 		}
 	}
 	// A rail with nothing but two-pad parts on it, declared off the line:
@@ -268,7 +286,7 @@ func TestDomainDeclaredWithoutGroundSeedsItsOwn(t *testing.T) {
 	}
 	// Two groundless declarations that share a net: the first keeps it, and
 	// the result is the same on every run.
-	two := PowerSpec{Declared: []DeclaredDomain{{Nets: []string{"HV_RTN", "HV_POS"}, Line: true}, {Nets: []string{"HV_POS", "SIG_P"}}}}
+	two := PowerSpec{Declared: []DeclaredDomain{{Nets: []string{"RTN_P", "POS_P"}, Line: true}, {Nets: []string{"POS_P", "SIG_P"}}}}
 	b = tieBoard(tieFixture()...)
 	first := Understand(b, Analyze(b, two, nil))
 	for i := 0; i < 5; i++ {
@@ -284,7 +302,7 @@ func TestDomainDeclaredWithoutGroundSeedsItsOwn(t *testing.T) {
 			}
 		}
 	}
-	if first.DeclaredNet["HV_POS"] != first.DeclaredNet["HV_RTN"] {
+	if first.DeclaredNet["POS_P"] != first.DeclaredNet["RTN_P"] {
 		t.Errorf("a net of two declarations left the first: %v", first.DeclaredNet)
 	}
 }
