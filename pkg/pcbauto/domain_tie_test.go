@@ -228,4 +228,38 @@ func TestDomainDeclaredWithoutGroundSeedsItsOwn(t *testing.T) {
 	if c.DeclaredNet["VCC_B"] != c.DomainOf["U2"] || c.DomainOf["C2"] != c.DomainOf["U2"] || c.DomainOf["U1"] == c.DomainOf["U2"] {
 		t.Errorf("a declared rail of a grounded domain: %v %v", c.DeclaredNet, c.DomainOf)
 	}
+	// The same rail feeding many isolators: they belong to no side and do
+	// not outvote the two parts that sit on the ground.
+	many := append([]*Part(nil), parts...)
+	for i := 0; i < 9; i++ {
+		ref := "U_ISO" + string(rune('A'+i))
+		many = append(many, hvPart(ref, "PC817", Point{1300, 200 + 150*float64(i)}, smdPad("1", "SIG_A", -100, 50, 40, 40), smdPad("2", "GND_A", -100, -50, 40, 40),
+			smdPad("3", "N_"+ref, 100, -50, 40, 40), smdPad("4", "VCC_B", 100, 50, 40, 40)))
+	}
+	b = tieBoard(many...)
+	c = Understand(b, Analyze(b, rail, nil))
+	if c.DeclaredNet["VCC_B"] != c.DomainOf["U2"] || c.DomainOf["C2"] != c.DomainOf["U2"] {
+		t.Errorf("a declared rail feeding nine isolators left its ground: %v %v", c.DeclaredNet, c.DomainOf)
+	}
+	// Two groundless declarations that share a net: the first keeps it, and
+	// the result is the same on every run.
+	two := PowerSpec{Declared: []DeclaredDomain{{Nets: []string{"HV_RTN", "HV_POS"}, Line: true}, {Nets: []string{"HV_POS", "SIG_P"}}}}
+	b = tieBoard(parts...)
+	first := Understand(b, Analyze(b, two, nil))
+	for i := 0; i < 5; i++ {
+		again := Understand(b, Analyze(b, two, nil))
+		for n, d := range first.DeclaredNet {
+			if again.DeclaredNet[n] != d {
+				t.Fatalf("run %d: DeclaredNet[%s] = %q, was %q", i, n, again.DeclaredNet[n], d)
+			}
+		}
+		for ref, d := range first.DomainOf {
+			if again.DomainOf[ref] != d {
+				t.Fatalf("run %d: DomainOf[%s] = %q, was %q", i, ref, again.DomainOf[ref], d)
+			}
+		}
+	}
+	if first.DeclaredNet["HV_POS"] != first.DeclaredNet["HV_RTN"] {
+		t.Errorf("a net of two declarations left the first: %v", first.DeclaredNet)
+	}
 }

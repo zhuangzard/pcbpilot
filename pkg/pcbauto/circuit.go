@@ -565,10 +565,10 @@ func (c *Circuit) buildDomains(b *Board, an *Analysis) {
 	// A declared domain without a ground net is a reference domain all the
 	// same: its nets seed it as a ground would. (Without this its parts had
 	// no reference, and the first capacitor from one of its nets to another
-	// circuit carried that circuit's domain over all of it.) When a quarter
-	// of the parts on its nets sit on one ground, it is that ground's
-	// domain — a rail declared to give its domain a kind — and nothing
-	// changes.
+	// circuit carried that circuit's domain over all of it.) When half
+	// of the parts on its nets — isolation parts aside, which belong to no
+	// side — sit on one ground, it is that ground's domain — a rail
+	// declared to give its domain a kind — and nothing changes.
 	declOf := map[string]string{}
 	if an != nil {
 		for _, dd := range an.declared {
@@ -593,11 +593,12 @@ func (c *Circuit) buildDomains(b *Board, an *Analysis) {
 			if busiest == "" {
 				continue
 			}
-			byGround := map[string]int{}
+			byGround, sided := map[string]int{}, 0
 			for ref := range on {
 				if c.Kinds[ref].Bridges() {
 					continue
 				}
+				sided++
 				seen := map[string]bool{}
 				for _, n := range partNets[ref] {
 					if d, ok := domOfGround[n]; ok && !seen[d] {
@@ -608,7 +609,7 @@ func (c *Circuit) buildDomains(b *Board, an *Analysis) {
 			}
 			id := busiest
 			for _, g := range grounds {
-				if d := domOfGround[g]; 4*byGround[d] >= len(on) && (id == busiest || byGround[d] > byGround[id]) {
+				if d := domOfGround[g]; byGround[d] > 0 && 2*byGround[d] >= sided && (id == busiest || byGround[d] > byGround[id]) {
 					id = d
 				}
 			}
