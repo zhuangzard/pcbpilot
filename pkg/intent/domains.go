@@ -329,6 +329,7 @@ func (c *ctx) pairFor(a, b *Domain, bridges []string, note string) *Pair {
 		}
 		p.Why = append(p.Why, fmt.Sprintf("%d × %s declared by spec.standard (mopCount)", p.MOPCount, p.MOP))
 	}
+	c.applyDeclaredInsulation(p, a, b)
 	var tw string
 	p.Transient, p.MainsVrms, tw = c.pairTransient(a, b)
 	if tw != "" {
@@ -424,6 +425,53 @@ func (c *ctx) spanning(a, b string) []string {
 		}
 	}
 	return out
+}
+
+// insulRank orders the insulation grades by what they ask.
+var insulRank = map[string]int{"functional": 0, "basic": 1, "supplementary": 1, "double": 2, "reinforced": 2}
+
+// pairNames reports whether ref (a net, or "domain:<id>") names domain d.
+func pairNames(d *Domain, ref string) bool {
+	ref = strings.TrimSpace(ref)
+	if id, ok := strings.CutPrefix(ref, "domain:"); ok {
+		return strings.TrimSpace(id) == d.ID
+	}
+	return has(d.Nets, ref)
+}
+
+// applyDeclaredInsulation gives the pair the grade spec.isolation[] states
+// for it (the strictest of several). A grade below the derived one is the
+// owner's decision: it is applied, said in the pair's why and reported.
+func (c *ctx) applyDeclaredInsulation(p *Pair, a, b *Domain) {
+	grade, at := "", -1
+	for i, si := range c.spec.Isolation {
+		if si.Insulation == "" || !(pairNames(a, si.A) && pairNames(b, si.B) || pairNames(a, si.B) && pairNames(b, si.A)) {
+			continue
+		}
+		if c.isoUsed == nil {
+			c.isoUsed = map[int]bool{}
+		}
+		c.isoUsed[i] = true
+		if at < 0 || insulRank[si.Insulation] > insulRank[grade] {
+			grade, at = si.Insulation, i
+		}
+	}
+	if at < 0 || grade == p.Insulation {
+		return
+	}
+	si, was := c.spec.Isolation[at], p.Insulation
+	p.Insulation = grade
+	if p.MOP != "" || c.out.Standard.MOP != "" {
+		p.MOP, p.MOPCount = c.out.Standard.MOP, 1
+		if insulRank[grade] >= 2 {
+			p.MOPCount = 2
+		}
+	}
+	p.Why = append(p.Why, fmt.Sprintf("spec.isolation[%d] (%s|%s) declares %s insulation (derived: %s): %s", at, si.A, si.B, grade, was, si.Why))
+	if insulRank[grade] < insulRank[was] {
+		c.add("warn", "declared-insulation-lowered", fmt.Sprintf("%s ↔ %s: %s insulation by spec.isolation[%d], where %s is derived — the distances are those of %s insulation", a.ID, b.ID, grade, at, was, grade), nil, []string{si.A, si.B},
+			"the owner's declaration ("+si.Why+"): confirm the other means of protection it relies on")
+	}
 }
 
 // declaredFor is the largest clearance / creepage the spec declares for

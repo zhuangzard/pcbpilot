@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- **`intent derive`: `spec.isolation[].insulation` states a pair's insulation grade.** A pair between a hazardous and
+  a touchable domain is derived as reinforced; where the other means of protection exists (mains to protective earth),
+  the spec can now say `"insulation": "basic"` with a required `why`. The pair's distances follow the declared grade,
+  the pair's `why` names the declaration, and a grade below the derived one is reported as the warning
+  `declared-insulation-lowered`.
 - **`intent derive`: a declared net between two isolation parts is in its declared domain.** A net that only
   isolation parts sit on (an isolator's output into an isolated converter) had no part to carry it into a domain, so a
   net declared in a mains domain ended in none and got no insulation pair. It is now in the domain it was declared in.

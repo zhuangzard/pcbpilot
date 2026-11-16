@@ -127,3 +127,68 @@ func TestDeclaredIsolationUnmatchedDomainWarns(t *testing.T) {
 		t.Fatalf("no warning for the unmatched spec.domains declaration: %+v", it.Findings)
 	}
 }
+
+// A pair's grade stated in spec.isolation replaces the derived one: a
+// lower grade gives the lower distances, says so in the pair and is a
+// warning; it needs a why, and a grade outside the list is refused.
+func TestDeclaredPairInsulation(t *testing.T) {
+	base := mainsIntent(t, nil)
+	var strict *Pair
+	for _, p := range base.Pairs {
+		if insulRank[p.Insulation] >= 2 {
+			strict = p
+		}
+	}
+	if strict == nil {
+		t.Fatalf("fixture has no reinforced pair: %+v", base.Pairs)
+	}
+	it := mainsIntent(t, func(s *Spec) {
+		s.Isolation = []SpecIsolation{{A: strict.A, B: strict.B, Insulation: "basic", Why: "protective earth is the other means"}}
+	})
+	p := pairOf(it, strict.A, strict.B)
+	if p.Insulation != "basic" || p.ClearanceMm >= strict.ClearanceMm || p.CreepageMm >= strict.CreepageMm {
+		t.Fatalf("declared basic: %s %g/%g, derived %s %g/%g", p.Insulation, p.ClearanceMm, p.CreepageMm, strict.Insulation, strict.ClearanceMm, strict.CreepageMm)
+	}
+	if !strings.Contains(strings.Join(p.Why, "; "), "protective earth is the other means") {
+		t.Fatalf("why %v", p.Why)
+	}
+	warned := false
+	for _, f := range it.Findings {
+		warned = warned || f.Kind == "declared-insulation-lowered" && f.Severity == "warn"
+		if f.Kind == "declared-isolation-unmatched" {
+			t.Fatalf("a matched declaration was reported unmatched: %+v", f)
+		}
+	}
+	if !warned {
+		t.Fatal("a lowered grade was not reported")
+	}
+	for _, q := range it.Pairs {
+		if o := pairOf(base, q.A, q.B); q != p && (o == nil || o.Insulation != q.Insulation || o.ClearanceMm != q.ClearanceMm) {
+			t.Fatalf("pair %s|%s changed", q.A, q.B)
+		}
+	}
+	// The derived grade declared again changes nothing and warns nothing.
+	it = mainsIntent(t, func(s *Spec) {
+		s.Isolation = []SpecIsolation{{A: strict.A, B: strict.B, Insulation: strict.Insulation, Why: "as derived"}}
+	})
+	if p = pairOf(it, strict.A, strict.B); p.Insulation != strict.Insulation || p.ClearanceMm != strict.ClearanceMm {
+		t.Fatalf("same grade: %+v", p)
+	}
+	for _, f := range it.Findings {
+		if f.Kind == "declared-insulation-lowered" {
+			t.Fatalf("no grade was lowered: %+v", f)
+		}
+	}
+	if _, err := ParseSpec([]byte(`{"isolation":[{"a":"X","b":"Y","insulation":"basic","why":"PE"}]}`)); err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []string{
+		`{"isolation":[{"a":"X","b":"Y","insulation":"basic"}]}`,
+		`{"isolation":[{"a":"X","b":"Y","insulation":"functional","why":"w"}]}`,
+		`{"isolation":[{"a":"X","b":"Y","insulation":"none","why":"w"}]}`,
+	} {
+		if _, err := ParseSpec([]byte(bad)); err == nil {
+			t.Errorf("accepted %s", bad)
+		}
+	}
+}
