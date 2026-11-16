@@ -180,3 +180,52 @@ func TestClassifyResistorOhms(t *testing.T) {
 		}
 	}
 }
+
+// A declared domain with no ground net among its nets is a reference domain
+// of its own: a Y capacitor from its return to another circuit's ground does
+// not carry that circuit's domain over it. A rail declared inside a grounded
+// domain seeds nothing.
+func TestDomainDeclaredWithoutGroundSeedsItsOwn(t *testing.T) {
+	parts := []*Part{
+		hvPart("U3", "CTRL-P", Point{300, 1500}, smdPad("1", "VCC_P", 0, 50, 40, 40), smdPad("2", "HV_RTN", 0, -50, 40, 40), smdPad("3", "SIG_P", 50, 0, 40, 40)),
+		hvPart("C3", "100nF", Point{300, 1800}, smdPad("1", "VCC_P", 0, 30, 40, 40), smdPad("2", "HV_RTN", 0, -30, 40, 40)),
+		hvPart("Q1", "NMOS", Point{600, 1500}, smdPad("1", "SIG_P", 0, 50, 40, 40), smdPad("2", "HV_POS", 0, -50, 40, 40), smdPad("3", "HV_RTN", 50, 0, 40, 40)),
+		hvPart("U_ISO2", "PC817", Point{1300, 1500}, smdPad("1", "SIG_P", -100, 50, 40, 40), smdPad("2", "HV_RTN", -100, -50, 40, 40),
+			smdPad("3", "GND_B", 100, -50, 40, 40), smdPad("4", "SIG_B", 100, 50, 40, 40)),
+		tiePart("CY1", "2.2nF Y1", "", "HV_RTN", "GND_B"),
+	}
+	b := tieBoard(parts...)
+	free := Understand(b, Analyze(b, PowerSpec{}, nil))
+	if free.DomainOf["U3"] != free.DomainOf["U2"] {
+		t.Fatalf("fixture: undeclared, the Y capacitor no longer carries GND_B over the bus side: %v", free.DomainOf)
+	}
+	decl := PowerSpec{Declared: []DeclaredDomain{{Nets: []string{"HV_POS", "HV_RTN", "NOT_ON_BOARD"}, Line: true}}}
+	c := Understand(b, Analyze(b, decl, nil))
+	own := c.DomainOf["U3"]
+	if own == "" || own == c.DomainOf["U2"] || own == c.DomainOf["U1"] {
+		t.Fatalf("the declared bus side is not its own domain: %v", c.DomainOf)
+	}
+	for _, ref := range []string{"C3", "Q1"} {
+		if c.DomainOf[ref] != own {
+			t.Errorf("%s in %q, want %q", ref, c.DomainOf[ref], own)
+		}
+	}
+	if c.DomainOf["C2"] != c.DomainOf["U2"] || c.DomainOf["U2"] == own {
+		t.Errorf("the grounded side changed: %v", c.DomainOf)
+	}
+	if c.DeclaredNet["HV_RTN"] != own || c.DeclaredNet["HV_POS"] != own {
+		t.Errorf("DeclaredNet %v, want both bus nets in %q", c.DeclaredNet, own)
+	}
+	if _, ok := c.DeclaredNet["NOT_ON_BOARD"]; ok {
+		t.Errorf("a declared net that is not on the board got a domain: %v", c.DeclaredNet)
+	}
+	if !strings.Contains(strings.Join(c.Notes, "\n"), "declared domain without a ground net") {
+		t.Errorf("no note: %v", c.Notes)
+	}
+	// A rail of a grounded domain, declared: the domain is the ground's.
+	rail := PowerSpec{Declared: []DeclaredDomain{{Nets: []string{"VCC_B"}}}}
+	c = Understand(b, Analyze(b, rail, nil))
+	if c.DeclaredNet["VCC_B"] != c.DomainOf["U2"] || c.DomainOf["C2"] != c.DomainOf["U2"] || c.DomainOf["U1"] == c.DomainOf["U2"] {
+		t.Errorf("a declared rail of a grounded domain: %v %v", c.DeclaredNet, c.DomainOf)
+	}
+}

@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+- **`intent derive`: a declared domain whose return is not a ground net is a domain of its own.** A domain declared in
+  the spec with no ground-named net among its nets (a primary whose return is a bus net) had no reference, so the first
+  Y capacitor from it to another circuit carried that circuit's domain over all of it: one "mains" domain holding nearly
+  every net, referenced to the secondary's ground, and an insulation distance applied board-wide. Its declared nets now
+  seed their own reference domain; a rail declared only to give a grounded domain its kind changes nothing.
+- **`kicad place`: an overlap between two parts that do not move is not illegal.** Two locked or fixed parts whose
+  courtyards overlap (a through-hole part over a part on the other side) failed the placement, which the placer cannot
+  change. Such pairs are now listed in the report's `fixedOverlaps` with a note, are not counted in `illegal`, and are
+  left for DRC to judge.
 - **`kicad place`: a domain may be given several zone rectangles.** `--mech` zones that name the same domain more than
   once used to keep only the last rectangle, so an L-shaped or split domain lost most of its room. Every rectangle now
   counts: the domain's parts are shared among them by the room each has, and a part is legal inside any of them. The

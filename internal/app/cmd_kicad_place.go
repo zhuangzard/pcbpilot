@@ -66,7 +66,11 @@ type kicadPlaceReport struct {
 	Verdict  gate.Status        `json:"verdict"`
 	Illegal  []string           `json:"illegal,omitempty"`
 	ZoneFill []pcbauto.ZoneFill `json:"zoneFill,omitempty"`
-	Notes    []string           `json:"notes,omitempty"`
+	// FixedOverlaps are the courtyard overlaps between two parts that do
+	// not move (locked, fixed by --mech): not placements of this run, so
+	// they do not fail the verdict; DRC judges them.
+	FixedOverlaps []string `json:"fixedOverlaps,omitempty"`
+	Notes         []string `json:"notes,omitempty"`
 
 	path string // where the report was written
 }
@@ -453,6 +457,9 @@ func runKicadPlace(o kicadPlaceOpts, deps kicadPlaceDeps, stderr io.Writer) (*ki
 	}
 	best := outs[0]
 	rep.Illegal, rep.ZoneFill, rep.Verdict = best.Result.Illegal, best.Result.ZoneFill, gate.Pass
+	if rep.FixedOverlaps = best.Result.FixedOverlaps; len(rep.FixedOverlaps) > 0 {
+		fmt.Fprintf(stderr, "placement: note: %d courtyard overlap(s) between parts that do not move (locked or fixed) are left as they are and not counted as illegal (see fixedOverlaps in the report; DRC judges them)\n", len(rep.FixedOverlaps))
+	}
 	for _, z := range rep.ZoneFill {
 		fill := "none usable"
 		if z.Fill != nil {

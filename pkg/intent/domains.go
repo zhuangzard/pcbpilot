@@ -106,6 +106,10 @@ func (c *ctx) buildDomains() {
 					// across the barrier (Y capacitor, bleeder) reaches it from.
 					continue
 				}
+				if g, ok := c.circ.DeclaredNet[n]; ok && g != pd.ID {
+					// Likewise a net of a declared domain without a ground.
+					continue
+				}
 				if has(d.Nets, n) {
 					d.Kind = sd.Kind
 					if sd.WorkingVrms > 0 {

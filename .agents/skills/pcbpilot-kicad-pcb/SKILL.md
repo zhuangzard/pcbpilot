@@ -119,6 +119,8 @@ post-layout 仿真 → 签核 → 保存（复制回工程）。板框、层叠�
   留在连接器旁。
 - **去耦靠脚**：去耦电容必须在其 IC 电源脚旁；看 `report.json` 每个种子的 `decapToPinMeanMil`，偏大说明分组或意图缺失。
 - **热与噪声隔离**：功率件、电感、开关节点与模拟/时钟/RF 分开；高压域由意图的 `domains` / `pairs` 自动分区。
+  意图 spec 里声明的域即使没有地网络（回路是母线负端的一次侧）也自成一域；派生后先看 `domains` 各域的网络数是否
+  与声明相当，某个域占了全板大部分网络就是串域，先修 spec 再布局。
 - **共用 / 占位位号**（v0.10.2 起；更早版本直接报 duplicate designator 失败）：两个 `H1`、logo 的 `REF**` 等不会被移动，作为固定障碍列在 `report.json` 的 `fixed` 与 `notes`；
   要让它们参与布局，请用户在原理图里重新标注成唯一位号再同步。
 
@@ -126,6 +128,7 @@ post-layout 仿真 → 签核 → 保存（复制回工程）。板框、层叠�
 
 1. 跑 `kicad place`，读 `report.json`：每个种子 `illegal`（必须 0）、`labelBlocked`、`metrics.overlaps` / `outOfBoard` /
    `keepoutHits`、`weightedWirelengthIn` 对比 `startWirelengthIn`（原始布局的线长）。
+   两个都不动的件（锁定/固定，如插件压在背面贴片上）互相重叠不算非法，列在 `fixedOverlaps`，交给 DRC 判断。
 2. 最佳种子比原布局线长更长、或关键关系（去耦、晶振、接口保护）变差 → 保留原布局，不为“自动”而换。
 3. 请用户在 KiCad 里看最佳板和备选板，确认可接受的部分；把确认的器件 Lock（或加进 `fixed[]`），这就是**锁定集**，
    只增不减。

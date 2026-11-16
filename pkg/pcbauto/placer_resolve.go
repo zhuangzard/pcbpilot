@@ -85,18 +85,45 @@ const courtyardGap = 2.0
 
 // overlapPairs are the colliding part pairs whose courtyards overlap by
 // more than 1 mil² (metrics' Overlaps; resolveOverlaps can move only the
-// movable ones).
+// movable ones). A pair of two parts that do not move is not among them:
+// see fixedOverlapList.
 func (pl *placer) overlapPairs() [][2]*Part {
 	var out [][2]*Part
 	parts := pl.b.Parts
 	for i, p := range parts {
 		bi := p.Body()
 		for _, q := range parts[i+1:] {
-			if collide(p, q) && bi.OverlapArea(q.Body()) > 1 {
+			if !(p.Fixed && q.Fixed) && collide(p, q) && bi.OverlapArea(q.Body()) > 1 {
 				out = append(out, [2]*Part{p, q})
 			}
 		}
 	}
+	return out
+}
+
+// fixedOverlapList names the courtyard overlaps between two parts that do
+// not move (metrics' FixedOverlaps), sorted: the placer can do nothing
+// about them, and a through-hole part's courtyard over a part on the other
+// side is often meant.
+func (pl *placer) fixedOverlapList() []string {
+	var out []string
+	parts := pl.b.Parts
+	for i, p := range parts {
+		if !p.Fixed {
+			continue
+		}
+		bi := p.Body()
+		for _, q := range parts[i+1:] {
+			if q.Fixed && collide(p, q) && bi.OverlapArea(q.Body()) > 1 {
+				a, b := p.Ref, q.Ref
+				if a > b {
+					a, b = b, a
+				}
+				out = append(out, sprintf("overlap %s %s (%.0f mil²)", a, b, bi.OverlapArea(q.Body())))
+			}
+		}
+	}
+	sort.Strings(out)
 	return out
 }
 

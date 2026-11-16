@@ -222,7 +222,12 @@ type Circuit struct {
 	GroundTies []GroundTie `json:"-"`
 	// GroundDomain maps every ground net to the domain it ended up in.
 	GroundDomain map[string]string `json:"-"`
-	Notes        []string          `json:"notes,omitempty"`
+	// DeclaredNet maps the nets of a declared domain that has no ground
+	// net of its own (a primary whose return is a bus, not a "GND") to the
+	// domain they are: a ground's domain when the declared nets hang on
+	// one, else a domain of their own named after their busiest net.
+	DeclaredNet map[string]string `json:"-"`
+	Notes       []string          `json:"notes,omitempty"`
 }
 
 // GroundTie is one part that joined ground net A to ground net B (Line: B is
@@ -557,6 +562,67 @@ func (c *Circuit) buildDomains(b *Board, an *Analysis) {
 		domOfGround[g] = gfind(g)
 	}
 	c.GroundDomain = domOfGround
+	// A declared domain without a ground net is a reference domain all the
+	// same: its nets seed it as a ground would. (Without this its parts had
+	// no reference, and the first capacitor from one of its nets to another
+	// circuit carried that circuit's domain over all of it.) When a quarter
+	// of the parts on its nets sit on one ground, it is that ground's
+	// domain — a rail declared to give its domain a kind — and nothing
+	// changes.
+	declOf := map[string]string{}
+	if an != nil {
+		for _, dd := range an.declared {
+			grounded := false
+			for _, n := range dd.Nets {
+				_, ok := domOfGround[n]
+				grounded = grounded || ok
+			}
+			if grounded {
+				continue
+			}
+			on := map[string]bool{}
+			busiest := ""
+			for _, n := range dd.Nets {
+				for _, ref := range netParts[n] {
+					on[ref] = true
+				}
+				if len(netParts[n]) > len(netParts[busiest]) || len(netParts[n]) == len(netParts[busiest]) && len(netParts[n]) > 0 && n < busiest {
+					busiest = n
+				}
+			}
+			if busiest == "" {
+				continue
+			}
+			byGround := map[string]int{}
+			for ref := range on {
+				if c.Kinds[ref].Bridges() {
+					continue
+				}
+				seen := map[string]bool{}
+				for _, n := range partNets[ref] {
+					if d, ok := domOfGround[n]; ok && !seen[d] {
+						seen[d] = true
+						byGround[d]++
+					}
+				}
+			}
+			id := busiest
+			for _, g := range grounds {
+				if d := domOfGround[g]; 4*byGround[d] >= len(on) && (id == busiest || byGround[d] > byGround[id]) {
+					id = d
+				}
+			}
+			for _, n := range dd.Nets {
+				if _, taken := declOf[n]; !taken && len(netParts[n]) > 0 {
+					declOf[n] = id
+				}
+			}
+			if id == busiest {
+				c.Notes = append(c.Notes, sprintf("declared domain without a ground net: its %d nets form reference domain %s", len(dd.Nets), id))
+			}
+		}
+	}
+	c.DeclaredNet = declOf
 	assign := map[string]string{}
 	for _, p := range b.Parts {
 		// An isolation part never belongs to one side, even when only one
@@ -570,6 +636,9 @@ func (c *Circuit) buildDomains(b *Board, an *Analysis) {
 		var ds []string
 		for _, n := range partNets[p.Ref] {
 			if d, ok := domOfGround[n]; ok && !containsStr(ds, d) {
+				ds = append(ds, d)
+			}
+			if d, ok := declOf[n]; ok && !containsStr(ds, d) {
 				ds = append(ds, d)
 			}
 			if hasMains && onLine(n) && !containsStr(ds, mainsRoot) {
@@ -596,6 +665,9 @@ func (c *Circuit) buildDomains(b *Board, an *Analysis) {
 			if isGlobalNet(an, n, b.Rules) {
 				continue
 			}
+			if d, ok := declOf[n]; ok && d != assign[ref] {
+				continue // a declared net carries only its own domain
+			}
 			for _, other := range netParts[n] {
 				if _, done := assign[other]; done || c.Kinds[other].Bridges() {
 					continue
@@ -612,7 +684,7 @@ func (c *Circuit) buildDomains(b *Board, an *Analysis) {
 		}
 		for _, n := range partNets[p.Ref] {
 			for _, other := range netParts[n] {
-				if d, ok := assign[other]; ok && !c.Kinds[other].Bridges() {
+				if d, ok := assign[other]; ok && !c.Kinds[other].Bridges() && (declOf[n] == "" || declOf[n] == d) {
 					assign[p.Ref] = d
 					break
 				}

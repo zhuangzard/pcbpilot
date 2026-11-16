@@ -98,11 +98,16 @@ type PlaceMetrics struct {
 	WirelengthIn float64 `json:"weightedWirelengthIn"`
 	StartWireIn  float64 `json:"startWirelengthIn"`
 	Overlaps     int     `json:"overlaps"`
-	OutOfBoard   int     `json:"outOfBoard"`
-	OutOfZone    int     `json:"outOfZone"`
-	KeepoutHits  int     `json:"keepoutHits"`
-	HeightHits   int     `json:"heightHits"`
-	DecapMeanMil float64 `json:"decapToPinMeanMil"`
+	// FixedOverlaps are the courtyard overlaps between two parts that do
+	// not move (locked, fixed by the mechanics): where their owner put
+	// them, not a placement of this run, so they are named and not counted
+	// as illegal.
+	FixedOverlaps int     `json:"fixedOverlaps,omitempty"`
+	OutOfBoard    int     `json:"outOfBoard"`
+	OutOfZone     int     `json:"outOfZone"`
+	KeepoutHits   int     `json:"keepoutHits"`
+	HeightHits    int     `json:"heightHits"`
+	DecapMeanMil  float64 `json:"decapToPinMeanMil"`
 	// TetherExcessMil sums how far every tethered auxiliary sits beyond its
 	// role's slack from the pin it serves (0 = every relation satisfied).
 	TetherExcessMil float64 `json:"tetherExcessMil"`
@@ -137,6 +142,9 @@ type PlaceResult struct {
 	// placement zone's room.
 	Illegal  []string   `json:"illegal,omitempty"`
 	ZoneFill []ZoneFill `json:"zoneFill,omitempty"`
+	// FixedOverlaps names the courtyard overlaps between two parts that do
+	// not move (see PlaceMetrics.FixedOverlaps).
+	FixedOverlaps []string `json:"fixedOverlaps,omitempty"`
 	// Aesthetics is what the aesthetics stage moved (nil when skipped).
 	Aesthetics *AesPlaceReport `json:"aesthetics,omitempty"`
 }
@@ -368,6 +376,9 @@ func Place(b *Board, an *Analysis, c *Circuit, m *Mechanics, opt PlaceOptions) (
 	pl.metrics(res)
 	pairs := pl.overlapPairs()
 	res.Illegal = pl.illegalList(pairs)
+	if res.FixedOverlaps = pl.fixedOverlapList(); len(res.FixedOverlaps) > 0 {
+		res.Notes = append(res.Notes, sprintf("%d courtyard overlap(s) between parts that do not move (locked or fixed): left where they are and not counted as illegal — see fixedOverlaps, and let DRC judge them", len(res.FixedOverlaps)))
+	}
 	res.ZoneFill = pl.zoneFill(res, pairs)
 	for _, z := range res.ZoneFill {
 		switch {
@@ -2345,7 +2356,11 @@ func (pl *placer) metrics(res *PlaceResult) {
 		m.PartAreaIn2 += bi.Area() / 1e6
 		for _, q := range parts[i+1:] {
 			if collide(p, q) && bi.OverlapArea(q.Body()) > 1 {
-				m.Overlaps++
+				if p.Fixed && q.Fixed {
+					m.FixedOverlaps++
+				} else {
+					m.Overlaps++
+				}
 			}
 		}
 		if len(pl.b.Outline) >= 3 && !p.Fixed {

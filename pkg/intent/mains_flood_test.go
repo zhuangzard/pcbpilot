@@ -253,3 +253,61 @@ func TestDomainFloodWarning(t *testing.T) {
 		t.Errorf("flood warning with declared domains: %s", f.Message)
 	}
 }
+
+// groundlessDesign is offlineDesign with the primary's return on a bus net
+// that is no ground (HV_RTN), and a Y capacitor from it to the control ground.
+func groundlessDesign(extra ...*powersim.Part) *powersim.Design {
+	d := offlineDesign(extra...)
+	delete(d.NetRole, "GND_A")
+	for _, p := range d.Parts {
+		for i := range p.Pins {
+			if p.Pins[i].Net == "GND_A" {
+				p.Pins[i].Net = "HV_RTN"
+			}
+		}
+	}
+	d.Parts = append(d.Parts, synPart("C9", "Y1-CAP", "2.2nF", "HV_RTN", "GND_B"))
+	return d
+}
+
+// (f) A declared domain whose return is no ground net is a domain of its
+// own: the Y capacitor from its return to the control ground does not carry
+// the control side's domain over the primary. (A large board declared its
+// mains nets, none of them a ground; the derived mains domain then held
+// nearly every net of the board, referenced to the secondary's ground.)
+func TestDeclaredDomainWithoutGroundIsItsOwn(t *testing.T) {
+	spec := &Spec{Domains: []SpecDomain{{Kind: "mains", Nets: []string{"AC_L", "AC_N", "HV_BUS", "HV_RTN"}}}}
+	it := deriveSyn(t, groundlessDesign(), spec)
+	pri, ctl := domainWith(it, "DB1"), domainWith(it, "U1")
+	if pri == nil || ctl == nil || pri == ctl {
+		t.Fatalf("primary and control are not two domains: %+v", it.Domains)
+	}
+	if pri.Kind != "mains" || has(pri.Nets, "GND_B") || has(pri.Nets, "VCC_B") || has(pri.Parts, "U1") {
+		t.Errorf("primary domain %+v", pri)
+	}
+	if ctl.Kind == "mains" || ctl.Kind == "hazardous" || ctl.Reference != "GND_B" {
+		t.Errorf("control domain %+v", ctl)
+	}
+	for _, n := range []string{"HV_RTN", "HV_BUS", "VCC_A", "SIG_A"} {
+		if np := it.Nets[n]; np == nil || np.Domain != pri.ID {
+			t.Errorf("net %s: %+v, want domain %s", n, np, pri.ID)
+		}
+	}
+	for _, n := range []string{"ADC_IN", "VCC_B", "GND_B", "SIG_B"} {
+		if np := it.Nets[n]; np == nil || np.Domain != ctl.ID || isLine(it, n) {
+			t.Errorf("net %s: %+v, want domain %s and not a line net", n, np, ctl.ID)
+		}
+	}
+	if len(it.Pairs) != 1 || !has(it.Pairs[0].Bridges, "U_ISO1") {
+		t.Errorf("pairs %+v", it.Pairs)
+	}
+	// A rail declared to give a grounded domain its kind seeds nothing new.
+	it = deriveSyn(t, offlineDesign(), &Spec{Domains: []SpecDomain{{Kind: "SELV", Nets: []string{"VCC_B"}}}})
+	if ctl := domainWith(it, "U1"); ctl == nil || ctl.Kind != "SELV" || ctl.Reference != "GND_B" || !has(ctl.Parts, "C2") {
+		t.Errorf("a declared rail of a grounded domain: %+v", ctl)
+	}
+	controlApartDeclared := domainWith(it, "DB1")
+	if controlApartDeclared == nil || controlApartDeclared.Kind != "mains" || controlApartDeclared.Reference != "GND_A" {
+		t.Errorf("primary beside a declared rail: %+v", controlApartDeclared)
+	}
+}

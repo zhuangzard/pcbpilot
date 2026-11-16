@@ -2,6 +2,7 @@ package pcbauto
 
 import (
 	"sort"
+	"strings"
 	"testing"
 	"time"
 )
@@ -336,5 +337,50 @@ func TestFreeGridPartsOnlyKeepoutIsPerMountedSide(t *testing.T) {
 		if under == cu {
 			t.Fatalf("noCopper %v: room under the keep-out for a bottom part: %v", cu, under)
 		}
+	}
+}
+
+// Two parts that do not move and overlap are not the placer's to fix: the
+// pair is listed apart (fixedOverlaps), not among the illegal items, and not
+// counted as an overlap. One of them moving, it is an overlap again.
+func TestFixedPairOverlapIsNotIllegal(t *testing.T) {
+	pl := testPlacer(t, "reference-4stage-compact.json")
+	var res PlaceResult
+	pl.metrics(&res)
+	base, baseFixed := res.Metrics.Overlaps, res.Metrics.FixedOverlaps
+	basePairs := len(pl.overlapPairs())
+	if len(pl.movable) < 2 {
+		t.Skip("fixture lacks movable parts")
+	}
+	p, q := pl.movable[0], pl.movable[1]
+	q.Side = p.Side
+	movePartCentre(q, p.Body().Center(), q.Rotation)
+	p.Fixed, q.Fixed = true, true
+	res = PlaceResult{}
+	pl.metrics(&res)
+	fixed := pl.fixedOverlapList()
+	named := false
+	for _, s := range fixed {
+		named = named || strings.Contains(s, p.Ref) && strings.Contains(s, q.Ref)
+	}
+	if !named || res.Metrics.FixedOverlaps <= baseFixed || res.Metrics.FixedOverlaps != len(fixed) {
+		t.Fatalf("fixed overlaps %v (metric %d, was %d): the pair %s/%s is not among them", fixed, res.Metrics.FixedOverlaps, baseFixed, p.Ref, q.Ref)
+	}
+	for _, pr := range pl.overlapPairs() {
+		if pr[0].Fixed && pr[1].Fixed {
+			t.Fatalf("a pair of fixed parts %s/%s is among the overlaps to resolve", pr[0].Ref, pr[1].Ref)
+		}
+	}
+	for _, s := range pl.illegalList(pl.overlapPairs()) {
+		if strings.Contains(s, "overlap "+p.Ref+" "+q.Ref) || strings.Contains(s, "overlap "+q.Ref+" "+p.Ref) {
+			t.Fatalf("the fixed pair is illegal: %s", s)
+		}
+	}
+	// One of the two free again: the placer's overlap.
+	q.Fixed = false
+	res = PlaceResult{}
+	pl.metrics(&res)
+	if res.Metrics.Overlaps <= base || len(pl.overlapPairs()) <= basePairs {
+		t.Fatalf("with one part movable the overlap is not counted: %d (was %d)", res.Metrics.Overlaps, base)
 	}
 }
