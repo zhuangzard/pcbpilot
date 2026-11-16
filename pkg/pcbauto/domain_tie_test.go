@@ -186,14 +186,17 @@ func TestClassifyResistorOhms(t *testing.T) {
 // not carry that circuit's domain over it. A rail declared inside a grounded
 // domain seeds nothing.
 func TestDomainDeclaredWithoutGroundSeedsItsOwn(t *testing.T) {
-	parts := []*Part{
-		hvPart("U3", "CTRL-P", Point{300, 1500}, smdPad("1", "VCC_P", 0, 50, 40, 40), smdPad("2", "HV_RTN", 0, -50, 40, 40), smdPad("3", "SIG_P", 50, 0, 40, 40)),
-		hvPart("C3", "100nF", Point{300, 1800}, smdPad("1", "VCC_P", 0, 30, 40, 40), smdPad("2", "HV_RTN", 0, -30, 40, 40)),
-		hvPart("Q1", "NMOS", Point{600, 1500}, smdPad("1", "SIG_P", 0, 50, 40, 40), smdPad("2", "HV_POS", 0, -50, 40, 40), smdPad("3", "HV_RTN", 50, 0, 40, 40)),
-		hvPart("U_ISO2", "PC817", Point{1300, 1500}, smdPad("1", "SIG_P", -100, 50, 40, 40), smdPad("2", "HV_RTN", -100, -50, 40, 40),
-			smdPad("3", "GND_B", 100, -50, 40, 40), smdPad("4", "SIG_B", 100, 50, 40, 40)),
-		tiePart("CY1", "2.2nF Y1", "", "HV_RTN", "GND_B"),
+	tieFixture := func() []*Part {
+		return []*Part{
+			hvPart("U3", "CTRL-P", Point{300, 1500}, smdPad("1", "VCC_P", 0, 50, 40, 40), smdPad("2", "HV_RTN", 0, -50, 40, 40), smdPad("3", "SIG_P", 50, 0, 40, 40)),
+			hvPart("C3", "100nF", Point{300, 1800}, smdPad("1", "VCC_P", 0, 30, 40, 40), smdPad("2", "HV_RTN", 0, -30, 40, 40)),
+			hvPart("Q1", "NMOS", Point{600, 1500}, smdPad("1", "SIG_P", 0, 50, 40, 40), smdPad("2", "HV_POS", 0, -50, 40, 40), smdPad("3", "HV_RTN", 50, 0, 40, 40)),
+			hvPart("U_ISO2", "PC817", Point{1300, 1500}, smdPad("1", "SIG_P", -100, 50, 40, 40), smdPad("2", "HV_RTN", -100, -50, 40, 40),
+				smdPad("3", "GND_B", 100, -50, 40, 40), smdPad("4", "SIG_B", 100, 50, 40, 40)),
+			tiePart("CY1", "2.2nF Y1", "", "HV_RTN", "GND_B"),
+		}
 	}
+	parts := tieFixture()
 	b := tieBoard(parts...)
 	free := Understand(b, Analyze(b, PowerSpec{}, nil))
 	if free.DomainOf["U3"] != free.DomainOf["U2"] {
@@ -230,7 +233,7 @@ func TestDomainDeclaredWithoutGroundSeedsItsOwn(t *testing.T) {
 	}
 	// The same rail feeding many isolators: they belong to no side and do
 	// not outvote the two parts that sit on the ground.
-	many := append([]*Part(nil), parts...)
+	many := tieFixture()
 	for i := 0; i < 9; i++ {
 		ref := "U_ISO" + string(rune('A'+i))
 		many = append(many, hvPart(ref, "PC817", Point{1300, 200 + 150*float64(i)}, smdPad("1", "SIG_A", -100, 50, 40, 40), smdPad("2", "GND_A", -100, -50, 40, 40),
@@ -241,10 +244,32 @@ func TestDomainDeclaredWithoutGroundSeedsItsOwn(t *testing.T) {
 	if c.DeclaredNet["VCC_B"] != c.DomainOf["U2"] || c.DomainOf["C2"] != c.DomainOf["U2"] {
 		t.Errorf("a declared rail feeding nine isolators left its ground: %v %v", c.DeclaredNet, c.DomainOf)
 	}
+	// One controller and one Y capacitor on a declared return: the
+	// capacitor has no say, whether or not the controller is there.
+	for _, keep := range [][]string{{"U3", "CY1"}, {"U_ISO2", "CY1"}} {
+		var few []*Part
+		for _, p := range tieFixture() {
+			if containsStr(keep, p.Ref) {
+				few = append(few, p)
+			}
+		}
+		b = tieBoard(few...)
+		c = Understand(b, Analyze(b, decl, nil))
+		if d := c.DeclaredNet["HV_RTN"]; d == "" || d == c.DomainOf["U2"] || d == c.DomainOf["U1"] {
+			t.Errorf("%v: a Y capacitor carried the declared return into %q: %v", keep, d, c.DomainOf)
+		}
+	}
+	// A rail with nothing but two-pad parts on it, declared off the line:
+	// its decoupling capacitor still says whose rail it is.
+	b = tieBoard(tiePart("C7", "100nF", "", "VAUX", "GND_B"), tiePart("R7", "", "1k", "VAUX", "SIG_B"))
+	c = Understand(b, Analyze(b, PowerSpec{Declared: []DeclaredDomain{{Nets: []string{"VAUX"}}}}, nil))
+	if c.DeclaredNet["VAUX"] != c.DomainOf["U2"] || c.DomainOf["C7"] != c.DomainOf["U2"] {
+		t.Errorf("a declared rail of two-pad parts left its ground: %v %v", c.DeclaredNet, c.DomainOf)
+	}
 	// Two groundless declarations that share a net: the first keeps it, and
 	// the result is the same on every run.
 	two := PowerSpec{Declared: []DeclaredDomain{{Nets: []string{"HV_RTN", "HV_POS"}, Line: true}, {Nets: []string{"HV_POS", "SIG_P"}}}}
-	b = tieBoard(parts...)
+	b = tieBoard(tieFixture()...)
 	first := Understand(b, Analyze(b, two, nil))
 	for i := 0; i < 5; i++ {
 		again := Understand(b, Analyze(b, two, nil))

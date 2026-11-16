@@ -565,11 +565,20 @@ func (c *Circuit) buildDomains(b *Board, an *Analysis) {
 	// A declared domain without a ground net is a reference domain all the
 	// same: its nets seed it as a ground would. (Without this its parts had
 	// no reference, and the first capacitor from one of its nets to another
-	// circuit carried that circuit's domain over all of it.) When half
-	// of the parts on its nets — isolation parts aside, which belong to no
-	// side — sit on one ground, it is that ground's domain — a rail
-	// declared to give its domain a kind — and nothing changes.
+	// circuit carried that circuit's domain over all of it.) When most
+	// of the parts on its nets sit on one ground, it is that ground's
+	// domain — a rail declared to give its domain a kind — and nothing
+	// changes. The parts that count are those with three pads or more
+	// (a controller, a transistor: a part with a reference pin), never an
+	// isolation part, which belongs to no side; a two-pad part — the Y
+	// capacitor or the bleeder across the barrier looks just like a rail's
+	// decoupling capacitor — counts only where no other part does and the
+	// declaration is not the line's.
 	declOf := map[string]string{}
+	padCount := map[string]int{}
+	for _, p := range b.Parts {
+		padCount[p.Ref] = len(p.Pads)
+	}
 	if an != nil {
 		for _, dd := range an.declared {
 			grounded := false
@@ -593,23 +602,33 @@ func (c *Circuit) buildDomains(b *Board, an *Analysis) {
 			if busiest == "" {
 				continue
 			}
-			byGround, sided := map[string]int{}, 0
-			for ref := range on {
-				if c.Kinds[ref].Bridges() {
-					continue
-				}
-				sided++
-				seen := map[string]bool{}
-				for _, n := range partNets[ref] {
-					if d, ok := domOfGround[n]; ok && !seen[d] {
-						seen[d] = true
-						byGround[d]++
+			vote := func(minPads int, groundedOnly bool) (map[string]int, int) {
+				byGround, sided := map[string]int{}, 0
+				for ref := range on {
+					if c.Kinds[ref].Bridges() || padCount[ref] < minPads {
+						continue
+					}
+					seen := map[string]bool{}
+					for _, n := range partNets[ref] {
+						if d, ok := domOfGround[n]; ok && !seen[d] {
+							seen[d] = true
+							byGround[d]++
+						}
+					}
+					if len(seen) > 0 || !groundedOnly {
+						sided++
 					}
 				}
+				return byGround, sided
+			}
+			byGround, sided := vote(3, false)
+			if sided == 0 && !dd.Line {
+				// Two-pad parts only: those on a ground decide among themselves.
+				byGround, sided = vote(0, true)
 			}
 			id := busiest
 			for _, g := range grounds {
-				if d := domOfGround[g]; byGround[d] > 0 && 2*byGround[d] >= sided && (id == busiest || byGround[d] > byGround[id]) {
+				if d := domOfGround[g]; 2*byGround[d] > sided && id == busiest {
 					id = d
 				}
 			}
