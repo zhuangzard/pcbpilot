@@ -112,6 +112,11 @@ func TestDomainDeclaredGroundsStayApart(t *testing.T) {
 	if !strings.Contains(strings.Join(c.Notes, "\n"), "declared in different domains") {
 		t.Errorf("no note about the refused tie: %v", c.Notes)
 	}
+	// Two declarations on the line are two domains all the same.
+	both := PowerSpec{Declared: []DeclaredDomain{{Nets: []string{"GND_A", "VCC_A"}, Line: true}, {Nets: []string{"GND_B"}, Line: true}}}
+	if c := Understand(b, Analyze(b, both, nil)); c.DomainOf["U1"] == c.DomainOf["U2"] || len(c.GroundTies) != 0 {
+		t.Fatalf("grounds of two line declarations joined: %v %+v", c.DomainOf, c.GroundTies)
+	}
 	// Through a third, undeclared ground.
 	r2 := tiePart("R2", "", "0R", "GND_C", "GND_B")
 	b = tieBoard(tiePart("R1", "", "0R", "GND_A", "GND_C"), r2)

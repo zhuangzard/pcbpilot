@@ -452,7 +452,7 @@ func (pl *placer) zoneFill(res *PlaceResult, pairs [][2]*Part) []ZoneFill {
 			} else {
 				sf.OverFull = need > 0
 			}
-			if side == LayerBottom && sf.Parts > 0 {
+			if side == LayerBottom && (sf.Parts > 0 || fixed > 0) {
 				bottomUsed = true
 			}
 			sides = append(sides, sf)

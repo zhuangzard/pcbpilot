@@ -358,6 +358,21 @@ func TestKeepStricterAnalyse(t *testing.T) {
 	if len(p.rep.Head) != 0 || len(p.rep.Tail) != 1 || p.verdicts[keepKey{0, 0}].relation != "weaker" {
 		t.Fatalf("unprovable overlap: %+v", p.rep)
 	}
+	// Both overlapping pair rules move (one user rule stricter than each):
+	// in the head block the later rule wins too, so the 2 mm one goes last.
+	p = keepStricterAnalyse([]kicad.DRURule{user(0, "iso_gap", "A.hasNetclass('PPD_HV_A')", "clearance", 3000000)}, gens, env)
+	if len(p.rep.Head) != 2 || p.rep.Head[0].MinNm != 1000000 || p.rep.Head[1].MinNm != 2000000 || len(p.rep.Unresolved) != 0 {
+		t.Fatalf("two moved rules: %+v", p.rep)
+	}
+	// A warning-only user rule no stricter than the generated edge minimum
+	// keeps it last, whatever stricter rule would have moved it: behind the
+	// warning the minimum would no longer be an error.
+	warn := user(1, "edge_note", "A.hasNetclass('PPD_HV_A')", "edge_clearance", 300000)
+	warn.Severity = "warning"
+	p = keepStricterAnalyse([]kicad.DRURule{user(0, "edge_gap", "A.hasNetclass('PPD_HV_A')", "edge_clearance", 800000), warn}, gens, env)
+	if len(p.rep.Head) != 0 || len(p.rep.Unresolved) != 1 || !strings.Contains(p.rep.Unresolved[0].Why, "edge_note") || p.verdicts[keepKey{0, 0}].ok {
+		t.Fatalf("weaker warning rule: %+v", p.rep)
+	}
 	// Equal: nothing to order.
 	p = keepStricterAnalyse([]kicad.DRURule{user(0, "edge_gap", "A.hasNetclass('PPD_HV_A')", "edge_clearance", 500000)}, gens, env)
 	if len(p.rep.Head) != 0 || len(p.rep.Unresolved) != 0 || p.verdicts[keepKey{0, 0}].relation != "equal" {

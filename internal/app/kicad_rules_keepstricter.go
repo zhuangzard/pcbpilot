@@ -294,6 +294,10 @@ func keepStricterAnalyse(users []kicad.DRURule, gens []keepGen, env keepEnv) *ke
 			case !l.comparable && (l.min <= g.min || l.u.Constraints[l.con].Min == nil || l.u.Constraints[l.con].Unparsed):
 				if l.u.Constraints[l.con].Min == nil || l.u.Constraints[l.con].Unparsed {
 					blockers[gi] = append(blockers[gi], fmt.Sprintf("the user rule %q may match the same items and cannot be compared (%s)", l.u.Name, l.whyNot))
+				} else {
+					// Behind it the generated minimum would be lost where
+					// both match: it stays last, as without --keep-stricter.
+					blockers[gi] = append(blockers[gi], fmt.Sprintf("the user rule %q (min %s) is no stricter and %s, so the generated rule must stay after it", l.u.Name, mm(l.min), l.whyNot))
 				}
 			case !l.comparable:
 				blockers[gi] = append(blockers[gi], fmt.Sprintf("the user rule %q is stricter (min %s) but %s", l.u.Name, mm(l.min), l.whyNot))
@@ -386,6 +390,9 @@ func keepStricterAnalyse(users []kicad.DRURule, gens []keepGen, env keepEnv) *ke
 		p.verdicts[k] = v
 	}
 	sort.SliceStable(p.rep.Unresolved, func(i, j int) bool { return p.rep.Unresolved[i].UserRule < p.rep.Unresolved[j].UserRule })
+	// In the head block the later rule wins too: the stricter minimum goes
+	// last, so one moved rule never lowers another where both match.
+	sort.SliceStable(p.rep.Head, func(i, j int) bool { return p.rep.Head[i].MinNm < p.rep.Head[j].MinNm })
 	return p
 }
 

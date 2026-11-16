@@ -1835,9 +1835,13 @@ func (pl *placer) legalise() {
 					pl.spiralRings = 0
 				}
 			}
+			at := p.Body().Center()
 			ok := pl.spiral(p)
 			if grid != nil {
 				grid.put(p, pl.boxes[p])
+				if p.Body().Center() != at {
+					clear(grid.full) // the room it left may be what another needs
+				}
 			}
 			if ok {
 				moved = true

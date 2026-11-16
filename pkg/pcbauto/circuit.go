@@ -447,13 +447,13 @@ func (c *Circuit) buildDomains(b *Board, an *Analysis) {
 	}
 	union := func(ref, a, bb string) bool {
 		ra, rb := gfind(a), gfind(bb)
-		if ga, gb := grp[ra], grp[rb]; ga != 0 && gb != 0 && ga != gb && !(grpLine[ga] && grpLine[gb]) {
+		if ga, gb := grp[ra], grp[rb]; ga != 0 && gb != 0 && ga != gb && !(grpLine[ga] && grpLine[gb] && (ga == -1 || gb == -1)) {
 			c.Notes = append(c.Notes, sprintf("%s: grounds %s and %s are declared in different domains — not joined", ref, a, bb))
 			return false
 		} else if ra != rb {
 			gparent[ra] = rb
-			if gb == 0 {
-				grp[rb] = ga
+			if gb == 0 || (gb == -1 && ga > 0) {
+				grp[rb] = ga // a declaration outlives "on the line, undeclared"
 			}
 		}
 		return true
