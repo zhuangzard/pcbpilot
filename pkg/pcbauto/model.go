@@ -48,9 +48,13 @@ func (p *Pad) OnLayer(id int) bool { return p.Layer == LayerMulti || p.Layer == 
 
 // Part is a placed footprint.
 type Part struct {
-	Ref      string  `json:"ref"`
-	ID       string  `json:"id,omitempty"`
-	Device   string  `json:"device,omitempty"`
+	Ref    string `json:"ref"`
+	ID     string `json:"id,omitempty"`
+	Device string `json:"device,omitempty"`
+	// Value is the schematic value ("10k", "0R") when the caller knows it
+	// apart from Device (which is often a part number). Optional: only the
+	// domain rules read it, to tell a ground tie from a bleeder.
+	Value    string  `json:"value,omitempty"`
 	Pos      Point   `json:"pos"` // anchor
 	Rotation float64 `json:"rotation"`
 	Side     int     `json:"side"` // 1 top, 2 bottom

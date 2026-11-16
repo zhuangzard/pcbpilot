@@ -34,13 +34,14 @@ type ctx struct {
 	worst *powersim.Result
 	scens []*powersim.Result // solved scenarios (no "worst")
 
-	parts   map[string]*powersim.Part
-	simKind map[string]string          // ref → sim model kind
-	modelID map[string]string          // ref → bound model id
-	conf    map[string]string          // ref → model confidence
-	model   map[string]*powersim.Model // ref → library model (ratings)
-	netPins map[string][]pinRef        // net → pins (design order)
-	mains   map[string]bool            // AC line nets
+	parts    map[string]*powersim.Part
+	simKind  map[string]string          // ref → sim model kind
+	modelID  map[string]string          // ref → bound model id
+	conf     map[string]string          // ref → model confidence
+	model    map[string]*powersim.Model // ref → library model (ratings)
+	netPins  map[string][]pinRef        // net → pins (design order)
+	mains    map[string]bool            // AC line nets
+	mainsVia map[string]int             // ref → nets the line reached through that part
 
 	out *Intent
 
@@ -115,6 +116,7 @@ func Derive(in Input) (*Intent, error) {
 		Pairs:     "insulation between domains that an isolation part bridges; numbers from SafetyDistances(pair, standard)",
 	}
 	c.buildDomains()
+	c.checkDomainFlood()
 	c.out.Standard = resolveStandard(c.spec.Standard, c.hasHazard())
 	c.buildBlocks()
 	c.buildNets()
@@ -240,6 +242,9 @@ func (c *ctx) setup() error {
 	}
 	if c.spec.Standard != nil {
 		ps.Coated = c.spec.Standard.Coated
+	}
+	for _, sd := range c.spec.Domains {
+		ps.Declared = append(ps.Declared, pcbauto.DeclaredDomain{Nets: sd.Nets, Line: lineKind(sd.Kind)})
 	}
 	for _, r := range c.spec.Rails {
 		if r.CurrentA > 0 || r.Voltage != 0 {
@@ -519,49 +524,130 @@ func has(xs []string, v string) bool {
 }
 
 var (
-	reSeriesRef  = regexp.MustCompile(`^(F|FU|PTC|NTC|RT|TH|L|FB|LF|CMC|RV|MOV|VDR|ZNR|R)[0-9]`)
+	// reSeriesRef: parts that sit in series with the line and pass it on
+	// (fuse, thermistor, choke, varistor). Resistors are judged by value,
+	// see lineResistor.
+	reSeriesRef  = regexp.MustCompile(`^(F|FU|PTC|NTC|RT|TH|L|FB|LF|CMC|RV|MOV|VDR|ZNR)[0-9]`)
+	reChokeRef   = regexp.MustCompile(`^(L|LF|CMC)[0-9]`)
+	reResRef     = regexp.MustCompile(`^R[0-9]`)
 	reContactPin = regexp.MustCompile(`(?i)^(COM\d?|NO\d?|NC\d?)$`)
+	// reRailName: supply rails of some other circuit. The line never spreads
+	// INTO one (a divider's bottom rail, a sense resistor's supply).
+	reRailName = regexp.MustCompile(`(?i)^\+?(VCC|VDD|VEE|VBUS|VBAT|VSYS|VCORE|VIO|AVDD|DVDD|PVDD|AVCC|DVCC)[A-Z0-9_.+-]*$|^[+-]?\d+(\.\d+)?V\d*[A-Z0-9_]*$`)
 )
 
-// propagateMains extends the AC line set through series parts (fuse,
-// thermistor, choke, varistor, resistor) and relay contacts: a fused L is
+// lineResistorOhms is the resistance up to which a resistor in the line is a
+// series element (inrush limiter, fusible resistor, shunt) whose far side is
+// still the line. Above it — or with no readable value — the far side is a
+// divider tap, a bleeder node or a sense signal: not the line.
+const lineResistorOhms = 10.0
+
+// propagateMains extends the AC line set through genuine series parts — a
+// two-terminal fuse, thermistor, choke or varistor, a resistor known to be
+// ≤ 10 Ω, a common-mode choke winding — and relay contacts: a fused L is
 // still line voltage. Capacitors are not crossed (a Y-cap reaches the
-// secondary ground on purpose).
+// secondary ground on purpose), nor are resistors of higher or unknown
+// value (a sense divider reaches a controller's ADC pin on purpose), and
+// the line never spreads into a ground, a supply rail or a net the spec
+// declares in a non-mains domain. (Before 2026-11-16 every R… part passed
+// the line on through all its pins: on a large mixed board the series and
+// pull-up resistors carried it to nearly every net.)
 func (c *ctx) propagateMains() {
 	if len(c.mains) == 0 {
 		return
 	}
+	blocked := map[string]bool{}
+	for _, sd := range c.spec.Domains {
+		if !lineKind(sd.Kind) {
+			for _, n := range sd.Nets {
+				blocked[n] = true
+			}
+		}
+	}
+	for _, r := range c.spec.Rails {
+		blocked[r.Net] = true
+	}
+	open := func(n string) bool {
+		if n == "" || c.mains[n] || blocked[n] || c.d.NetRole[n] == "ground" {
+			return false
+		}
+		return !reGroundName.MatchString(n) && !reRailName.MatchString(strings.TrimSpace(n))
+	}
+	c.mainsVia = map[string]int{}
 	for changed := true; changed; {
 		changed = false
 		for _, p := range c.d.Parts {
-			var group []string
+			ref := strings.ToUpper(p.Ref)
+			var groups [][]string
 			switch {
-			case reSeriesRef.MatchString(strings.ToUpper(p.Ref)):
-				for _, pin := range p.Pins {
-					group = append(group, pin.Net)
-				}
-			case strings.HasPrefix(strings.ToUpper(p.Ref), "K"):
-				for _, pin := range p.Pins {
-					if reContactPin.MatchString(pin.Name) {
-						group = append(group, pin.Net)
+			case reSeriesRef.MatchString(ref), reResRef.MatchString(ref):
+				nets := distinctNets(p.Pins, nil)
+				if reResRef.MatchString(ref) {
+					if v, ok := pcbauto.ResistorOhms(p.Value); !ok || v > lineResistorOhms || len(nets) != 2 {
+						continue
 					}
 				}
+				switch {
+				case len(nets) == 2:
+					groups = append(groups, nets)
+				case reChokeRef.MatchString(ref) && len(p.Pins) == 4:
+					if ws := c.spec.Windings[p.Ref]; ws != nil {
+						// Declared windings: each carries its own conductor.
+						byNum := map[string]string{}
+						for _, pin := range p.Pins {
+							byNum[pin.Number] = pin.Net
+						}
+						for _, w := range ws {
+							groups = append(groups, []string{byNum[w[0]], byNum[w[1]]})
+						}
+						break
+					}
+					// Undeclared common-mode choke: with two line conductors
+					// on it, both windings carry the line; with one, the
+					// other winding may belong to another circuit.
+					hot := 0
+					for _, n := range nets {
+						if c.mains[n] {
+							hot++
+						}
+					}
+					if hot >= 2 {
+						groups = append(groups, nets)
+					}
+				}
+			case strings.HasPrefix(ref, "K"):
+				groups = append(groups, distinctNets(p.Pins, func(pin powersim.Pin) bool { return reContactPin.MatchString(pin.Name) }))
 			}
-			hot := false
-			for _, n := range group {
-				hot = hot || c.mains[n]
-			}
-			if !hot {
-				continue
-			}
-			for _, n := range group {
-				if n != "" && !c.mains[n] && !reGroundName.MatchString(n) {
-					c.mains[n] = true
-					changed = true
+			for _, group := range groups {
+				hot := false
+				for _, n := range group {
+					hot = hot || c.mains[n]
+				}
+				if !hot {
+					continue
+				}
+				for _, n := range group {
+					if open(n) {
+						c.mains[n] = true
+						c.mainsVia[p.Ref]++
+						changed = true
+					}
 				}
 			}
 		}
 	}
+}
+
+// distinctNets lists the nets on pins (those keep accepts; nil = all), each
+// once, in pin order.
+func distinctNets(pins []powersim.Pin, keep func(powersim.Pin) bool) []string {
+	var out []string
+	for _, pin := range pins {
+		if pin.Net != "" && (keep == nil || keep(pin)) && !has(out, pin.Net) {
+			out = append(out, pin.Net)
+		}
+	}
+	return out
 }
 
 var reGroundName = regexp.MustCompile(`(?i)^([A-Z0-9]+_)?(A|D|P|S|C|E)?GND[A-Z0-9_]*$|^VSS[A-Z0-9_]*$|^GROUND$|^0V$`)

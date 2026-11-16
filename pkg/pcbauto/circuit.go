@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -94,7 +95,9 @@ func ClassifyPart(p *Part) PartKind {
 	switch prefix {
 	case "R", "RN", "RA", "VR":
 		return KindResistor
-	case "C", "CE", "EC", "CB":
+	case "C", "CE", "EC", "CB", "CX", "CY":
+		// CX / CY: safety (X / Y) capacitors. Left unclassified, a Y capacitor
+		// across a barrier counted as a wire and joined the two grounds.
 		return KindCapacitor
 	case "L", "FB":
 		return KindInductor
@@ -110,7 +113,7 @@ func ClassifyPart(p *Part) PartKind {
 		return KindFuse
 	case "K", "RLY":
 		return KindRelay
-	case "T", "TR":
+	case "T", "TR", "TX":
 		return KindTransformer
 	case "SW", "S", "KEY", "BTN":
 		return KindSwitch
@@ -213,7 +216,107 @@ type Circuit struct {
 	// UnknownWindings are 4-pad inductors on two or more grounds whose
 	// windings are not declared: their grounds were not joined.
 	UnknownWindings []string `json:"unknownWindings,omitempty"`
-	Notes           []string `json:"notes,omitempty"`
+	// GroundTies are the parts that joined two ground nets (or a ground and
+	// the line) into one domain, in board order: the trail a caller follows
+	// when one domain swallowed the board.
+	GroundTies []GroundTie `json:"-"`
+	// GroundDomain maps every ground net to the domain it ended up in.
+	GroundDomain map[string]string `json:"-"`
+	Notes        []string          `json:"notes,omitempty"`
+}
+
+// GroundTie is one part that joined ground net A to ground net B (Line: B is
+// the AC line, A the ground tied to it). Sure marks a tie that is clearly
+// meant: a resistor of known low value, a net-tie, a declared winding.
+type GroundTie struct {
+	Ref  string
+	A, B string
+	Line bool
+	Sure bool
+}
+
+// BleederOhms is the resistance from which a resistor between two grounds
+// (or from the line to a ground) is a bleeder / divider / protective
+// impedance across a barrier, not a tie that makes them one circuit.
+const BleederOhms = 100e3
+
+var (
+	reOhmPlain = regexp.MustCompile(`^(\d+(?:\.\d+)?)\s*([mRrkKMG]?)\s*(?:[Ω\x{2126}]|[oO][hH][mM][sS]?|R)?$`)
+	reOhmInfix = regexp.MustCompile(`^(\d+)([mRrkKMG])(\d+)\s*[Ω\x{2126}]?$`)
+	// reTieRef / reTieDev: the two-pad parts of no recognised kind that are a
+	// deliberate connection (net-tie, solder jumper / bridge, 0 Ω link).
+	reTieRef = regexp.MustCompile(`^(NT|SJ|SB|JP|W|LK)\d`)
+	reTieDev = regexp.MustCompile(`(?i)(NET[-_ ]?TIE|JUMPER|SOLDER.?BRIDGE|^0 ?(R|[Ω\x{2126}]|OHM)$)`)
+)
+
+// ResistorOhms reads a plain resistance ("0R", "4K7", "330kΩ", "1M", "100");
+// ok is false for anything else (a part number, an empty value).
+func ResistorOhms(s string) (ohms float64, ok bool) {
+	s = strings.TrimSpace(s)
+	if f := strings.Fields(s); len(f) > 1 { // "330 kΩ", "10k 1%"
+		if v, ok := ResistorOhms(f[0] + f[1]); ok {
+			return v, true
+		}
+		s = f[0]
+	}
+	mult := func(u string) float64 {
+		switch u {
+		case "m":
+			return 1e-3
+		case "k", "K":
+			return 1e3
+		case "M":
+			return 1e6
+		case "G":
+			return 1e9
+		}
+		return 1
+	}
+	if m := reOhmInfix.FindStringSubmatch(s); m != nil {
+		v, err := strconv.ParseFloat(m[1]+"."+m[3], 64)
+		return v * mult(m[2]), err == nil
+	}
+	if m := reOhmPlain.FindStringSubmatch(s); m != nil {
+		v, err := strconv.ParseFloat(m[1], 64)
+		return v * mult(m[2]), err == nil
+	}
+	return 0, false
+}
+
+// partOhms is the resistance of a resistor part from its Value, else its
+// Device when that is a value with a unit (a bare number there is a
+// footprint or an order code, not ohms).
+func partOhms(p *Part) (float64, bool) {
+	if v, ok := ResistorOhms(p.Value); ok {
+		return v, true
+	}
+	if strings.Trim(strings.TrimSpace(p.Device), "0123456789.") == "" {
+		return 0, false
+	}
+	return ResistorOhms(p.Device)
+}
+
+// tiesGrounds reports whether a two-pad part between two grounds makes them
+// one circuit, and whether that is certain. A resistor does unless it is
+// known to be ≥ 100 kΩ (a bleeder or divider across a barrier); one of
+// unknown value still does — a ground-to-ground resistor is nearly always a
+// 0 Ω star point, and a board often carries only its part number — but is
+// not "sure". An inductor / ferrite does. A part of no recognised kind does
+// only when it is named as a link (net-tie, solder jumper, 0 Ω): a spark
+// gap, a varistor or an unrecognised safety capacitor is not a wire.
+func (c *Circuit) tiesGrounds(p *Part) (tie, sure bool) {
+	switch c.Kinds[p.Ref] {
+	case KindResistor:
+		v, ok := partOhms(p)
+		return !ok || v < BleederOhms, ok && v <= 10
+	case KindInductor:
+		return true, false
+	case KindOther:
+		if reTieRef.MatchString(upper(p.Ref)) || reTieDev.MatchString(strings.TrimSpace(p.Device)) || reTieDev.MatchString(strings.TrimSpace(p.Value)) {
+			return true, true
+		}
+	}
+	return false, false
 }
 
 var (
@@ -289,12 +392,78 @@ func (c *Circuit) buildDomains(b *Board, an *Analysis) {
 		gparent[g] = gfind(gparent[g])
 		return gparent[g]
 	}
+	// Declared domains win: two grounds declared in different domains are
+	// never joined (grp follows the union roots, so not through a third
+	// ground either), and a ground declared outside the line is never tied
+	// to it.
+	grp, grpLine := map[string]int{}, map[int]bool{}
+	if an != nil {
+		for i, dd := range an.declared {
+			grpLine[i+1] = dd.Line
+			for _, n := range dd.Nets {
+				if grp[n] == 0 && an.Plan(n, b.Rules).Role == RoleGround {
+					grp[n] = i + 1
+				}
+			}
+		}
+	}
+	// lineGrounds: the line net and the grounds a conducting part sits on.
+	// Isolating parts (transformer, opto, isolator, relay), capacitors (X/Y
+	// caps) and resistors known to be ≥ 100 kΩ (the bleeder beside a Y
+	// capacitor, a protective impedance) conduct nothing that ties.
+	lineGrounds := func(p *Part) (line string, gs []string) {
+		k := c.Kinds[p.Ref]
+		if k.Bridges() || k == KindCapacitor {
+			return "", nil
+		}
+		if v, ok := partOhms(p); k == KindResistor && ok && v >= BleederOhms {
+			return "", nil
+		}
+		for _, pd := range p.Pads {
+			if reMains.MatchString(upper(pd.Net)) {
+				line = pd.Net
+			}
+			if an.Plan(pd.Net, b.Rules).Role == RoleGround && !slices.Contains(gs, pd.Net) {
+				gs = append(gs, pd.Net)
+			}
+		}
+		return line, gs
+	}
+	if len(grp) > 0 {
+		// An undeclared ground on the line counts as declared on it, so a
+		// ground declared outside the line cannot absorb it first.
+		grpLine[-1] = true
+		for _, p := range b.Parts {
+			if line, gs := lineGrounds(p); line != "" {
+				for _, g := range gs {
+					if grp[g] == 0 {
+						grp[g] = -1
+					}
+				}
+			}
+		}
+	}
+	union := func(ref, a, bb string) bool {
+		ra, rb := gfind(a), gfind(bb)
+		if ga, gb := grp[ra], grp[rb]; ga != 0 && gb != 0 && ga != gb && !(grpLine[ga] && grpLine[gb]) {
+			c.Notes = append(c.Notes, sprintf("%s: grounds %s and %s are declared in different domains — not joined", ref, a, bb))
+			return false
+		} else if ra != rb {
+			gparent[ra] = rb
+			if gb == 0 {
+				grp[rb] = ga
+			}
+		}
+		return true
+	}
 	for _, p := range b.Parts {
 		k := c.Kinds[p.Ref]
 		if (k == KindResistor || k == KindInductor || k == KindOther) && len(p.Pads) == 2 {
 			a, bb := p.Pads[0].Net, p.Pads[1].Net
 			if a != bb && an.Plan(a, b.Rules).Role == RoleGround && an.Plan(bb, b.Rules).Role == RoleGround {
-				gparent[gfind(a)] = gfind(bb)
+				if tie, sure := c.tiesGrounds(p); tie && union(p.Ref, a, bb) {
+					c.GroundTies = append(c.GroundTies, GroundTie{Ref: p.Ref, A: a, B: bb, Sure: sure})
+				}
 			}
 		}
 		// A 4-pin common-mode choke carries the return line through one
@@ -325,8 +494,8 @@ func (c *Circuit) buildDomains(b *Board, an *Analysis) {
 			}
 			for _, w := range ws {
 				a, bb := byNum[w[0]], byNum[w[1]]
-				if a != "" && bb != "" && a != bb && an.Plan(a, b.Rules).Role == RoleGround && an.Plan(bb, b.Rules).Role == RoleGround {
-					gparent[gfind(a)] = gfind(bb)
+				if a != "" && bb != "" && a != bb && an.Plan(a, b.Rules).Role == RoleGround && an.Plan(bb, b.Rules).Role == RoleGround && union(p.Ref, a, bb) {
+					c.GroundTies = append(c.GroundTies, GroundTie{Ref: p.Ref, A: a, B: bb, Sure: true})
 				}
 			}
 		}
@@ -341,30 +510,26 @@ func (c *Circuit) buildDomains(b *Board, an *Analysis) {
 	// A ground galvanically tied to the line — the DC side of a bridge
 	// rectifier, a capacitive dropper's return — is the same hazardous
 	// circuit as the line: one domain, no insulation between them. Only
-	// isolating parts (transformer, opto, isolator, relay) and capacitors
-	// (X/Y caps) do not tie. Without this the primary of an off-line
-	// converter was a separate domain "insulated" from the line by its own
-	// bridge rectifier.
+	// isolating parts (transformer, opto, isolator, relay), capacitors
+	// (X/Y caps) and resistors known to be ≥ 100 kΩ (the bleeder beside a Y
+	// capacitor, a protective impedance) do not tie. Without this the
+	// primary of an off-line converter was a separate domain "insulated"
+	// from the line by its own bridge rectifier.
 	mainsRoot := "MAINS"
 	if hasMains {
 		var tied []string
 		for _, p := range b.Parts {
-			k := c.Kinds[p.Ref]
-			if k.Bridges() || k == KindCapacitor {
+			line, gs := lineGrounds(p)
+			if line == "" {
 				continue
 			}
-			line := false
-			var gs []string
-			for _, pd := range p.Pads {
-				if reMains.MatchString(upper(pd.Net)) {
-					line = true
+			for _, g := range gs {
+				if d := grp[gfind(g)]; d != 0 && !grpLine[d] {
+					c.Notes = append(c.Notes, sprintf("%s: ground %s is declared outside the line — not tied to %s", p.Ref, g, line))
+					continue
 				}
-				if an.Plan(pd.Net, b.Rules).Role == RoleGround {
-					gs = append(gs, pd.Net)
-				}
-			}
-			if line {
-				tied = append(tied, gs...)
+				tied = append(tied, g)
+				c.GroundTies = append(c.GroundTies, GroundTie{Ref: p.Ref, A: g, B: line, Line: true})
 			}
 		}
 		sort.Strings(tied)
@@ -373,7 +538,7 @@ func (c *Circuit) buildDomains(b *Board, an *Analysis) {
 				mainsRoot = gfind(g)
 				continue
 			}
-			gparent[gfind(g)] = gfind(mainsRoot)
+			union("line", g, mainsRoot)
 			mainsRoot = gfind(mainsRoot)
 		}
 		if mainsRoot != "MAINS" {
@@ -384,6 +549,7 @@ func (c *Circuit) buildDomains(b *Board, an *Analysis) {
 	for _, g := range grounds {
 		domOfGround[g] = gfind(g)
 	}
+	c.GroundDomain = domOfGround
 	assign := map[string]string{}
 	for _, p := range b.Parts {
 		// An isolation part never belongs to one side, even when only one

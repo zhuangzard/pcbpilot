@@ -5,6 +5,8 @@ import (
 	"math"
 	"sort"
 	"strings"
+
+	"github.com/zhuangzard/pcbpilot/pkg/pcbauto"
 )
 
 // SELV limits (IEC 61140 / 62368-1 ES1): 60 V DC, 30 Vrms / 42.4 V peak AC.
@@ -62,19 +64,18 @@ func (c *ctx) buildDomains() {
 	for _, pd := range c.circ.Domains {
 		d := &Domain{Nets: append([]string(nil), pd.Nets...), Reference: pd.Ground, Parts: sortRefs(append([]string(nil), pd.Parts...))}
 		sort.Strings(d.Nets)
-		mains := false
+		mains := c.lineTied(pd)
 		rms, peak := 0.0, 0.0
 		for _, n := range pd.Nets {
 			if c.mains[n] {
-				mains = true
-				continue
+				continue // the line's own voltage: counted only by a domain on it
 			}
 			v := c.volts[n]
 			rms = math.Max(rms, math.Max(math.Abs(v.Max), math.Abs(v.Min)))
 			peak = math.Max(peak, v.Peak)
 		}
 		switch {
-		case mains || pd.ID == "MAINS":
+		case mains:
 			d.Kind = "mains"
 			line := c.mainsVrms()
 			d.Why = append(d.Why, fmt.Sprintf("AC line nets present: %s Vrms (%s V peak)", trimFloat(line, 0), trimFloat(line*math.Sqrt2, 0)))
@@ -100,6 +101,11 @@ func (c *ctx) buildDomains() {
 		}
 		for _, sd := range c.spec.Domains {
 			for _, n := range sd.Nets {
+				if g, ok := c.circ.GroundDomain[n]; ok && g != pd.ID {
+					// A declared ground names its own domain, not one a part
+					// across the barrier (Y capacitor, bleeder) reaches it from.
+					continue
+				}
 				if has(d.Nets, n) {
 					d.Kind = sd.Kind
 					if sd.WorkingVrms > 0 {
@@ -488,5 +494,156 @@ func (c *ctx) findDeclaredIsolation() {
 			c.add("warn", "declared-isolation-unmatched", fmt.Sprintf("spec.domains[%d] declares clearance %s / creepage %s mm but its domain is in no insulation pair: not applied", i, trimFloat(sd.ClearanceMm, 3), trimFloat(sd.CreepageMm, 3)), nil, sd.Nets,
 				"check that the domain's nets are on the barrier an isolation part bridges")
 		}
+	}
+}
+
+// lineKind reports whether a declared domain kind may be on the AC line.
+func lineKind(kind string) bool { return kind == "mains" || kind == "hazardous" }
+
+// lineTied reports whether pcbauto domain pd is galvanically on the AC line:
+// it is the line itself, or a conducting part of it sits on a line net. A
+// capacitor (Y capacitor), an isolation part and a resistor that is not
+// known to be < 100 kΩ (sense divider, bleeder) reach the line without
+// making their domain part of it. (Before 2026-11-16 one line net among a
+// domain's nets — the far end of a divider — made the whole domain mains.)
+func (c *ctx) lineTied(pd *pcbauto.Domain) bool {
+	if pd.ID == "MAINS" {
+		return true
+	}
+	for _, ref := range pd.Parts {
+		p := c.parts[ref]
+		k := c.circ.Kinds[ref]
+		if p == nil || k.Bridges() || k == pcbauto.KindCapacitor {
+			continue
+		}
+		if v, ok := pcbauto.ResistorOhms(p.Value); k == pcbauto.KindResistor && (!ok || v >= pcbauto.BleederOhms) {
+			continue
+		}
+		for _, pin := range p.Pins {
+			if c.mains[pin.Net] {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// floodShare is the share of the board's nets above which one hazardous
+// domain, on a board that carries isolation parts, is reported when it was
+// assembled from several grounds.
+const floodShare = 0.6
+
+// checkDomainFlood warns when one derived mains / hazardous domain swallowed
+// most of a board that has isolation parts, and names the parts that joined
+// the grounds into it: nearly always a part across a barrier taken for a
+// wire, or a signal net carrying a line name.
+func (c *ctx) checkDomainFlood() {
+	total := len(c.d.Nets())
+	barrier := false
+	for _, k := range c.circ.Kinds {
+		barrier = barrier || k.Bridges()
+	}
+	if total == 0 || !barrier {
+		return
+	}
+	for _, pd := range c.circ.Domains {
+		d := c.domOfPcb[pd.ID]
+		if d == nil || (d.Kind != "mains" && d.Kind != "hazardous") || float64(len(pd.Nets)) <= floodShare*float64(total) {
+			continue
+		}
+		if _, declared := c.domSpec[d.ID]; declared {
+			continue
+		}
+		grounds := map[string]bool{}
+		for g, dom := range c.circ.GroundDomain {
+			if dom == pd.ID {
+				grounds[g] = true
+			}
+		}
+		// A tie is doubtful unless it is clearly meant (0 Ω, net-tie, declared
+		// winding); the first ground on the line is the board's own primary.
+		doubtful, lineGrounds := 0, map[string]bool{}
+		var ties []pcbauto.GroundTie
+		for _, t := range c.circ.GroundTies {
+			if !grounds[t.A] {
+				continue
+			}
+			ties = append(ties, t)
+			switch {
+			case t.Line:
+				lineGrounds[t.A] = true
+			case !t.Sure:
+				doubtful++
+			}
+		}
+		if n := len(lineGrounds) - 1; n > 0 {
+			doubtful += n
+		}
+		if len(grounds) < 2 || doubtful == 0 {
+			continue
+		}
+		// Nets hanging on each ground: what a tie brought into the domain.
+		reach := map[string]map[string]bool{}
+		for _, p := range c.d.Parts {
+			nets := distinctNets(p.Pins, nil)
+			for _, g := range nets {
+				if grounds[g] {
+					if reach[g] == nil {
+						reach[g] = map[string]bool{}
+					}
+					for _, n := range nets {
+						reach[g][n] = true
+					}
+				}
+			}
+		}
+		type via struct {
+			ref, what string
+			gain      int
+		}
+		best := map[string]*via{}
+		for _, t := range ties {
+			gain, what := len(reach[t.A]), fmt.Sprintf("ties %s to line net %s", t.A, t.B)
+			if !t.Line {
+				gain = min(gain, len(reach[t.B]))
+				what = fmt.Sprintf("joins %s and %s", t.A, t.B)
+				if p := c.parts[t.Ref]; p != nil && c.circ.Kinds[t.Ref] == pcbauto.KindResistor {
+					if _, ok := pcbauto.ResistorOhms(p.Value); !ok {
+						what += ", value unknown"
+					}
+				}
+			}
+			if v := best[t.Ref]; v == nil || gain > v.gain {
+				best[t.Ref] = &via{t.Ref, what, gain}
+			}
+		}
+		vias := make([]*via, 0, len(best))
+		for _, v := range best {
+			vias = append(vias, v)
+		}
+		sort.Slice(vias, func(i, j int) bool {
+			if vias[i].gain != vias[j].gain {
+				return vias[i].gain > vias[j].gain
+			}
+			return vias[i].ref < vias[j].ref
+		})
+		var refs, list []string
+		for i, v := range vias {
+			if i == 5 {
+				list = append(list, fmt.Sprintf("… %d more", len(vias)-i))
+				break
+			}
+			refs = append(refs, v.ref)
+			list = append(list, fmt.Sprintf("%s (%s, ≈ %d nets)", v.ref, v.what, v.gain))
+		}
+		gs := make([]string, 0, len(grounds))
+		for g := range grounds {
+			gs = append(gs, g)
+		}
+		sort.Strings(gs)
+		c.add("warn", "domain-flood", fmt.Sprintf("domain %s (%s) holds %d of the board's %d nets (%.0f %%) although the board has isolation parts: %d grounds were joined into it, through %s — check that each is a real connection and not a part across a barrier",
+			d.ID, d.Kind, len(pd.Nets), total, 100*float64(len(pd.Nets))/float64(total), len(grounds), strings.Join(list, "; ")),
+			refs, gs,
+			`give a resistor between two grounds its value (≥ 100 kΩ is a bleeder, not a tie), name safety capacitors C… / CX… / CY…, rename a signal net that is called L / N / PE / LINE but is not the AC line, or declare the domains in the intent spec ("domains": [{"kind": "SELV", "nets": ["<its ground>"]}]): declared domains are never joined to another one or to the line`)
 	}
 }
