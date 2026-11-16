@@ -85,6 +85,9 @@ func TestKicadRulesCheckClearanceAndEdge(t *testing.T) {
 		"edge rule weakened": {func(s string) string {
 			return strings.Replace(s, "(constraint edge_clearance (min 2.032mm))", "(constraint edge_clearance (min 0.5mm))", 1)
 		}, gate.Fail, "is not edge_clearance"},
+		"edge rule only a warning": {func(s string) string {
+			return strings.Replace(s, "(rule \"pcbpilot edge PPD_HVD\"\n", "(rule \"pcbpilot edge PPD_HVD\"\n  (severity warning)\n", 1)
+		}, gate.Fail, "is not edge_clearance"},
 		"later edge override": {func(s string) string {
 			return s + "(rule \"edge-all\"\n  (constraint edge_clearance (min 0.3mm)))\n"
 		}, gate.Fail, "may lower edge_clearance"},

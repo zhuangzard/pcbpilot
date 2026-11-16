@@ -2051,14 +2051,14 @@ func (r *rulesRun) clearanceEdgeProblems(rules []kicad.DRURule) (bad, unknown []
 		}
 		u := rules[at]
 		name = u.Name
-		ok := u.Condition == cond && u.Layer == ""
+		ok := u.Condition == cond && u.Layer == "" && (u.Severity == "" || u.Severity == "error")
 		for _, c := range u.Constraints {
 			if c.Type == "edge_clearance" && (c.Min == nil || *c.Min < want) {
 				ok = false
 			}
 		}
 		if !ok || !hasConstraint(u, "edge_clearance") {
-			bad = append(bad, fmt.Sprintf("domain %s: rule %q is not edge_clearance min %s on %q", dom, name, kicad.MmOfNm(want), cond))
+			bad = append(bad, fmt.Sprintf("domain %s: rule %q is not edge_clearance min %s on %q, as an error", dom, name, kicad.MmOfNm(want), cond))
 		}
 		for _, later := range rules[at+1:] {
 			if druDisjoint(later.Condition, names) {

@@ -638,6 +638,11 @@ func (c *Circuit) buildDomains(b *Board, an *Analysis) {
 				for _, ref := range netParts[n] {
 					on[ref] = true
 				}
+				// A net an earlier declaration holds does not name this
+				// one: the two would become one domain.
+				if _, taken := declOf[n]; taken {
+					continue
+				}
 				if len(netParts[n]) > len(netParts[busiest]) || len(netParts[n]) == len(netParts[busiest]) && len(netParts[n]) > 0 && n < busiest {
 					busiest = n
 				}

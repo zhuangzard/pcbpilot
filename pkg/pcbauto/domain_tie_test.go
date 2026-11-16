@@ -313,6 +313,11 @@ func TestDomainDeclaredWithoutGroundSeedsItsOwn(t *testing.T) {
 	if first.DeclaredNet["POS_P"] != first.DeclaredNet["RTN_P"] {
 		t.Errorf("a net of two declarations left the first: %v", first.DeclaredNet)
 	}
+	// … and the second declaration's own net is not drawn into the first
+	// by the shared one.
+	if d := first.DeclaredNet["SIG_P"]; d == "" || d == first.DeclaredNet["POS_P"] {
+		t.Errorf("the second declaration joined the first through the shared net: %v", first.DeclaredNet)
+	}
 }
 
 // A declared net that only isolation parts sit on (an isolator's output
