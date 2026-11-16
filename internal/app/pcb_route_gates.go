@@ -619,9 +619,12 @@ func snapshotIntentGates(snap *boardSnapshot, in *designIntent, intentPath, simV
 // it, except via-current findings the per-segment basis rates (viaOK).
 // detail "" = the pcb-check-intent wording.
 func intentCheckGate(name, detail string, rep *pcbCheckReport, errs []string, viaOK func([]string, string) (bool, string)) gateResult {
-	var items, perGroup []string
+	var items, perGroup, warns []string
 	for _, f := range rep.Findings {
 		if f.Level != "ERROR" {
+			if f.Level == "WARN" {
+				warns = append(warns, f.Type+": "+f.Message)
+			}
 			continue
 		}
 		if f.Type == "via-current" && viaOK != nil {
@@ -642,6 +645,12 @@ func intentCheckGate(name, detail string, rep *pcbCheckReport, errs []string, vi
 	g.Info = rep.Limitations
 	if name == "pcb-check-intent" {
 		g.Info = nil // the EasyEDA gate contract carries no info lines
+	} else if len(warns) > 0 {
+		// a pass with warnings says so: "0 error(s)" beside a KiCad DRC that
+		// fails the same pads (an edge-mounted connector under the board's
+		// edge clearance) read as two gates contradicting each other
+		g.Detail += fmt.Sprintf("; %d warning(s) this gate does not fail (the board's own DRC rule still judges them)", len(warns))
+		g.Info = append(append([]string{}, g.Info...), warns...)
 	}
 	if len(perGroup) > 0 {
 		g.Detail += fmt.Sprintf("; %d via group(s) rated by their simulated current (width basis segment)", len(perGroup))

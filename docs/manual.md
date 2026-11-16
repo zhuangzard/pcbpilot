@@ -154,7 +154,7 @@ pcbpilot **自带的仿真器编译在二进制里**（`sim power` 的 DC 电源
 | 工具 | 必需 | 最低版本 | 用途 | macOS | Debian/Ubuntu | Fedora/RHEL | Windows |
 |---|---|---|---|---|---|---|---|
 | ngspice | **是** | 30 | `sim power --spice-check`、模拟 SPICE 仿真流程 | `brew install ngspice` | `sudo apt-get install -y ngspice` | `sudo dnf install -y ngspice` | 运行时 `winget show` 有 ngspice 包则用 winget，否则 `choco install ngspice -y`（管理员），都没有则打印官网下载说明 |
-| Elmer FEM（ElmerSolver + ElmerGrid） | 否（`--require-elmer` 可改为必需） | 9.0 | `sim post-layout --elmer-check` 热交叉验证 | `brew tap elmercsc/elmerfem` + `brew install elmercsc/elmerfem/elmer`（**源码编译，20–60+ 分钟**） | Ubuntu：`sudo add-apt-repository -y ppa:elmer-csc-ubuntu/elmer-csc-ppa` + `sudo apt-get install -y elmerfem-csc`；其他发行版打印源码编译说明 | 打印源码编译说明 | 官方 NSIS 安装包 `rel26.1/ElmerFEM-nogui-nompi-Windows-AMD64-rel26.1.exe`（nic.funet.fi 镜像）下载到临时目录后 `/S` 静默运行（UAC 确认）；URL 失效时打印镜像目录 |
+| Elmer FEM（ElmerSolver + ElmerGrid） | 否（`--require-elmer` 可改为必需） | 9.0 | `sim post-layout --elmer-check` 热交叉验证 | `brew tap elmercsc/elmerfem` + `brew install elmercsc/elmerfem/elmer`（**源码编译，20–60+ 分钟**） | Ubuntu：`sudo add-apt-repository -y ppa:elmer-csc-ubuntu/elmer-csc-ppa` + `sudo apt-get install -y elmerfem-csc`；其他发行版打印源码编译说明 | 打印源码编译说明 | 官方 zip 包 `rel26.1/ElmerFEM-nogui-nompi-Windows-AMD64-rel26.1.zip`（nic.funet.fi 镜像）下载后校验 SHA-256，解压到 `%USERPROFILE%\.pcbpilot\elmer\rel26.1`（仅当前用户：不需要管理员权限、不运行安装程序、不改 PATH；不解压自带的 gfortran 工具链）；下载或校验失败时只打印一行手动步骤 |
 
 ```bash
 pcbpilot sim tools check                 # 路径、版本、最低版本、ok/missing/outdated、本机安装命令
@@ -166,7 +166,8 @@ pcbpilot sim tools install --yes         # 执行（每条命令先打印）；-
 规则：不加 `--yes` 时只在交互终端询问 y/N，否则只打印；只有**必需**工具（ngspice）装完仍不可用
 才返回非零；Elmer 失败只给出明确警告。Linux 需要 root：有 sudo 就用（可能要求密码），非交互
 shell 且 sudo 需要密码时只打印命令；macOS 没有 Homebrew 时只打印 Homebrew 官方安装命令，不代装。
-Windows 上安装器常不改 PATH，检查也会找 `C:\Spice64\bin`、`Program Files\Elmer*\bin`。
+Windows 上安装器常不改 PATH，检查也会找 `C:\Spice64\bin`、`%USERPROFILE%\.pcbpilot\elmer\*\bin`、
+`Program Files\Elmer*\bin`。Windows 上的 Elmer 不走官方安装程序（它要管理员权限，标准账户必然失败）。
 `pcbpilot update --check` 末尾显示一行仿真工具状态。
 
 ## 4. 连接 EasyEDA 并验证

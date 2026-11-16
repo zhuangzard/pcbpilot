@@ -1576,8 +1576,8 @@ func renderSbPage(e *kicad.SchEditor, d *sbDesign, st *sbState, pg sbPage, zis [
 			if mk.Kind == "power" || mk.Kind == "ground" {
 				// supply symbols always point up, ground symbols down (EG-05):
 				// a stub that arrives the other way gets a short jog
-				if (mk.Kind == "power" && mk.Dir == "down") || (mk.Kind == "ground" && mk.Dir == "up") {
-					j := kicad.Pt{X: at.X + 2.54, Y: at.Y}
+				if dx, ok := mk.sbJogs(); ok {
+					j := kicad.Pt{X: at.X + dx, Y: at.Y}
 					e.AddWire(at, j)
 					segs = append(segs, [2]kicad.Pt{at, j})
 					at = j

@@ -806,8 +806,9 @@ try {
         }
         # -- simulation tools: ngspice (required) + Elmer FEM (optional) -------
         # Single source: 'pcbpilot sim tools install' picks winget/choco for
-        # ngspice and the official Elmer NSIS installer (UAC prompt), printing
-        # each command. A failure never aborts the installer.
+        # ngspice and unpacks the official Elmer .zip into the user's own
+        # .pcbpilot\elmer folder (no administrator rights, PATH unchanged),
+        # printing each command. A failure never aborts the installer.
         $simOk = $false
         $simManual = 'ngspice: choco install ngspice -y (or https://ngspice.sourceforge.io/download.html); Elmer (optional): https://www.nic.funet.fi/pub/sci/physics/elmer/bin/windows/'
         if (-not $SimTools) {

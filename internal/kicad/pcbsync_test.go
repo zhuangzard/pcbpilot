@@ -503,9 +503,12 @@ func TestBuildSyncPlan(t *testing.T) {
 		{"package-text", func(nl *SyncNetlist, inv *SyncInventory, _ *SyncOptions) {
 			compByRef(nl, "R1").Fields[SymPackageField] = "0603"
 			fpByRef(inv, "C1").Fields[SymPackageField] = "mine"
-			fpByRef(inv, "R1").Fields["package"] = "other case"
 		}, func(t *testing.T, p *SyncPlan) {
-			if len(p.Ops) != 0 {
+			// a symbol field like any other: KiCad's schematic parity
+			// compares it, so the board must carry it
+			set, rm := opsOf(p, "setField"), opsOf(p, "removeField")
+			if len(set) != 1 || set[0].Ref != "R1" || set[0].Field != SymPackageField || *set[0].Value != "0603" ||
+				len(rm) != 1 || rm[0].Ref != "C1" || rm[0].Field != SymPackageField {
 				t.Fatalf("%+v", p.Ops)
 			}
 		}},

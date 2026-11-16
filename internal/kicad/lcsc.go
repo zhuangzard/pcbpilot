@@ -168,7 +168,7 @@ func ReadSchematicParts(cli, sch string) ([]SchPart, error) {
 	cmd, cancel := SchCLICommand(cli, SchBOMArgs(sch, out)...)
 	defer cancel()
 	if b, err := cmd.CombinedOutput(); err != nil {
-		return nil, fmt.Errorf("kicad-cli sch export bom: %w: %s", err, b)
+		return nil, fmt.Errorf("kicad-cli sch export bom: %s", SchCLIFail(cmd, err, string(b)))
 	}
 	b, err := os.ReadFile(out)
 	if err != nil {

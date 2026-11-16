@@ -38,8 +38,8 @@ import (
 // temperature at probe coordinates (the board maximum and the hottest cell
 // under each dissipating part) to probes.dat.
 
-// findElmer locates an Elmer binary (PATH and the Windows install dirs of
-// `pcbpilot sim tools install`); tests replace it.
+// findElmer locates an Elmer binary (PATH, then on Windows the per-user unpack
+// of `pcbpilot sim tools install` and the installer's folders); tests replace it.
 var findElmer = simtools.Find
 
 // ElmerCheck is the cross-check result recorded in post.json.
@@ -102,7 +102,7 @@ func (res *Result) ExportElmer(dir string) error {
 	return nil
 }
 
-// RunElmer runs ElmerSolver on an exported deck when it is on PATH and
+// RunElmer runs ElmerSolver on an exported deck when it is installed and
 // compares the probes; otherwise the check is marked skipped.
 func (res *Result) RunElmer(timeout time.Duration) {
 	e := res.Elmer
@@ -119,6 +119,7 @@ func (res *Result) RunElmer(timeout time.Duration) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, bin, "case.sif")
 	cmd.Dir = e.Deck
+	cmd.Env = elmerEnv(bin, os.Environ())
 	out, err := cmd.CombinedOutput()
 	_ = os.WriteFile(filepath.Join(e.Deck, "elmer.log"), out, 0o644)
 	if err != nil {
@@ -133,6 +134,23 @@ func (res *Result) RunElmer(timeout time.Duration) {
 		return
 	}
 	res.CompareElmer(raw)
+}
+
+// elmerEnv adds ELMER_HOME for a solver found outside PATH (the per-user
+// unpack of `pcbpilot sim tools install`, or an installer that skipped PATH):
+// without it ElmerSolver looks for its share folder under the build-time
+// prefix in Program Files. A value the user already set is kept.
+func elmerEnv(bin string, env []string) []string {
+	for _, kv := range env {
+		if k, v, _ := strings.Cut(kv, "="); strings.EqualFold(k, "ELMER_HOME") && v != "" {
+			return env
+		}
+	}
+	home := simtools.ElmerHome(bin)
+	if home == "" {
+		return env
+	}
+	return append(append([]string{}, env...), "ELMER_HOME="+home)
 }
 
 // CompareElmer reads a SaveScalars probes.dat (the last row; its last N

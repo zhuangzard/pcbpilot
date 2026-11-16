@@ -460,7 +460,7 @@ func kicadFlat(v kicad.Violation) drcFlatViolation {
 
 // kicadDRCFlat is the report in the `pcb drc --json` shape (report design --drc).
 func kicadDRCFlat(rep *kicad.DRCReport) drcFlatReport {
-	out := drcFlatReport{Passed: rep.Total == 0, Total: rep.Total, Counts: rep.Counts}
+	out := drcFlatReport{Passed: rep.Total == 0, Total: rep.Total, Counts: rep.Counts, Tool: "KiCad"}
 	for _, v := range rep.Violations {
 		out.Violations = append(out.Violations, kicadFlat(v))
 	}

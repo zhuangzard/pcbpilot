@@ -202,7 +202,7 @@ func ExportCrossProbeSVGs(sch, pcb string, pages []SchPage, dir string) (pageSVG
 		}
 		cmd.Stdout, cmd.Stderr = &buf, &buf
 		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("kicad-cli %s: %v: %s", strings.Join(args[:3], " "), err, strings.TrimSpace(buf.String()))
+			return fmt.Errorf("kicad-cli %s: %s", strings.Join(args[:3], " "), SchCLIFail(cmd, err, buf.String()))
 		}
 		return nil
 	}

@@ -39,7 +39,9 @@ Install commands per platform:
                  sudo apt-get install -y elmerfem-csc   (other distros: source build)
   Fedora/RHEL    sudo dnf install -y ngspice
   Windows        winget (if an ngspice id exists) else choco install ngspice;
-                 Elmer: official NSIS installer from the CSC mirror, run /S (UAC)`,
+                 Elmer: the official .zip from the CSC mirror, SHA-256 checked
+                 and unpacked into %USERPROFILE%\.pcbpilot\elmer (this user
+                 only: no administrator rights, no installer, PATH unchanged)`,
 	}
 	c.AddCommand(newSimToolsCheckCmd(stdout), newSimToolsInstallCmd(stdout, stderr))
 	return c

@@ -197,6 +197,9 @@ type sbRPart struct {
 	// symbol: Package, or "" with --no-package-text.
 	Package string `json:"-"`
 	Pkg     string `json:"-"`
+	// cat is the LCSC catalogue record of the part's number, when the
+	// catalogue cache has it (the BOM shows it; nothing else reads it).
+	cat *kicad.EasyEDAPart
 }
 
 // sbDesign is the expanded, resolved spec the builder draws.
@@ -1451,6 +1454,7 @@ type sbOptions struct {
 	LayoutQuality                  string // strict | advisory (signed waiver)
 	ZoneTimeout                    time.Duration
 	NoPackageText, NoBomPages      bool
+	BomCatalog                     bool
 }
 
 // sbFlags registers the options sch-build and sch-edit share.
@@ -1478,6 +1482,7 @@ func sbFlags(c *cobra.Command, o *sbOptions) {
 	f.BoolVar(&o.DiscardExternal, "discard-external-edits", false, "overwrite edits made in --out outside pcbpilot since its last build (refused by default: EXTERNAL_EDIT); the current files are checkpointed first")
 	f.BoolVar(&o.NoPackageText, "no-package-text", false, "do not draw the package (0603, SOIC-8 … from the footprint, or fields.Package) next to every symbol's value")
 	f.BoolVar(&o.NoBomPages, "no-bom-pages", false, "do not add the BOM sheet after every schematic page (<page>-bom.kicad_sch: refs, qty, value, package, MPN, LCSC, spec / requirements, sourcing)")
+	f.BoolVar(&o.BomCatalog, "bom-catalog", false, "fill the BOM from the LCSC catalogue: fetch the record (MPN, manufacturer, description) of every LCSC number that is not cached yet (network; bounded, a failed lookup is a warning). Without it the BOM shows only records already cached by an earlier --bom-catalog or kicad lcsc --verify")
 	f.BoolVar(&o.Render, "render", false, "also export one normalised SVG per sheet to <out>/render (the kicad render plotter; diff two with kicad render --compare)")
 }
 
@@ -1589,6 +1594,10 @@ func finishSbRun(res *sbReport, err error, reportPath string, stdout, stderr io.
 		}
 		return errActionFailed
 	}
+	if res != nil && res.Plan != nil {
+		fmt.Fprintln(stderr, "sch-build: dry run — a plan only, nothing written and nothing verified")
+		return nil
+	}
 	if res != nil && !res.Complete {
 		for _, w := range res.Warnings {
 			if strings.Contains(w, "agent-signed waiver") {
@@ -1605,6 +1614,12 @@ func finishSbRun(res *sbReport, err error, reportPath string, stdout, stderr io.
 // one.
 func sbIncomplete(res *sbReport) []string {
 	out := []string{}
+	if res.Plan != nil {
+		// a dry run writes nothing, so the gates that read the written
+		// schematic never ran: its ok:true is "the plan stands", never
+		// "complete" (a dry run used to report complete:true with no gates)
+		out = append(out, "dry-run plan: nothing was written and no gate checked a schematic; run without --dry-run")
+	}
 	for _, g := range res.Gates {
 		if g.Status != "pass" {
 			out = append(out, fmt.Sprintf("%s %s: %s", g.Name, g.Status, clipReason(g.Detail)))

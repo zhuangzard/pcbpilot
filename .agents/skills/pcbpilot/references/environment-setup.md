@@ -228,8 +228,9 @@ pcbpilot sim tools install --yes [--only ngspice|elmer] [--require-elmer]
 ```
 
 平台命令由该命令按 OS/发行版选择（macOS brew + 官方 tap `elmercsc/elmerfem`，Elmer 源码编译
-20–60+ 分钟；Debian/Ubuntu apt，Ubuntu Elmer 走官方 PPA；Fedora dnf；Windows winget/choco +
-官方 Elmer NSIS 安装包）。Agent 规则：交叉验证前先 `sim tools check --json`；报告里写实际版本；
+20–60+ 分钟；Debian/Ubuntu apt，Ubuntu Elmer 走官方 PPA；Fedora dnf；Windows winget/choco；
+Windows 的 Elmer 是官方 zip 包校验 SHA-256 后解压到 `%USERPROFILE%\.pcbpilot\elmer`，仅当前用户，
+不需要管理员权限、不改 PATH，pcbpilot 自己从该目录找 ElmerSolver/ElmerGrid）。Agent 规则：交叉验证前先 `sim tools check --json`；报告里写实际版本；
 工具缺失时如实写“交叉验证未执行”，不把 `skipped` 当通过。安装系统软件（sudo/UAC/长时间编译）
 前告知用户并取得同意，不在 EDA 现场任务中途静默安装；macOS 缺 Homebrew 只转告官方安装命令。
 
