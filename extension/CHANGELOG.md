@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- **`intent derive`: a declared net between two isolation parts is in its declared domain.** A net that only
+  isolation parts sit on (an isolator's output into an isolated converter) had no part to carry it into a domain, so a
+  net declared in a mains domain ended in none and got no insulation pair. It is now in the domain it was declared in.
+- **`kicad rules --check`: a weaker `--keep-stricter` head rule after a stricter one is reported.** Two head rules
+  that may govern the same pair were each accepted on their own value; KiCad applies the last one that matches.
+
 - **`kicad rules`: a user rule that cannot match a net is no longer reported as lowering its clearance.** A user
   clearance rule whose condition has a nested alternative (`A.hasNetclass('X') && (B.hasNetclass('Y') || ...)`) or a
   negated class (`!B.hasNetclass('X')`) was taken to cover every planned net, so `staged-readback` failed with "may

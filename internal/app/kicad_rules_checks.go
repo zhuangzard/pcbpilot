@@ -1840,7 +1840,8 @@ func (r *rulesRun) isolationRuleProblems(rules []kicad.DRURule, p rulesIsoPlan) 
 		}
 		headOK[want.typ] = true
 		for _, later := range rules[hat+1:] {
-			if later.Block == "head" || druDisjointPair(later.Condition, sa, sb) {
+			// A later head rule too: KiCad applies the last one that matches.
+			if druDisjointPair(later.Condition, sa, sb) {
 				continue
 			}
 			for _, c := range later.Constraints {

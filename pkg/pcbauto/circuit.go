@@ -775,12 +775,47 @@ func (c *Circuit) buildDomains(b *Board, an *Analysis) {
 		dom.Parts = append(dom.Parts, p.Ref)
 		c.DomainOf[p.Ref] = d
 	}
+	// A declared net that only isolation parts sit on (an isolator's output
+	// into an isolated converter) has no part to bring it into a domain: it
+	// is in the one it was declared in.
+	held := map[string]bool{}
+	for _, dom := range byID {
+		for _, ref := range dom.Parts {
+			for _, n := range partNets[ref] {
+				held[n] = true
+			}
+		}
+	}
+	orphans := map[string][]string{}
+	if an != nil {
+		for _, dd := range an.declared {
+			id := ""
+			for _, n := range dd.Nets {
+				if d, ok := domOfGround[n]; ok && id == "" {
+					id = d
+				}
+			}
+			for _, n := range dd.Nets {
+				d := id
+				if d == "" {
+					d = declOf[n]
+				}
+				if byID[d] != nil && !held[n] && len(netParts[n]) > 0 {
+					held[n] = true
+					orphans[d] = append(orphans[d], n)
+				}
+			}
+		}
+	}
 	for _, dom := range byID {
 		nets := map[string]bool{}
 		for _, ref := range dom.Parts {
 			for _, n := range partNets[ref] {
 				nets[n] = true
 			}
+		}
+		for _, n := range orphans[dom.ID] {
+			nets[n] = true
 		}
 		for n := range nets {
 			dom.Nets = append(dom.Nets, n)

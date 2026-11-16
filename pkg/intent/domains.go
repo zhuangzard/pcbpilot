@@ -146,6 +146,16 @@ func (c *ctx) buildDomains() {
 		c.out.Domains = append(c.out.Domains, d)
 	}
 	// Net → domain: the domain with the most parts on the net.
+	// A net no domain's part sits on (a declared net between two isolation
+	// parts) is in the one domain that lists it.
+	listed := map[string][]string{}
+	for _, pd := range c.circ.Domains {
+		if d := c.domOfPcb[pd.ID]; d != nil {
+			for _, n := range pd.Nets {
+				listed[n] = append(listed[n], d.ID)
+			}
+		}
+	}
 	c.domOfNet = map[string]string{}
 	for _, net := range c.d.Nets() {
 		count := map[string]int{}
@@ -159,6 +169,9 @@ func (c *ctx) buildDomains() {
 			if count[id] > bestN {
 				best, bestN = id, count[id]
 			}
+		}
+		if best == "" && len(listed[net]) == 1 {
+			best = listed[net][0]
 		}
 		c.domOfNet[net] = best
 	}

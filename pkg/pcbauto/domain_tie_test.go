@@ -314,3 +314,36 @@ func TestDomainDeclaredWithoutGroundSeedsItsOwn(t *testing.T) {
 		t.Errorf("a net of two declarations left the first: %v", first.DeclaredNet)
 	}
 }
+
+// A declared net that only isolation parts sit on (an isolator's output
+// into an isolated converter) is in the domain it was declared in; left
+// undeclared it is in none.
+func TestDeclaredNetBetweenBridgesKeepsItsDomain(t *testing.T) {
+	iso := func(ref string) *Part {
+		return hvPart(ref, "PC817", Point{1300, 1500}, smdPad("1", "LINK", -100, 50, 40, 40), smdPad("2", "GND_A", -100, -50, 40, 40),
+			smdPad("3", "GND_B", 100, -50, 40, 40), smdPad("4", "SIG_B", 100, 50, 40, 40))
+	}
+	holds := func(c *Circuit) string {
+		in := ""
+		for _, d := range c.Domains {
+			for _, n := range d.Nets {
+				if n == "LINK" {
+					in += d.ID + " "
+				}
+			}
+		}
+		return in
+	}
+	b := tieBoard(iso("U_ISO2"), iso("U_ISO3"))
+	c := Understand(b, Analyze(b, PowerSpec{}, nil))
+	if !c.Kinds["U_ISO2"].Bridges() || holds(c) != "" {
+		t.Fatalf("fixture: undeclared, the net is in %q (kind %v)", holds(c), c.Kinds["U_ISO2"])
+	}
+	for name, decl := range map[string][]string{"grounded": {"GND_A", "LINK"}, "groundless": {"SIG_A", "LINK"}} {
+		b = tieBoard(iso("U_ISO2"), iso("U_ISO3"))
+		c = Understand(b, Analyze(b, PowerSpec{Declared: []DeclaredDomain{{Nets: decl}}}, nil))
+		if got, want := holds(c), c.DomainOf["U1"]+" "; got != want {
+			t.Errorf("%s: the declared net is in %q, want %q", name, got, want)
+		}
+	}
+}
