@@ -268,6 +268,9 @@ func TestDomainDeclaredWithoutGroundSeedsItsOwn(t *testing.T) {
 			tiePart("C9", "2.2nF Y1", "", "RTN_P", "GND_B"),
 			tiePart("C9", "CAP-SAFETY-Y2", "2.2nF", "RTN_P", "GND_B"),
 			tiePart("R9", "", "4M7", "RTN_P", "GND_B"),
+			tiePart("E1", "Y1", "", "RTN_P", "GND_B"),
+			tiePart("E2", "GAP", "", "RTN_P", "GND_B"),
+			hvPart("RN1", "1M", Point{1300, 1200}, smdPad("1", "RTN_P", -40, 0, 30, 30), smdPad("2", "GND_B", 0, 0, 30, 30), smdPad("3", "SIG_B", 40, 0, 30, 30)),
 		} {
 			b = tieBoard(tieFixture()[3], cy)
 			one := PowerSpec{Declared: []DeclaredDomain{{Nets: []string{"RTN_P"}, Line: line}}}

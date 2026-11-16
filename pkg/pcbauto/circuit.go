@@ -575,7 +575,8 @@ func (c *Circuit) buildDomains(b *Board, an *Analysis) {
 	// domain — a rail declared to give its domain a kind — and nothing
 	// changes. The parts that count are those on three nets or more that
 	// are no capacitor (a controller, a transistor: a part with a reference
-	// pin), never an isolation part, which belongs to no side. The Y
+	// pin: an IC, a transistor, a module), never an isolation part, which
+	// belongs to no side. The Y
 	// capacitor or the bleeder across the barrier looks just like a rail's
 	// decoupling capacitor, so the other parts count only where no such
 	// part does and the declaration is not the line's — and then never a
@@ -588,20 +589,33 @@ func (c *Circuit) buildDomains(b *Board, an *Analysis) {
 	}
 	// refPin: the part has a reference pin; passive: it may stand for one
 	// in the fallback.
+	// Both lists are closed: a part of a kind not named here (a resistor
+	// network, a spark gap, a part nothing is known about) sides no net.
+	safety := func(ref string) bool {
+		p := partOf[ref]
+		return reSafetyCapRef.MatchString(upper(ref)) || reSafetyCapDev.MatchString(p.Device) || reSafetyCapDev.MatchString(p.Value)
+	}
 	refPin := func(ref string) bool {
-		return c.Kinds[ref] != KindCapacitor && len(partNets[ref]) >= 3
+		switch c.Kinds[ref] {
+		case KindIC, KindTransistor, KindModule:
+			return !safety(ref) && len(partNets[ref]) >= 3
+		}
+		return false
 	}
 	passive := func(ref string) bool {
-		p := partOf[ref]
+		if safety(ref) {
+			return false
+		}
 		switch c.Kinds[ref] {
 		case KindCapacitor:
-			return !reSafetyCapRef.MatchString(upper(ref)) && !reSafetyCapDev.MatchString(p.Device) && !reSafetyCapDev.MatchString(p.Value)
+			return true
 		case KindResistor:
+			p := partOf[ref]
 			tie, _ := c.tiesGrounds(p)
 			v, ok := partOhms(p)
 			return tie && ok && v < BleederOhms
 		}
-		return true
+		return false
 	}
 	if an != nil {
 		for _, dd := range an.declared {
