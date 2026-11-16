@@ -1941,61 +1941,59 @@ func (r *rulesRun) isolationRuleProblems(rules []kicad.DRURule, p rulesIsoPlan) 
 // condition AND the generated one, with the planned minimum as an error.
 func (r *rulesRun) carryProblems(rules []kicad.DRURule) []string {
 	var plan []keepCarry
+	var moves []keepMove
 	if r.keep != nil && r.keepActive() {
-		plan = r.keep.rep.Carried
+		plan, moves = r.keep.rep.Carried, r.keep.rep.Head
 	}
 	var bad []string
-	planned := map[string]bool{}
-	for _, c := range plan {
-		planned[c.Rule] = true
+	// A constraint the plan moved before the user's rules is not also at
+	// the end (there it would win over the stricter user rule again), and
+	// every head rule is a planned one.
+	headName := map[string]bool{}
+	for _, m := range moves {
+		headName[m.HeadRule] = true
+		for _, u := range rules {
+			if u.Block == "route" && u.Name == m.Generated && hasConstraint(u, m.Type) {
+				bad = append(bad, fmt.Sprintf("keep-stricter: the rule %q still has its %s constraint in the generated block at the end, after the user's stricter rules (the plan has it before them, as %q)", m.Generated, m.Type, m.HeadRule))
+			}
+		}
 	}
-	prev := map[string]int{}
-	for _, c := range plan {
-		at, gen, copies := -1, -1, 0
-		for i, u := range rules {
-			if u.Name == c.Rule {
-				copies++ // anywhere in the file: the name is pcbpilot's
-			}
-			if u.Block != "route" {
-				continue
-			}
-			switch u.Name {
-			case c.Rule:
-				at = i
-			case c.Generated:
-				gen = i
-			}
+	gen := map[string]kicad.DRURule{}
+	var have []kicad.DRURule
+	for _, u := range rules {
+		carry := strings.HasPrefix(u.Name, keepCarryPrefix)
+		switch {
+		case u.Block == "head" && strings.HasPrefix(u.Name, kicad.DRUHeadPrefix) && !headName[u.Name]:
+			bad = append(bad, fmt.Sprintf("keep-stricter: the head rule %q is not in the plan (the user rules or the derived minimums changed after it was written)", u.Name))
+		case carry && u.Block != "route":
+			bad = append(bad, fmt.Sprintf("keep-stricter: the rule %q is outside the generated block", u.Name))
+		case carry:
+			have = append(have, u)
+		case u.Block == "route" && len(have) > 0:
+			bad = append(bad, fmt.Sprintf("keep-stricter: the rule %q is after the carry rule %q (carry rules are the last rules of the generated block)", u.Name, have[0].Name))
+		case u.Block == "route":
+			gen[u.Name] = u
 		}
-		if copies > 1 {
-			bad = append(bad, fmt.Sprintf("keep-stricter: %d rules named %q (one is planned: it carries the user rule %q after %q)", copies, c.Rule, c.UserRule, c.Generated))
+	}
+	// The carry rules are the planned ones, one by one, in plan order.
+	for i, c := range plan {
+		if i >= len(have) {
+			bad = append(bad, fmt.Sprintf("keep-stricter: no rule %q at the end of the generated block (it carries the user rule %q, min %s, where it and %q both match)", c.Rule, c.UserRule, kicad.MmOfNm(c.UserMinNm), c.Generated))
 			continue
 		}
-		if at < 0 || gen < 0 || at < gen {
-			bad = append(bad, fmt.Sprintf("keep-stricter: no rule %q after the generated rule %q (it carries the user rule %q, min %s, where both match)", c.Rule, c.Generated, c.UserRule, kicad.MmOfNm(c.UserMinNm)))
-			continue
-		}
-		u := rules[at]
-		ok := u.Condition == keepCarryCondition(c.Condition, rules[gen].Condition) && u.Layer == c.Layer && (u.Severity == "" || u.Severity == "error") && len(u.Constraints) == 1
+		u, g := have[i], gen[c.Generated]
+		ok := u.Name == c.Rule && hasConstraint(g, c.Type) && u.Condition == keepCarryCondition(c.Condition, g.Condition) && u.Layer == c.Layer &&
+			(u.Severity == "" || u.Severity == "error") && len(u.Constraints) == 1
 		if ok {
 			k := u.Constraints[0]
-			ok = k.Type == c.Type && k.Min != nil && !k.Unparsed && *k.Min == c.MinNm && hasConstraint(rules[gen], c.Type)
+			ok = k.Type == c.Type && k.Min != nil && !k.Unparsed && *k.Min == c.MinNm
 		}
-		for _, between := range rules[gen+1 : at] {
-			ok = ok && between.Block == "route" && strings.HasPrefix(between.Name, keepCarryPrefix) && planned[between.Name]
-		}
-		key := c.Generated + "\x00" + c.Type
-		if last, seen := prev[key]; seen && last > at {
-			ok = false
-		}
-		prev[key] = at
 		if !ok {
-			bad = append(bad, fmt.Sprintf("keep-stricter: the rule %q is not the planned one (%s min %s on the user rule %q's condition and that of %q, right after it)", c.Rule, c.Type, kicad.MmOfNm(c.MinNm), c.UserRule, c.Generated))
+			bad = append(bad, fmt.Sprintf("keep-stricter: carry rule %d of the generated block (%q) is not the planned %q (%s min %s on the user rule %q's condition and that of %q)", i+1, u.Name, c.Rule, c.Type, kicad.MmOfNm(c.MinNm), c.UserRule, c.Generated))
 		}
 	}
-	for _, u := range rules {
-		if strings.HasPrefix(u.Name, keepCarryPrefix) && (!planned[u.Name] || u.Block != "route") {
-			bad = append(bad, fmt.Sprintf("keep-stricter: the rule %q is not in the plan (the user rules or the derived minimums changed after it was written)", u.Name))
-		}
+	for _, u := range have[min(len(plan), len(have)):] {
+		bad = append(bad, fmt.Sprintf("keep-stricter: the rule %q is not in the plan (the user rules or the derived minimums changed after it was written)", u.Name))
 	}
 	return bad
 }

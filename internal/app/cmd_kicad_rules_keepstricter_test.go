@@ -151,6 +151,21 @@ func TestKicadRulesKeepStricterUserStricter(t *testing.T) {
 		}
 	}
 
+	// The moved clearance written back at the end as well: there it wins
+	// over the user's stricter rule again — --check says so.
+	good := keepTestRead(t, dru)
+	dup := "(rule \"" + keepTestPair + "\"\n  (condition \"" + isoCondition("PPD_HVD", "PPD_LV") + "\")\n  (constraint clearance (min 2mm)))\n"
+	if err := os.WriteFile(dru, []byte(strings.Replace(good, kicad.DRURouteEnd, dup+kicad.DRURouteEnd, 1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rep, _, _ = runRules(t, chk)
+	if c := checkOf(rep, "effective-rules"); !strings.Contains(strings.Join(c.Items, "\n"), "still has its clearance constraint") {
+		t.Fatalf("a moved constraint also at the end passed --check: %+v", c)
+	}
+	if err := os.WriteFile(dru, []byte(good), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
 	// A later run WITHOUT the flag: the conflict is reported again and the
 	// apply is refused; the file is not touched (its order still keeps the
 	// user's rule in force).
@@ -287,7 +302,7 @@ func TestKicadRulesKeepStricterCarry(t *testing.T) {
 		b, _ := json.Marshal(ks)
 		t.Fatalf("report: %s", b)
 	}
-	if !strings.Contains(stderr, "written again after it") || !strings.Contains(stderr, "iso_high") {
+	if !strings.Contains(stderr, "written again after the generated rules") || !strings.Contains(stderr, "iso_high") {
 		t.Fatalf("stderr:\n%s", stderr)
 	}
 	text := keepTestRead(t, dru)
@@ -383,6 +398,13 @@ func TestKicadRulesKeepStricterCarry(t *testing.T) {
 	}
 	if err := r.reapplyKeepStricter(classed, full); err == nil || !strings.Contains(err.Error(), "RULES_STALE") {
 		t.Fatalf("stale: %v", err)
+	}
+	// The owner narrows the carried rule (same name, same value): stale.
+	if err := os.WriteFile(cdru, []byte(strings.Replace(text, high, strings.Replace(high, "B.NetName == 'VCC'", "B.NetName == 'VCC' && A.Type == 'Track'", 1), 1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.reapplyKeepStricter(classed, full); err == nil || !strings.Contains(err.Error(), "RULES_STALE") {
+		t.Fatalf("stale condition: %v", err)
 	}
 	// A run without the flag: no head block, no carry rule.
 	f.o.keepStricter, f.o.replace = false, []string{"iso_high"}
@@ -486,6 +508,31 @@ func TestKeepStricterAnalyse(t *testing.T) {
 	p = keepStricterAnalyse([]kicad.DRURule{user(0, "c_low", lvc, "clearance", 500000), user(1, "c_high", lvc, "clearance", 1500000)}, gens, env)
 	if len(p.rep.Carried) != 0 || len(p.rep.Unresolved) == 0 || !strings.Contains(p.rep.Unresolved[0].Why, "would lower it") || !strings.Contains(p.rep.Unresolved[0].Why, "PPD_HV_A|PPD_LV_B") {
 		t.Fatalf("carry below an overlapping generated rule: %+v", p.rep)
+	}
+	// The carry of the first case is written after BOTH generated rules:
+	// right after its own, the overlapping 1 mm rule would win over it.
+	p = keepStricterAnalyse([]kicad.DRURule{user(0, "iso_gap", "A.hasNetclass('PPD_HV_A') && B.hasNetclass('PPD_LV_B')", "clearance", 3000000)}, gens, env)
+	genText := func(g keepGen) string {
+		return "(rule \"" + g.rule + "\"\n  (condition \"" + isoCondition("PPD_"+g.a, "PPD_"+g.b) + "\")\n  (constraint clearance (min " + kicad.MmOfNm(g.min) + ")))\n"
+	}
+	druText := "(version 1)\n(rule \"iso_gap\"\n  (condition \"A.hasNetclass('PPD_HV_A') && B.hasNetclass('PPD_LV_B')\")\n  (constraint clearance (min 3mm)))\n" +
+		kicad.DRURouteBegin + "\n" + genText(gens[0]) + genText(gens[1]) + kicad.DRURouteEnd + "\n"
+	out, err := keepHeadBlock(druText, nil, p.rep.Carried)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := kicad.ParseDRU(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if last := parsed[len(parsed)-1]; last.Name != p.rep.Carried[0].Rule || last.Block != "route" || *last.Constraints[0].Min != 3000000 || parsed[len(parsed)-2].Name != gens[1].rule {
+		t.Fatalf("the carry is not the last rule:\n%s", out)
+	}
+	if again, err := keepHeadBlock(out, nil, p.rep.Carried); err != nil || again != out {
+		t.Fatalf("not idempotent (%v):\n%s", err, again)
+	}
+	if none, err := keepHeadBlock(out, nil, nil); err != nil || none != druText {
+		t.Fatalf("not undone (%v):\n%s", err, none)
 	}
 	// An edge rule the user's stricter edge rule covers: moved.
 	p = keepStricterAnalyse([]kicad.DRURule{user(0, "edge_gap", "A.hasNetclass('PPD_HV_A')", "edge_clearance", 800000)}, gens, env)

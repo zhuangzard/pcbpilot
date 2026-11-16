@@ -477,7 +477,7 @@ func (c *ctx) applyDeclaredInsulation(p *Pair, a, b *Domain) {
 		means = fmt.Sprintf(", %d × %s for this pair instead of %d", p.MOPCount, p.MOP, wasCount)
 	}
 	p.Why = append(p.Why, fmt.Sprintf("spec.isolation[%d] (%s|%s) declares %s insulation (derived: %s)%s: %s", at, si.A, si.B, grade, was, means, si.Why))
-	if insulRank[grade] < insulRank[was] || grade == was && p.MOPCount < wasCount {
+	if insulRank[grade] < insulRank[was] || p.MOPCount < wasCount {
 		c.add("warn", "declared-insulation-lowered", fmt.Sprintf("%s ↔ %s: %s insulation by spec.isolation[%d], where %s is derived%s — the distances are those of %s insulation", a.ID, b.ID, grade, at, was, means, grade), nil, []string{si.A, si.B},
 			"the owner's declaration ("+si.Why+"): confirm the other means of protection it relies on")
 	}

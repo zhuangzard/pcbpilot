@@ -86,6 +86,10 @@ type keepCarry struct {
 	UserMinNm int64  `json:"userMinNm"`
 	Condition string `json:"userCondition,omitempty"`
 	Layer     string `json:"layer,omitempty"`
+	// order: the user rule's place in the file, its constraint, the
+	// generated minimum, the generated rule — the order the carry rules
+	// are written in (see keepStricterAnalyse).
+	order [4]int64
 }
 
 // keepCarryPrefix starts the name of every carry rule.
@@ -427,11 +431,28 @@ func keepStricterAnalyse(users []kicad.DRURule, gens []keepGen, env keepEnv) *ke
 		carried[gi] = map[int]string{}
 		for i, l := range links[gi][first:] {
 			c := keepCarry{Rule: keepCarryName(g.rule, g.typ, i+1), Generated: g.rule, Type: g.typ, MinNm: max(l.min, g.min),
-				UserRule: l.u.Name, UserMinNm: l.min, Condition: l.u.Condition, Layer: l.u.Layer}
+				UserRule: l.u.Name, UserMinNm: l.min, Condition: l.u.Condition, Layer: l.u.Layer,
+				order: [4]int64{int64(l.u.Index), int64(l.con), g.min, int64(gi)}}
 			carried[gi][first+i] = c.Rule
 			p.rep.Carried = append(p.rep.Carried, c)
 		}
 	}
+	// The carry rules are written after every generated rule, in the
+	// user's own rule order (KiCad applies the last matching rule: where
+	// several match, the user's later rule decides, as in the user's file),
+	// and for one user rule the larger generated minimum last. No carry is
+	// below a generated minimum that may match the same items (above), so
+	// the last matching carry is max(the user's effective value, every
+	// generated minimum that matches).
+	sort.SliceStable(p.rep.Carried, func(i, j int) bool {
+		a, b := p.rep.Carried[i].order, p.rep.Carried[j].order
+		for k := range a {
+			if a[k] != b[k] {
+				return a[k] < b[k]
+			}
+		}
+		return false
+	})
 	rel := map[keepKey]map[string]bool{}
 	note := func(l link, relation, text string, ok bool) {
 		k := keepKey{l.u.Index, l.con}
@@ -468,7 +489,7 @@ func keepStricterAnalyse(users []kicad.DRURule, gens []keepGen, env keepEnv) *ke
 				yields = append(yields, ref)
 				note(l, "stricter", fmt.Sprintf("the user rule (min %s) is stricter than %s: --keep-stricter writes the generated minimum before the user's rules (head block rule %q), so the user rule wins where both match", mm(l.min), what, keepHeadName(g.rule, g.typ)), true)
 			case carried[gi][li] != "":
-				note(l, "stricter", fmt.Sprintf("the user rule (min %s) is stricter than %s, which must stay last (%s): --keep-stricter writes the user's minimum again after it, limited to the items both rules match (rule %q), so the stricter value applies there", mm(l.min), what, strings.Join(blockers[gi], "; "), carried[gi][li]), true)
+				note(l, "stricter", fmt.Sprintf("the user rule (min %s) is stricter than %s, which must stay last (%s): --keep-stricter writes the user's minimum again after the generated rules, limited to the items both rules match (rule %q), so the stricter value applies there", mm(l.min), what, strings.Join(blockers[gi], "; "), carried[gi][li]), true)
 			default:
 				because := blockers[gi]
 				if noCarry[gi] != "" {
@@ -609,8 +630,9 @@ func keepCarryText(c keepCarry, gen string) string {
 // each moved constraint leaves its rule in the route block (a rule left
 // without a constraint is dropped) and is written, with the rule's
 // condition and its own text, as a rule of a new head block right after
-// (version …); each carry rule is written right after the generated rule
-// it belongs to. The head block also lists the carries (it is the mark
+// (version …); each carry rule is written after the generated rules, for the rule
+// it belongs to — all of them at the end of the route block, in the given
+// order. The head block also lists the carries (it is the mark
 // that keep-stricter is in force). Neither: the text without a head block.
 // The user part is not touched: cutting the head block out again gives it
 // back byte for byte.
@@ -649,6 +671,7 @@ func keepHeadBlock(text string, moves []keepMove, carries []keepCarry) (string, 
 	}
 	got := make([]string, len(moves))
 	placed := make([]bool, len(carries))
+	genCond, genHas := map[string]string{}, map[string]map[string]bool{}
 	var nb strings.Builder
 	last := 0
 	for _, f := range druTopForms(body) {
@@ -682,33 +705,38 @@ func keepHeadBlock(text string, moves []keepMove, carries []keepCarry) (string, 
 			}
 			keep = append(keep, kt)
 		}
-		if hits == 0 && cs == nil {
+		if q0, q1 := strings.Index(cond, "\""), strings.LastIndex(cond, "\""); cs != nil && q1 > q0 {
+			genCond[name], genHas[name] = cond[q0+1:q1], has
+		}
+		if hits == 0 {
 			continue
 		}
 		nb.WriteString(body[last:f[0]])
 		last = f[1]
-		switch {
-		case hits == 0:
-			nb.WriteString(form)
-		case left == 0:
+		if left == 0 {
 			if last < len(body) && body[last] == '\n' {
 				last++
 			}
 			continue
-		default:
-			nb.WriteString(strings.TrimRight(form[:kids[0][0]], " \t\n") + "\n  " + strings.Join(keep, "\n  ") + ")")
 		}
-		q0, q1 := strings.Index(cond, "\""), strings.LastIndex(cond, "\"")
-		for _, ci := range cs {
-			// The generated minimum the carry follows must still be here.
-			if q1 <= q0 || !has[carries[ci].Type] {
-				continue
-			}
-			nb.WriteString("\n" + keepCarryText(carries[ci], cond[q0+1:q1]))
-			placed[ci] = true
-		}
+		nb.WriteString(strings.TrimRight(form[:kids[0][0]], " \t\n") + "\n  " + strings.Join(keep, "\n  ") + ")")
 	}
 	nb.WriteString(body[last:])
+	if len(carries) > 0 {
+		rest := strings.TrimRight(nb.String(), "\n")
+		tail := nb.String()[len(rest):]
+		nb.Reset()
+		nb.WriteString(rest)
+		for ci, c := range carries {
+			// The generated minimum the carry follows must still be here.
+			if !genHas[c.Generated][c.Type] {
+				continue
+			}
+			nb.WriteString("\n" + keepCarryText(c, genCond[c.Generated]))
+			placed[ci] = true
+		}
+		nb.WriteString(tail)
+	}
 	oneLine := strings.NewReplacer("\n", " ", "\r", " ")
 	var hb strings.Builder
 	hb.WriteString(kicad.DRUHeadBegin + "\n")
@@ -730,8 +758,12 @@ func keepHeadBlock(text string, moves []keepMove, carries []keepCarry) (string, 
 		if !placed[i] {
 			return "", fmt.Errorf("custom rules: the route block has no %s constraint in rule %q to write the user's rule %q after", c.Type, c.Generated, c.UserRule)
 		}
-		fmt.Fprintf(&hb, "# %s of %q stays last; the user's %q (min %s) is written again after it as %q (min %s, where both match)\n",
-			c.Type, c.Generated, oneLine.Replace(c.UserRule), kicad.MmOfNm(c.UserMinNm), c.Rule, kicad.MmOfNm(c.MinNm))
+		on := ""
+		if c.Layer != "" {
+			on = ", layer " + c.Layer
+		}
+		fmt.Fprintf(&hb, "# %s of %q stays last; the user's %q (min %s%s, on: %s) is written again after the generated rules as %q (min %s, where both match)\n",
+			c.Type, c.Generated, oneLine.Replace(c.UserRule), kicad.MmOfNm(c.UserMinNm), on, oneLine.Replace(c.Condition), c.Rule, kicad.MmOfNm(c.MinNm))
 	}
 	hb.WriteString(kicad.DRUHeadEnd + "\n")
 	return insertHeadBlock(text[:b0]+nb.String()+text[b1:], hb.String())
@@ -788,7 +820,7 @@ func (r *rulesRun) keepAnalyse(userRules []kicad.DRURule, replaced map[string]bo
 		fmt.Fprintf(r.stderr, "keep-stricter: %s min %s of generated rule %q stays last; it is at least as strict as and wins over user rule %s\n", s.Type, mm(s.MinNm), s.Generated, refs(s.Over))
 	}
 	for _, c := range rep.Carried {
-		fmt.Fprintf(r.stderr, "keep-stricter: generated rule %q stays last; %s of user rule %q (min %s) is written again after it as rule %q (min %s, where both match)\n", c.Generated, c.Type, c.UserRule, mm(c.UserMinNm), c.Rule, mm(c.MinNm))
+		fmt.Fprintf(r.stderr, "keep-stricter: generated rule %q stays last; %s of user rule %q (min %s) is written again after the generated rules as rule %q (min %s, where both match)\n", c.Generated, c.Type, c.UserRule, mm(c.UserMinNm), c.Rule, mm(c.MinNm))
 	}
 	for _, u := range rep.Unresolved {
 		fmt.Fprintf(r.stderr, "keep-stricter: NOT resolved, user rule %q: %s\n", u.UserRule, u.Why)

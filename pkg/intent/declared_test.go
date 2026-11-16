@@ -222,6 +222,21 @@ func TestDeclaredPairInsulation(t *testing.T) {
 	if p = pairOf(it, mp.A, mp.B); p.MOPCount != wantCount || wantCount == 2 && p.ClearanceMm != mp.ClearanceMm {
 		t.Fatalf("same grade under 2 x MOPP: %+v", p)
 	}
+	// The other grade of the same rank counts one as well, and the count
+	// that drops is reported although no grade rank is lowered.
+	if other := map[string]string{"basic": "supplementary", "supplementary": "basic"}[mp.Insulation]; other != "" {
+		it = mainsIntent(t, func(s *Spec) {
+			two(s)
+			s.Isolation = []SpecIsolation{{A: mp.A, B: mp.B, Insulation: other, Why: "the other single means"}}
+		})
+		said = false
+		for _, f := range it.Findings {
+			said = said || f.Kind == "declared-insulation-lowered"
+		}
+		if p = pairOf(it, mp.A, mp.B); p.MOPCount != 1 || !said {
+			t.Fatalf("%s for %s under 2 x MOPP: count %d, reported %v", other, mp.Insulation, p.MOPCount, said)
+		}
+	}
 	one := func(s *Spec) { s.Standard.Name, s.Standard.MOP, s.Standard.MOPCount = "IEC60601-1", "MOPP", 1 }
 	obase := mainsIntent(t, one)
 	for _, q := range obase.Pairs {
