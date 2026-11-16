@@ -268,6 +268,9 @@ func (pl *placer) gridSeat(fg *freeGrid, p *Part) bool {
 	if bridge {
 		zk.sides += 16
 	}
+	if p.Side == LayerBottom {
+		zk.sides += 32 // parts-only keep-outs bar the mounted side: two through-hole parts differ by it
+	}
 	dims := [2]int{max(turns[0].kw, turns[0].kh), min(turns[0].kw, turns[0].kh)}
 	if pl.opt.NoRotate {
 		dims = [2]int{turns[0].kw, turns[0].kh}
