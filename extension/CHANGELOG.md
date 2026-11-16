@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+- **`kicad board outline`: a footprint with its own slot or cut-out no longer blocks the board outline.** Any footprint
+  that draws on Edge.Cuts (a connector with a slot, for example) made the command refuse every new outline with
+  `E_BOARD_OUTLINE_EXISTS`, with or without `--replace`. Closed Edge.Cuts contours inside a footprint that lie wholly
+  inside the new outline now stay as they are and count as cut-outs of the board (`summary.footprintCutouts`, and a
+  warning names the footprints); `--replace` is needed only when the board has its own outline drawings. The command
+  still refuses, naming each footprint and the reason, when a footprint's Edge.Cuts is open, crosses or touches the new
+  outline, or lies outside it, and when a new cutout lands on a footprint's cut-out. Footprint graphics are never changed.
+- **`kicad drc --timeout <duration>`** (for example `--timeout 90m`) sets the time limit of the kicad-cli DRC run;
+  `kicad fab --preflight` takes `--drc-timeout`. The flag wins over `PCBPILOT_KICAD_DRC_TIMEOUT`, which wins over the
+  computed limit; a zero or negative value is refused. The computed limit now also grows with the project's custom
+  rules file: 5 minutes per 100 kB of `<board>.kicad_dru`, on top of 2 minutes per MB of board file, still at most
+  2 hours (a board with a 400 kB rules file ran into the old limit and came back cannot-check). A timeout message
+  names the flag, the environment variable and, when the rules file is 100 kB or larger, its size.
+
 ## [0.12.10] — 2026-11-15
 
 **CLI, daemon, Skills, MCP and the connector move to 0.12.10. The connector runtime is unchanged from 0.12.9; import the

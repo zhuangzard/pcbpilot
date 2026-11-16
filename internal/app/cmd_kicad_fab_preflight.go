@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/zhuangzard/pcbpilot/internal/gate"
 	"github.com/zhuangzard/pcbpilot/internal/kicad"
@@ -50,6 +51,7 @@ type fabPreflightOptions struct {
 	pcb, sch, contract, overrides, cli string
 	noAssembly                         bool
 	waivers                            []gateWaiver
+	drcTimeout                         time.Duration // > 0: the limit of the kicad-cli DRC run (--drc-timeout)
 }
 
 func runFabPreflight(o fabPreflightOptions) *fabPreflightReport {
@@ -92,7 +94,7 @@ func runFabPreflight(o fabPreflightOptions) *fabPreflightReport {
 			rootErr = fmt.Errorf("%v; and --sch %s cannot stand in for it: %s", rootErr, o.sch, why)
 		}
 	}
-	rep.DRC = runKicadDRC(kicadDRCOptions{pcb: o.pcb, cli: o.cli, parity: parity, sch: foreign, waivers: o.waivers, tolMm: 0.5})
+	rep.DRC = runKicadDRC(kicadDRCOptions{pcb: o.pcb, cli: o.cli, parity: parity, sch: foreign, waivers: o.waivers, tolMm: 0.5, timeout: o.drcTimeout})
 	rep.Checks = append(rep.Checks, rep.DRC.Checks...)
 	if !parity {
 		add(cannotCheck("schematic-parity", rootErr.Error()))

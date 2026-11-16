@@ -473,8 +473,76 @@ p.SetNumber("1"); p.SetPosition(P(70, 10)); fp.Add(p); fp.SetAttributes(pcbnew.F
 	}
 }
 
+// TestKicadBoardLiveFootprintSlot: closed Edge.Cuts contours inside a
+// footprint (a slot of lines and arcs, a round cut-out) stay as cut-outs
+// of a new outline, without --replace on a board that has no board-level
+// outline and with it afterwards; an outline that cuts through the slot or
+// leaves it outside is refused with the footprint named.
+func TestKicadBoardLiveFootprintSlot(t *testing.T) {
+	tools := boardLiveTools(t)
+	pcb := filepath.Join(t.TempDir(), "slot.kicad_pcb")
+	boardLiveOp(t, tools, "new", pcb, &kicad.NewBoardSpec{Layers: 2})
+	seedPy(t, tools, pcb, `
+fp = pcbnew.FOOTPRINT(b0); fp.SetReference("J1"); fp.SetPosition(P(20, 20))
+def line(a, b):
+    s = pcbnew.PCB_SHAPE(fp); s.SetShape(pcbnew.SHAPE_T_SEGMENT); s.SetLayer(pcbnew.Edge_Cuts)
+    s.SetStart(P(*a)); s.SetEnd(P(*b)); s.SetWidth(pcbnew.FromMM(0.05)); fp.Add(s)
+def arc(a, m, b):
+    s = pcbnew.PCB_SHAPE(fp); s.SetShape(pcbnew.SHAPE_T_ARC); s.SetLayer(pcbnew.Edge_Cuts)
+    s.SetArcGeometry(P(*a), P(*m), P(*b)); s.SetWidth(pcbnew.FromMM(0.05)); fp.Add(s)
+line((18, 19.5), (22, 19.5)); arc((22, 19.5), (22.5, 20), (22, 20.5))
+line((22, 20.5), (18, 20.5)); arc((18, 20.5), (17.5, 20), (18, 19.5))
+c = pcbnew.PCB_SHAPE(fp); c.SetShape(pcbnew.SHAPE_T_CIRCLE); c.SetLayer(pcbnew.Edge_Cuts)
+c.SetCenter(P(20, 25)); c.SetEnd(P(21, 25)); c.SetWidth(pcbnew.FromMM(0.05)); fp.Add(c)
+fp.SetAttributes(pcbnew.FP_BOARD_ONLY); b0.Add(fp)
+`)
+	fpEdges := func() int {
+		data, err := os.ReadFile(pcb)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strings.Count(string(data), "(fp_line") + strings.Count(string(data), "(fp_arc") + strings.Count(string(data), "(fp_circle")
+	}
+	if n := fpEdges(); n != 5 {
+		t.Fatalf("fixture: %d footprint graphics, want 5", n)
+	}
+	check := func(what string, rep *kicadBoardReport, cutouts float64) {
+		t.Helper()
+		if rep.Summary["outlines"] != 1.0 || rep.Summary["cutouts"] != cutouts || rep.Summary["footprintCutouts"] != 2.0 ||
+			len(rep.Warnings) == 0 || !strings.Contains(strings.Join(rep.Warnings, "\n"), "J1") {
+			t.Errorf("%s: summary %v warnings %v", what, rep.Summary, rep.Warnings)
+		}
+		if n := fpEdges(); n != 5 {
+			t.Errorf("%s: %d footprint graphics left, want 5", what, n)
+		}
+	}
+	// No board-level outline yet: no --replace needed.
+	check("first outline", boardLiveOp(t, tools, "outline", pcb, &kicad.OutlineSpec{Outer: kicad.BoardShape{Rect: &kicad.BoardRect{Width: 40, Height: 40}}}), 2)
+	// A board-level outline exists now: --replace is required, and enough.
+	bigger := kicad.BoardShape{Rect: &kicad.BoardRect{X: -5, Y: -5, Width: 60, Height: 50, CornerRadius: 2}}
+	in := kicadBoardOpts{pcb: pcb, inPlace: true}
+	boardLiveRefused(t, tools, "outline", in, &kicad.OutlineSpec{Outer: bigger}, 2, kicad.ErrBoardOutlineExists)
+	check("replaced outline", boardLiveOp(t, tools, "outline", pcb, &kicad.OutlineSpec{Outer: bigger, Replace: true,
+		Cutouts: []kicad.BoardShape{{Circle: &kicad.BoardCircle{X: 40, Y: 30, Diameter: 3}}}}), 3)
+	// Through the slot, and beside it: refused, J1 named with the reason.
+	for why, r := range map[string]kicad.BoardRect{
+		"crosses or touches the new outline": {X: 20, Y: 0, Width: 40, Height: 40},
+		"lies outside the new outline":       {X: 30, Y: 0, Width: 40, Height: 40},
+	} {
+		r := r
+		rep := boardLiveRefused(t, tools, "outline", in, &kicad.OutlineSpec{Outer: kicad.BoardShape{Rect: &r}, Replace: true}, 2, kicad.ErrBoardOutlineExists)
+		if !strings.Contains(rep.Issues[0].Detail, "J1 ("+why) {
+			t.Errorf("%s: %+v", why, rep.Issues)
+		}
+	}
+	// A new cutout on the footprint's slot is refused too.
+	boardLiveRefused(t, tools, "outline", in, &kicad.OutlineSpec{Outer: bigger, Replace: true,
+		Cutouts: []kicad.BoardShape{{Circle: &kicad.BoardCircle{X: 20, Y: 20, Diameter: 0.4}}}}, 2, kicad.ErrBoardGeometry)
+}
+
 // TestKicadBoardLiveFootprintOutline: an outline drawn by a footprint's
-// Edge.Cuts is not replaced silently, with or without --replace.
+// Edge.Cuts is not replaced silently, with or without --replace (the new
+// outline does not enclose it, so it would be a second outer contour).
 func TestKicadBoardLiveFootprintOutline(t *testing.T) {
 	tools := boardLiveTools(t)
 	pcb := filepath.Join(t.TempDir(), "f.kicad_pcb")

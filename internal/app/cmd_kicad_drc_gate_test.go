@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zhuangzard/pcbpilot/internal/gate"
 	"github.com/zhuangzard/pcbpilot/internal/kicad"
@@ -447,5 +448,49 @@ func TestKicadDRCIgnoredCustomRuleBaseline(t *testing.T) {
 		if n := newPolicy(pcb); n != 1 {
 			t.Errorf("%s: %d new policy item(s), want 1", name, n)
 		}
+	}
+}
+
+// TestKicadDRCTimeoutFlag: --timeout stops the kicad-cli run at the given
+// limit even when the environment allows more (cannot-check, exit 5, the
+// message names the flag and the variable); a value that is not positive
+// is a usage error before anything runs; kicad fab --preflight has the same
+// limit as --drc-timeout.
+func TestKicadDRCTimeoutFlag(t *testing.T) {
+	pcb := copyDRCBoard(t)
+	fakeKicadCLIEnv(t, "drc/clean.json", "0")
+	for _, bad := range []string{"0", "0s", "-5m"} {
+		_, _, err := runKiCadCmd(t, "drc", "--pcb", pcb, "--timeout="+bad)
+		var ec exitCodeError
+		if err == nil || errors.As(err, &ec) || !strings.Contains(err.Error(), "--timeout must be positive") {
+			t.Errorf("drc --timeout=%s: %v", bad, err)
+		}
+		_, _, err = runKiCadCmd(t, "fab", "--preflight", "--pcb", pcb, "--drc-timeout="+bad)
+		if err == nil || errors.As(err, &ec) || !strings.Contains(err.Error(), "--drc-timeout must be positive") {
+			t.Errorf("fab --preflight --drc-timeout=%s: %v", bad, err)
+		}
+	}
+	if _, _, err := runKiCadCmd(t, "fab", "--pcb", pcb, "--out", t.TempDir(), "--drc-timeout", "5m"); err == nil || !strings.Contains(err.Error(), "--preflight flags") {
+		t.Errorf("--drc-timeout without --preflight: %v", err)
+	}
+
+	t.Setenv("PCBPILOT_FAKE_DRC_SLEEP_MS", "20000")
+	t.Setenv(kicad.EnvDRCTimeout, "1h")
+	start := time.Now()
+	rep, code := runDRCReport(t, "--pcb", pcb, "--timeout", "500ms")
+	if code != 5 || rep.Verdict != gate.CannotCheck || len(rep.Checks) != 1 {
+		t.Fatalf("exit %d verdict %s checks %+v", code, rep.Verdict, rep.Checks)
+	}
+	if time.Since(start) > 15*time.Second {
+		t.Errorf("the run was not stopped at --timeout (%s)", time.Since(start))
+	}
+	for _, want := range []string{"timed out after 500ms", "--timeout", kicad.EnvDRCTimeout} {
+		if !strings.Contains(rep.Checks[0].Detail, want) {
+			t.Errorf("detail lacks %q: %s", want, rep.Checks[0].Detail)
+		}
+	}
+	pre, code := runPreflight(t, "--pcb", pcb, "--no-assembly", "--drc-timeout", "500ms")
+	if code != 5 || checkStatus(pre.Checks)["kicad-drc"] != gate.CannotCheck || !strings.Contains(pre.DRC.Checks[0].Detail, "timed out after 500ms") {
+		t.Fatalf("preflight: exit %d checks %v", code, checkStatus(pre.Checks))
 	}
 }

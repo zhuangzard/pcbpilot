@@ -43,6 +43,9 @@ type DRCRunOptions struct {
 	CLI       string // kicad-cli
 	// SaveRaw: copy kicad-cli's JSON report here ("" = keep nothing).
 	SaveRaw string
+	// Timeout (> 0) is the time limit of the kicad-cli run: it replaces
+	// DRCTimeoutFor's (environment, then computed from the file sizes).
+	Timeout time.Duration
 }
 
 // DRCRun is one finished DRC run.
@@ -124,7 +127,7 @@ func RunDRC(o DRCRunOptions) (*DRCRun, error) {
 		args = append(args, "--schematic-parity")
 	}
 	args = append(args, "-o", out, staged)
-	limit := DRCTimeoutFor(pcb, DRCTimeout)
+	limit := DRCTimeoutWith(pcb, DRCTimeout, o.Timeout)
 	ctx, cancel := context.WithTimeout(context.Background(), limit)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, o.CLI, args...)

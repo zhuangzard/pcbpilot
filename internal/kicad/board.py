@@ -478,10 +478,154 @@ def refill_filled(board, res):
     return res
 
 
+def arc_points(start, mid, end, err=0.005):
+    """Points (mm) along the arc start→mid→end, chords within err of it."""
+    ax, ay = start
+    bx, by = mid
+    cx, cy = end
+    d = 2 * (ax * (by - cy) + bx * (cy - ay) + cx * (ay - by))
+    if abs(d) < 1e-12:
+        return [tuple(start), tuple(end)]
+    ux = ((ax * ax + ay * ay) * (by - cy) + (bx * bx + by * by) * (cy - ay) + (cx * cx + cy * cy) * (ay - by)) / d
+    uy = ((ax * ax + ay * ay) * (cx - bx) + (bx * bx + by * by) * (ax - cx) + (cx * cx + cy * cy) * (bx - ax)) / d
+    r = math.hypot(ax - ux, ay - uy)
+    a0 = math.atan2(ay - uy, ax - ux)
+    sweep = (math.atan2(cy - uy, cx - ux) - a0) % (2 * math.pi)
+    if (math.atan2(by - uy, bx - ux) - a0) % (2 * math.pi) > sweep:
+        sweep -= 2 * math.pi
+    step = 2 * math.acos(max(0.0, 1 - err / r)) if r > err else math.pi / 2
+    n = max(2, min(720, int(math.ceil(abs(sweep) / step))))
+    return [tuple(start)] + [(ux + r * math.cos(a0 + sweep * i / n), uy + r * math.sin(a0 + sweep * i / n)) for i in range(1, n)] + [tuple(end)]
+
+
+def circle_points(c, r, err=0.005):
+    step = 2 * math.acos(max(0.0, 1 - err / r)) if r > err else math.pi / 2
+    n = max(8, min(720, int(math.ceil(2 * math.pi / step))))
+    return [(c[0] + r * math.cos(2 * math.pi * i / n), c[1] + r * math.sin(2 * math.pi * i / n)) for i in range(n)]
+
+
+def edge_loops(edges):
+    """(loops, why) of one footprint's Edge.Cuts items (read_fp_edge dicts):
+    the closed contours they draw, each a point list (mm; arcs and circles
+    as chords), or why they are not closed contours only."""
+    loops, open_ = [], []
+    for e in edges:
+        k = e["kind"]
+        if k == "circle":
+            loops.append(circle_points(e["center"], e["radius"]))
+        elif k in ("rect", "poly"):
+            loops.append([tuple(p) for p in e["points"]])
+        elif k == "segment":
+            open_.append([tuple(e["start"]), tuple(e["end"])])
+        elif k == "arc":
+            open_.append(arc_points(e["start"], e["mid"], e["end"]))
+        else:
+            return None, "has a %s on Edge.Cuts, which is not a closed contour kicad board can check" % k
+    used = [False] * len(open_)
+    for i, first in enumerate(open_):
+        if used[i]:
+            continue
+        used[i] = True
+        path = list(first)
+        while len(path) < 3 or dist(path[-1], path[0]) > TOL:
+            nxt = [(j, rev) for j, q in enumerate(open_) if not used[j]
+                   for rev in (False, True) if dist(q[-1] if rev else q[0], path[-1]) <= TOL]
+            if len({j for j, _ in nxt}) != 1:
+                return None, "its Edge.Cuts items are not closed contours (%s at %.4g, %.4g mm)" % (
+                    "an open end" if not nxt else "a branch", path[-1][0], path[-1][1])
+            j, rev = nxt[0]
+            used[j] = True
+            path += (open_[j][::-1] if rev else open_[j])[1:]
+        loops.append(path[:-1])
+    for lp in loops:
+        if len(lp) < 3:
+            return None, "its Edge.Cuts items are not closed contours (a contour of %d point(s))" % len(lp)
+    return loops, None
+
+
+def loop_touches(loop, edges):
+    """Whether the closed point list loop comes within TOL of any of edges."""
+    return any(seg_edge(loop[i], loop[(i + 1) % len(loop)], e) <= TOL for i in range(len(loop)) for e in edges)
+
+
+def loop_edges(loop):
+    return [{"seg": [loop[i][0], loop[i][1], loop[(i + 1) % len(loop)][0], loop[(i + 1) % len(loop)][1]]} for i in range(len(loop))]
+
+
+def loop_in_outline(loop, outer):
+    """None when loop lies wholly inside the shape item outer ({"edges",
+    "shape"}), more than TOL from its boundary — else why not."""
+    if loop_touches(loop, outer["edges"]):
+        return "crosses or touches the new outline"
+    if sdf(outer["shape"], loop[0]) >= 0:
+        return "lies outside the new outline"
+    return None
+
+
+def loops_clash(a, b):
+    """Whether two closed point lists cross, touch or nest."""
+    return loop_touches(a, loop_edges(b)) or point_in_poly(b, a[0]) or point_in_poly(a, b[0])
+
+
+def read_fp_edge(g):
+    """One footprint Edge.Cuts item as edge_loops reads it (board mm)."""
+    if g.GetClass() != "PCB_SHAPE":
+        return {"kind": g.GetClass()}
+    k = g.GetShape()
+    if k in (pcbnew.SHAPE_T_SEGMENT, pcbnew.SHAPE_T_ARC, pcbnew.SHAPE_T_CIRCLE):
+        return read_edge(g)
+    if k == pcbnew.SHAPE_T_RECTANGLE:
+        a, b = xy_mm(g.GetStart()), xy_mm(g.GetEnd())
+        return {"kind": "rect", "points": [a, [b[0], a[1]], b, [a[0], b[1]]]}
+    if k == pcbnew.SHAPE_T_POLY:
+        ps = g.GetPolyShape()
+        if ps.OutlineCount() == 1 and ps.HoleCount(0) == 0:
+            return {"kind": "poly", "points": chain_mm(ps.Outline(0))}
+        return {"kind": "polygon with holes or several outlines"}
+    return {"kind": "curve (shape %d)" % k}
+
+
 def footprint_edges(board):
-    """Designators of footprints that draw on Edge.Cuts."""
-    return sorted({fp.GetReference() for fp in board.GetFootprints()
-                   for g in fp.GraphicalItems() if g.GetLayer() == pcbnew.Edge_Cuts})
+    """{designator: [read_fp_edge dict]} of the footprints that draw on Edge.Cuts."""
+    out = {}
+    for fp in board.GetFootprints():
+        es = [read_fp_edge(g) for g in fp.GraphicalItems() if g.GetLayer() == pcbnew.Edge_Cuts]
+        if es:
+            out.setdefault(fp.GetReference(), []).extend(es)
+    return out
+
+
+def footprint_cutouts(fps, outer, cutouts, P):
+    """The closed contours footprints draw on Edge.Cuts, [(designator,
+    loop)], when every one lies inside the new outline outer (they stay as
+    the footprints' own slots and cut-outs). Problems go to P: a footprint
+    whose Edge.Cuts would form or cut the outer contour, a new cutout on a
+    footprint's one."""
+    kept, bad = [], []
+    for ref in sorted(fps):
+        loops, why = edge_loops(fps[ref])
+        if not why:
+            why = next((w for w in (loop_in_outline(lp, outer) for lp in loops) if w), None)
+        if not why and any(loops_clash(lp, k) for lp in loops for _, k in kept):
+            why = "overlaps or nests with another footprint's Edge.Cuts contour"
+        if not why and any(loops_clash(a, b) for i, a in enumerate(loops) for b in loops[:i]):
+            why = "its Edge.Cuts contours overlap or nest"
+        if why:
+            bad.append("%s (%s)" % (ref, why))
+        else:
+            kept += [(ref, lp) for lp in loops]
+    if bad:
+        P.add("E_BOARD_OUTLINE_EXISTS", "outline",
+              "unsupported replacement: footprint(s) %s draw Edge.Cuts that would form or cut the board's outer contour; kicad board cannot remove or change footprint graphics (only closed footprint contours wholly inside the new outline are kept, as slots / cut-outs)" % ", ".join(bad),
+              "give an outline that encloses those footprints' closed Edge.Cuts contours with clearance, or edit the footprints' Edge.Cuts in KiCad first, or add cutouts only")
+        return []
+    for i, c in enumerate(cutouts):
+        hit = sorted({ref for ref, lp in kept
+                      if loop_touches(lp, c["edges"]) or sdf(c["shape"], lp[0]) < 0 or point_in_poly(lp, edge_start(c["edges"][0]))})
+        if hit:
+            P.add("E_BOARD_GEOMETRY", "cutouts[%d]" % i, "the %s cutout crosses, touches or nests with the Edge.Cuts cut-out of footprint(s) %s" % (c["kind"], ", ".join(hit)),
+                  "move it away from the footprint's slot / cut-out")
+    return kept
 
 
 def op_outline(board, spec, P):
@@ -492,10 +636,8 @@ def op_outline(board, spec, P):
     ps0 = board_polys(board)
     outlines_before = ps0.OutlineCount() if ps0 is not None else 0
     fps = footprint_edges(board)
-    if outer and fps:
-        P.add("E_BOARD_OUTLINE_EXISTS", "outline", "unsupported replacement: footprint(s) %s draw Edge.Cuts, which kicad board cannot remove or replace" % ", ".join(fps),
-              "remove or edit those footprints' Edge.Cuts in KiCad first, or add cutouts only")
-    elif outer and outlines_before and not existing:
+    fp_cuts = footprint_cutouts(fps, outer, cutouts, P) if outer and fps else []
+    if outer and outlines_before and not existing and not fps:
         P.add("E_BOARD_OUTLINE_EXISTS", "outline", "the board already has %d closed outline(s) that are not board-level Edge.Cuts drawings" % outlines_before,
               "unsupported replacement: remove the existing outline in KiCad first")
     if outer:
@@ -529,10 +671,15 @@ def op_outline(board, spec, P):
         for m, p in zip(made, shp["prims"]):
             want[m["uuid"]] = expect_edge(p)
         created += made
-    expect = {"holes": holes_before + len(cutouts), "edges": want, "lineWidth": w, "outlines": 1 if outer else outlines_before}
+    expect = {"holes": holes_before + len(cutouts) + len(fp_cuts), "edges": want, "lineWidth": w, "outlines": 1 if outer else outlines_before}
+    res = {"created": created, "removed": removed, "expect": expect}
     if outer:
         expect["bbox"] = outer["bbox"]
-    return refill_filled(board, {"created": created, "removed": removed, "expect": expect})
+    if fp_cuts:
+        refs = sorted({ref for ref, _ in fp_cuts})
+        res["warnings"] = ["kept %d Edge.Cuts contour(s) drawn by footprint(s) %s inside the new outline as cut-outs (footprint graphics are never changed)" % (len(fp_cuts), ", ".join(refs))]
+        res["summary"] = {"footprintCutouts": len(fp_cuts)}
+    return refill_filled(board, res)
 
 
 def verify_outline(board, spec, res, V):

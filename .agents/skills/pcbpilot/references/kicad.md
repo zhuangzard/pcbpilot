@@ -523,7 +523,7 @@ pcbpilot kicad route --pcb board-b-v5a.kicad_pcb --intent intent.json --sim sim.
    制造合法性（环宽、孔、径 对板子最小值、自定义规则和合同）与首选尺寸（类过孔）分开判：不合法一律失败，输入板已有的过孔也失败但绝不改；尺寸不符只有 input（列在 Info）和声明的例外放行，
    route 自己的意图逃逸过孔是内建的 neckdown-escape 例外（列在 Info）。`--via-policy FILE`（JSON：`contract` 合同路径；`exceptions` 每项 `kind` = neckdown-escape / stitching（要 `nets`，只免首选尺寸）或 microvia / blind-buried（要 `minDrillMm`、`minAnnularMm`，非通孔按它判合法性），都要 `reason`）。
    孔径不小于外径在任何跨层上都是失败（退出 6），未确认跨层的 cannot-check 证据照留；合法性、首选尺寸与尺寸步骤同一容差 100 nm。来源 unknown 不享受任何例外（microvia / blind-buried 声明对它也无效）；跨层未确认为通孔（层 id 缺失或为 0、非通孔）且未声明的、带条件或数值读不出的 via_diameter / hole_size / annular_width 自定义规则判 cannot-check。
-   **DRC 时限**：kicad-cli DRC 的时限按板文件大小放大（15 min + 每 MB 2 min，最多 2 h；`PCBPILOT_KICAD_DRC_TIMEOUT` 覆盖），
+   **DRC 时限**：kicad-cli DRC 的时限按板文件和工程自定义规则文件的大小放大（15 min + 每 MB 板文件 2 min + 板旁同名 `.kicad_dru` 每 100 kB 5 min，最多 2 h；`PCBPILOT_KICAD_DRC_TIMEOUT` 覆盖；`kicad drc --timeout` / `kicad fab --preflight --drc-timeout` 优先于环境变量），
    超时报 `kicad-cli pcb drc on <板> timed out after <时限>`。铺铜后的 starved-thermal 修复、widen 的 DRC 回退是可选步骤：
    它们的 DRC 没跑成（超时）时记一个 cannot-check 门禁（`starved-thermals` / `widen-drc`），照样写 routed 板、跑其余门禁，
    不再中止整个 route。
@@ -603,6 +603,9 @@ pcbpilot kicad drc --pcb board.kicad_pcb --baseline drc/drc-report.json --waiver
   用 pcbpilot 的隔离 KiCad 配置（空的全局库表，kicadenv.go）运行 `kicad-cli pcb drc --format json --severity-all`；工程自己的
   `fp-lib-table` / `sym-lib-table` 随副本带上，`${KIPRJMOD}` 指回原目录，所以工程库照常解析，只在全局库里的封装出 `lib_footprint_*`
   环境类警告。工程目录不新增 `.kicad_prl`、锁文件或任何改动（演示板副本前后哈希一致）。子图在工程目录外 → cannot-check。
+- **时限 `--timeout <时长>`**（如 `90m`）：每次 kicad-cli 运行的时限，默认 30 min + 每 MB 板文件 2 min + 同名 `.kicad_dru` 每 100 kB 5 min，最多 2 h
+  （几千条自定义规则的 `.kicad_dru` 会让 DRC 慢很多）。优先级：`--timeout` > 环境变量 `PCBPILOT_KICAD_DRC_TIMEOUT` > 计算值；非正值直接报错。
+  超时 = cannot-check（退出 5），报错写明时限、`.kicad_dru` 大小（≥ 100 kB 时）以及这两个调节办法。`kicad fab --preflight` 用 `--drc-timeout`。
 - **`--sch ROOT.kicad_sch`**（v0.12.2，隐含 `--schematic-parity`）：板写到了别的目录（`kicad place --out place/…`）时，
   把该根原理图及其层次复制到副本里板的旁边（根图改名为 `<板>.kicad_sch`），parity 照常比对；不给时只认板旁边的同名根图，
   没有就是 cannot-check。
