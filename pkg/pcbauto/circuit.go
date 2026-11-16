@@ -397,10 +397,15 @@ func (c *Circuit) buildDomains(b *Board, an *Analysis) {
 	// ground either), and a ground declared outside the line is never tied
 	// to it.
 	grp, grpLine := map[string]int{}, map[int]bool{}
+	// onLine: the net is the line by its name — unless it is declared in a
+	// domain that is not (a sensor's "N", a motor phase "L").
+	offLine := map[string]bool{}
+	onLine := func(n string) bool { return !offLine[n] && reMains.MatchString(upper(n)) }
 	if an != nil {
 		for i, dd := range an.declared {
 			grpLine[i+1] = dd.Line
 			for _, n := range dd.Nets {
+				offLine[n] = offLine[n] || !dd.Line
 				if grp[n] == 0 && an.Plan(n, b.Rules).Role == RoleGround {
 					grp[n] = i + 1
 				}
@@ -422,7 +427,7 @@ func (c *Circuit) buildDomains(b *Board, an *Analysis) {
 			return "", nil
 		}
 		for _, pd := range p.Pads {
-			if reMains.MatchString(upper(pd.Net)) {
+			if onLine(pd.Net) {
 				line = pd.Net
 			}
 			if an.Plan(pd.Net, b.Rules).Role == RoleGround && !slices.Contains(gs, pd.Net) {
@@ -505,7 +510,7 @@ func (c *Circuit) buildDomains(b *Board, an *Analysis) {
 	// Mains nets with no ground of their own form a "MAINS" domain.
 	hasMains := false
 	for _, np := range an.Nets {
-		if reMains.MatchString(upper(np.Net)) && np.PadCount >= 1 {
+		if onLine(np.Net) && np.PadCount >= 1 {
 			hasMains = true
 		}
 	}
@@ -567,7 +572,7 @@ func (c *Circuit) buildDomains(b *Board, an *Analysis) {
 			if d, ok := domOfGround[n]; ok && !containsStr(ds, d) {
 				ds = append(ds, d)
 			}
-			if hasMains && reMains.MatchString(upper(n)) && !containsStr(ds, mainsRoot) {
+			if hasMains && onLine(n) && !containsStr(ds, mainsRoot) {
 				ds = append(ds, mainsRoot)
 			}
 		}
@@ -647,7 +652,7 @@ func (c *Circuit) buildDomains(b *Board, an *Analysis) {
 		for n := range nets {
 			dom.Nets = append(dom.Nets, n)
 			v := an.Plan(n, b.Rules).Voltage
-			if reMains.MatchString(upper(n)) {
+			if onLine(n) {
 				dom.Mains = true
 				v = math.Max(v, 325) // 230 Vrms peak
 			}

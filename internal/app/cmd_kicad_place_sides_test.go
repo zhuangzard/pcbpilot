@@ -21,6 +21,13 @@ func TestRunKicadPlaceSidesFlipsBeforePlacing(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := filepath.Join(dir, "out", "board.kicad_pcb")
+	// The input's project and rules go with the staged copy and the output.
+	for ext, text := range map[string]string{".kicad_pro": "{}", ".kicad_dru": "(version 1)"} {
+		if err := os.WriteFile(filepath.Join(dir, "in"+ext), []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stagedRules := false
 	// The staged copy: board.kicad_pcb in a directory made for the run.
 	isStaged := func(p string) bool {
 		return filepath.Base(p) == "board.kicad_pcb" && strings.HasPrefix(filepath.Base(filepath.Dir(p)), "board.sides-staged-")
@@ -61,6 +68,9 @@ func TestRunKicadPlaceSidesFlipsBeforePlacing(t *testing.T) {
 		snapshot: func(p string) ([]byte, error) {
 			calls = append(calls, "snapshot "+filepath.Base(p))
 			if isStaged(p) {
+				_, e1 := os.Stat(strings.TrimSuffix(p, ".kicad_pcb") + ".kicad_dru")
+				_, e2 := os.Stat(strings.TrimSuffix(p, ".kicad_pcb") + ".kicad_pro")
+				stagedRules = e1 == nil && e2 == nil
 				return flipped(), nil
 			}
 			return tinyKicadSnapshot(), nil
@@ -86,6 +96,14 @@ func TestRunKicadPlaceSidesFlipsBeforePlacing(t *testing.T) {
 	rep, err := runKicadPlace(kicadPlaceOpts{pcb: pcb, out: out, sides: sides, placeSeeds: 1, candidates: 1, seed: 1}, deps, io.Discard)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !stagedRules {
+		t.Fatal("the staged copy was read without the input's .kicad_pro / .kicad_dru")
+	}
+	for _, ext := range []string{".kicad_pro", ".kicad_dru"} {
+		if _, err := os.Stat(strings.TrimSuffix(out, ".kicad_pcb") + ext); err != nil {
+			t.Fatalf("the output has no %s: %v", ext, err)
+		}
 	}
 	if len(flips) != 1 {
 		t.Fatalf("flipped %v, want C1 alone (R3 is on the bottom, R1 on the top already)", flips)

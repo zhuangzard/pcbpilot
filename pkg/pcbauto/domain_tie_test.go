@@ -139,6 +139,23 @@ func TestDomainDeclaredGroundsStayApart(t *testing.T) {
 	if c := Understand(b, Analyze(b, line, nil)); c.DomainOf["U2"] != c.DomainOf["J1"] {
 		t.Fatalf("ground declared on the line was not tied to it: %v", c.DomainOf)
 	}
+	// A net with the line's name, declared in a domain that is not the
+	// line, ties no ground to it: the control side stays apart.
+	d3 := hvPart("D3", "1N4148", Point{2300, 1200}, smdPad("1", "N", -40, 0, 40, 40), smdPad("2", "GND_B", 40, 0, 40, 40))
+	b = tieBoard(inlet, tiePart("D1", "1N4007", "", "AC_N", "GND_A"), d3)
+	sensor := PowerSpec{Declared: []DeclaredDomain{{Nets: []string{"N"}}}}
+	c = Understand(b, Analyze(b, sensor, nil))
+	if c.DomainOf["U2"] == c.DomainOf["J1"] || c.DomainOf["U2"] == c.DomainOf["U1"] || c.DomainOf["U1"] != c.DomainOf["J1"] {
+		t.Fatalf("a net named N, declared off the line, tied the control ground to it: %v", c.DomainOf)
+	}
+	for _, d := range c.Domains {
+		if d.ID == c.DomainOf["U2"] && d.Mains {
+			t.Fatalf("the control domain is mains: %+v", d)
+		}
+	}
+	if c := Understand(b, Analyze(b, PowerSpec{}, nil)); c.DomainOf["U2"] != c.DomainOf["J1"] {
+		t.Fatalf("fixture: undeclared, N does not tie GND_B to the line: %v", c.DomainOf)
+	}
 }
 
 func TestClassifySafetyCapsAndTransformerPrefixes(t *testing.T) {

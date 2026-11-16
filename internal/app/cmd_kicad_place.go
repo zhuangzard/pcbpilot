@@ -229,6 +229,11 @@ func runKicadPlace(o kicadPlaceOpts, deps kicadPlaceDeps, stderr io.Writer) (*ki
 			if _, err := deps.place(o.pcb, flips, staged); err != nil {
 				return nil, fmt.Errorf("--sides: %w", err)
 			}
+			// The copy is read and placed as the input would be: with its
+			// net classes and custom rules, which then go on to the output.
+			if _, err := copyKicadSidecars(o.pcb, staged); err != nil {
+				return nil, fmt.Errorf("--sides: %w", err)
+			}
 			o.pcb = staged
 			if raw, err = deps.snapshot(staged); err != nil {
 				return nil, err
