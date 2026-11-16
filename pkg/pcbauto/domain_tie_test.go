@@ -339,6 +339,22 @@ func TestDeclaredNetBetweenBridgesKeepsItsDomain(t *testing.T) {
 	if !c.Kinds["U_ISO2"].Bridges() || holds(c) != "" {
 		t.Fatalf("fixture: undeclared, the net is in %q (kind %v)", holds(c), c.Kinds["U_ISO2"])
 	}
+	// The whole declaration on isolation parts only: a domain without a part.
+	b = tieBoard(iso("U_ISO2"), iso("U_ISO3"))
+	c = Understand(b, Analyze(b, PowerSpec{Declared: []DeclaredDomain{{Nets: []string{"LINK"}}}}, nil))
+	if got := holds(c); got != "LINK " {
+		t.Errorf("a declaration of one bridge-only net is in %q, want its own domain", got)
+	}
+	// ... and the two parts on it are barriers to that domain.
+	bars := 0
+	for _, br := range c.Barriers {
+		if br.A == c.DeclaredNet["LINK"] || br.B == c.DeclaredNet["LINK"] {
+			bars++
+		}
+	}
+	if bars == 0 {
+		t.Errorf("no barrier reaches the part-less domain: %+v", c.Barriers)
+	}
 	for name, decl := range map[string][]string{"grounded": {"GND_A", "LINK"}, "groundless": {"SIG_A", "LINK"}} {
 		b = tieBoard(iso("U_ISO2"), iso("U_ISO3"))
 		c = Understand(b, Analyze(b, PowerSpec{Declared: []DeclaredDomain{{Nets: decl}}}, nil))

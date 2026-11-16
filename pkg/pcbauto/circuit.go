@@ -227,7 +227,10 @@ type Circuit struct {
 	// domain they are: a ground's domain when the declared nets hang on
 	// one, else a domain of their own named after their busiest net.
 	DeclaredNet map[string]string `json:"-"`
-	Notes       []string          `json:"notes,omitempty"`
+	// orphanNet maps a declared net that sits on isolation parts only to
+	// its domain: those parts bridge that domain too.
+	orphanNet map[string]string
+	Notes     []string `json:"notes,omitempty"`
 }
 
 // GroundTie is one part that joined ground net A to ground net B (Line: B is
@@ -800,10 +803,20 @@ func (c *Circuit) buildDomains(b *Board, an *Analysis) {
 				if d == "" {
 					d = declOf[n]
 				}
-				if byID[d] != nil && !held[n] && len(netParts[n]) > 0 {
-					held[n] = true
-					orphans[d] = append(orphans[d], n)
+				if d == "" || held[n] || len(netParts[n]) == 0 {
+					continue
 				}
+				if byID[d] == nil {
+					// Nothing but isolation parts on the whole declaration:
+					// the domain exists all the same, without a part.
+					byID[d] = &Domain{ID: d, Ground: d}
+				}
+				held[n] = true
+				orphans[d] = append(orphans[d], n)
+				if c.orphanNet == nil {
+					c.orphanNet = map[string]string{}
+				}
+				c.orphanNet[n] = d
 			}
 		}
 	}
@@ -1053,6 +1066,9 @@ func (c *Circuit) buildBarriers(b *Board, an *Analysis) {
 		// and by the domains of its signal neighbours.
 		touched := map[string]bool{}
 		for _, pd := range p.Pads {
+			if d := c.orphanNet[pd.Net]; d != "" {
+				touched[d] = true
+			}
 			for _, q := range b.Parts {
 				if q == p {
 					continue
