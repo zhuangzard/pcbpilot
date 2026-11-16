@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- **`kicad rules`: a user rule that cannot match a net is no longer reported as lowering its clearance.** A user
+  clearance rule whose condition has a nested alternative (`A.hasNetclass('X') && (B.hasNetclass('Y') || ...)`) or a
+  negated class (`!B.hasNetclass('X')`) was taken to cover every planned net, so `staged-readback` failed with "may
+  lower its clearance" and `--keep-stricter` left the conflict open. The condition is now evaluated for each net with
+  the classes the net is in: a rule that provably matches no pair with that net is left out. Anything not decided by
+  net and class names alone (a property, a function, a wildcard) still counts as a possible match.
 - **`intent derive`: a declared domain whose return is not a ground net is a domain of its own.** A domain declared in
   the spec with no ground-named net among its nets (a primary whose return is a bus net) had no reference, so the first
   Y capacitor from it to another circuit carried that circuit's domain over all of it: one "mains" domain holding nearly

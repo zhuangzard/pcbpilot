@@ -614,7 +614,7 @@ func (r *rulesRun) clearanceBelowClass(u kicad.DRURule, min int64) []string {
 	var out []string
 	for _, e := range r.rep.Nets {
 		cls, _ := r.classOf(e.Net)
-		if min < cls.NM.Clearance && !druDisjointFor(u.Condition, r.netNames(e), true) {
+		if min < cls.NM.Clearance && !druDisjointFor(u.Condition, r.netNames(e), true) && !druNeverGoverns(u.Condition, r.item(e.Net, nil)) {
 			out = append(out, fmt.Sprintf("%s (%s)", e.Net, kicad.MmOfNm(cls.NM.Clearance)))
 		}
 	}

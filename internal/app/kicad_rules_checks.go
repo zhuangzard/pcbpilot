@@ -1925,12 +1925,12 @@ func (r *rulesRun) isolationRuleProblems(rules []kicad.DRURule, p rulesIsoPlan) 
 func (r *rulesRun) clearanceEdgeProblems(rules []kicad.DRURule) (bad, unknown []string) {
 	for _, e := range r.rep.Nets {
 		cls, _ := r.classOf(e.Net)
-		names := r.netNames(e)
+		names, it := r.netNames(e), r.item(e.Net, nil)
 		for _, u := range rules {
 			if strings.HasPrefix(u.Name, "pcbpilot isolation ") && u.Block == "route" || strings.HasPrefix(u.Name, kicad.DRUHeadPrefix+"isolation ") && u.Block == "head" {
 				continue // pair-only; judged by isolationRuleProblems
 			}
-			if druDisjointFor(u.Condition, names, true) {
+			if druDisjointFor(u.Condition, names, true) || druNeverGoverns(u.Condition, it) {
 				continue
 			}
 			for _, c := range u.Constraints {
