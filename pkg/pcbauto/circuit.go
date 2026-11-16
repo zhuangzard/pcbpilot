@@ -409,14 +409,16 @@ func (c *Circuit) buildDomains(b *Board, an *Analysis) {
 	}
 	// lineGrounds: the line net and the grounds a conducting part sits on.
 	// Isolating parts (transformer, opto, isolator, relay), capacitors (X/Y
-	// caps) and resistors known to be ≥ 100 kΩ (the bleeder beside a Y
-	// capacitor, a protective impedance) conduct nothing that ties.
+	// caps) and resistors not known to be below 100 kΩ (the bleeder beside a
+	// Y capacitor, a protective impedance; one whose value cannot be read
+	// is not taken for a tie to the line, as in lineTied) conduct nothing
+	// that ties.
 	lineGrounds := func(p *Part) (line string, gs []string) {
 		k := c.Kinds[p.Ref]
 		if k.Bridges() || k == KindCapacitor {
 			return "", nil
 		}
-		if v, ok := partOhms(p); k == KindResistor && ok && v >= BleederOhms {
+		if v, ok := partOhms(p); k == KindResistor && (!ok || v >= BleederOhms) {
 			return "", nil
 		}
 		for _, pd := range p.Pads {

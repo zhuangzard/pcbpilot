@@ -88,6 +88,7 @@ func TestDomainLineTieSkipsBleederAndYCap(t *testing.T) {
 		{"bleeder 2M2", tiePart("R1", "", "2M2", "AC_N", "GND_B"), false},
 		{"Y capacitor", tiePart("CY1", "2.2nF", "", "AC_N", "GND_B"), false},
 		{"10R", tiePart("R1", "", "10R", "AC_N", "GND_B"), true},
+		{"resistor of unknown value", tiePart("R1", "RC0603FR-07XXX", "", "AC_N", "GND_B"), false},
 		{"diode", tiePart("D1", "1N4007", "", "AC_N", "GND_B"), true},
 	} {
 		b := tieBoard(inlet, tc.part)

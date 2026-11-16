@@ -195,21 +195,37 @@ func runKicadPlace(o kicadPlaceOpts, deps kicadPlaceDeps, stderr io.Writer) (*ki
 		// --sides: flip the named parts on a staged copy first, and place
 		// that copy — the model then has their pads and courtyards as they
 		// are on the new side.
-		staged := base + ".sides-staged.kicad_pcb"
-		flips, notes, err := kicadPlaceSides(o.sides, b, fixed, kept)
+		var mechFixed []string
+		if o.mech != "" {
+			mraw, err := os.ReadFile(o.mech)
+			if err != nil {
+				return nil, err
+			}
+			mech, err := pcbauto.ParseMech(mraw)
+			if err != nil {
+				return nil, err
+			}
+			for _, f := range mech.Fixed {
+				mechFixed = append(mechFixed, f.Ref)
+			}
+		}
+		flips, notes, err := kicadPlaceSides(o.sides, b, fixed, mechFixed, kept)
 		if err != nil {
 			return nil, err
 		}
 		sideNotes = notes
 		if len(flips) > 0 {
-			if err := os.MkdirAll(filepath.Dir(staged), 0o755); err != nil {
+			// The copy lives in a directory of its own, made for this run
+			// and removed with it: no name of the user's can be the same.
+			if err := os.MkdirAll(filepath.Dir(base), 0o755); err != nil {
 				return nil, err
 			}
-			defer func() {
-				for _, ext := range []string{".kicad_pcb", ".kicad_pro", ".kicad_prl", ".kicad_dru"} {
-					os.Remove(strings.TrimSuffix(staged, ".kicad_pcb") + ext)
-				}
-			}()
+			tmp, err := os.MkdirTemp(filepath.Dir(base), filepath.Base(base)+".sides-staged-*")
+			if err != nil {
+				return nil, err
+			}
+			defer os.RemoveAll(tmp)
+			staged := filepath.Join(tmp, filepath.Base(base)+".kicad_pcb")
 			if _, err := deps.place(o.pcb, flips, staged); err != nil {
 				return nil, fmt.Errorf("--sides: %w", err)
 			}
@@ -836,9 +852,10 @@ func isMountingHole(c kicadSnapComp) bool {
 // kicadPlaceSides reads --sides ({"top": [refs], "bottom": [refs]}) and
 // returns the pose of every named part that is on the other side: where it
 // stands, on the side asked (the writer flips it). A part named twice, not
-// on the board, locked or kept in place is refused: the file says where
-// parts go, and one that cannot go there is a mistake to fix, not to skip.
-func kicadPlaceSides(path string, b *pcbauto.Board, fixed []string, kept kicadKept) (map[string]kicad.Pose, []string, error) {
+// on the board, or one that would have to flip but is locked or fixed by
+// --mech, is refused: the file says where parts go, and one that cannot go
+// there is a mistake to fix, not to skip.
+func kicadPlaceSides(path string, b *pcbauto.Board, fixed, mechFixed []string, kept kicadKept) (map[string]kicad.Pose, []string, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, nil, err
@@ -880,6 +897,10 @@ func kicadPlaceSides(path string, b *pcbauto.Board, fixed []string, kept kicadKe
 		}
 		if slices.Contains(fixed, ref) {
 			bad = append(bad, ref+" (locked or a mounting hole: it stays where it is)")
+			continue
+		}
+		if slices.Contains(mechFixed, ref) {
+			bad = append(bad, ref+" (fixed by --mech: give its side there)")
 			continue
 		}
 		flips[ref] = kicad.Pose{XMil: p.Pos.X, YMil: 0 - p.Pos.Y, RotationDeg: p.Rotation, Side: side}

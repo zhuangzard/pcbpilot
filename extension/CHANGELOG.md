@@ -5,15 +5,19 @@
 - **`kicad place`: a domain may be given several zone rectangles.** `--mech` zones that name the same domain more than
   once used to keep only the last rectangle, so an L-shaped or split domain lost most of its room. Every rectangle now
   counts: the domain's parts are shared among them by the room each has, and a part is legal inside any of them. The
-  report's `zoneFill` lists each rectangle, and a warning names a zone no part belongs to.
+  report's `zoneFill` lists each rectangle that holds parts.
 - **`kicad place --sides`: put parts on the bottom (or the top) before placing.** The placer never changed a part's
   side, so a board that only fits with parts on both sides could not be placed. `--sides sides.json`
   (`{"top": [designators], "bottom": [designators]}`) flips each named part that is on the other side first, on a staged
-  copy, and places the result; the input board is not changed. The run is refused, before anything is written, when a
-  named part is unknown, locked, fixed by `--mech`, or named for both sides.
+  copy in a directory of its own, and places the result; the input board is not changed. The run is refused, before
+  anything is written, when a named part is unknown or named for both sides, or would have to flip but is locked or
+  fixed by `--mech`.
 - **`kicad place`: a rule area on some layers no longer blocks the other side.** A KiCad rule area on the top and inner
   layers was read as a keep-out on every layer, so nothing could be placed under it on the bottom. Its layer list is
   now kept: it blocks only the sides it is on.
+- **`kicad place`: a locked part inside a keep-out no longer fails the placement.** The illegal count included every
+  locked or fixed part lying in a no-parts keep-out, which the placer cannot move and the `illegal` list did not name,
+  so such a board could never reach `verdict: pass`. Only parts the placer may move are counted.
 - **`kicad place`: `zoneFill` is counted per board side.** The fill of a zone compared all its parts with one side's
   area, so a zone that is full on top and empty below read the same as one evenly filled. The report now gives the
   fill of the top and of the bottom (through-hole parts count on both).

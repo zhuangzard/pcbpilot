@@ -227,3 +227,82 @@ func TestIsoCostMatchesThePlainSum(t *testing.T) {
 		t.Fatal("the fixture put no pads inside a creepage: nothing was compared")
 	}
 }
+
+// A bridge is seated by the grid too: its centre on its zone (a strip on
+// the barrier, which its body overhangs), at zero hard cost, from wherever
+// it stood.
+func TestGridSeatSeatsABridgeOnItsStrip(t *testing.T) {
+	b := tieBoard()
+	an := Analyze(b, PowerSpec{}, nil)
+	pl := &placer{b: b, an: an, c: Understand(b, an), m: &Mechanics{Edge: map[string]MechEdge{}, Fixed: map[string]bool{}},
+		opt: PlaceOptions{SpacingMil: 12, Timeout: time.Minute}, partNet: map[*Part][]int{}, zoneOf: map[*Part]Rect{}, decap: map[*Part]*Pad{}, spacing: 12}
+	pl.setup(&PlaceResult{})
+	pl.rebuildBuckets()
+	g := pl.region
+	var bridges []*Part
+	for _, p := range pl.movable {
+		if pl.c.IsBridge(p.Ref) {
+			bridges = append(bridges, p)
+		}
+	}
+	if len(bridges) == 0 {
+		t.Skip("fixture has no movable bridge")
+	}
+	seated := 0
+	for _, p := range bridges {
+		z, ok := pl.zoneOf[p]
+		if !ok {
+			// A strip one grid cell wide would do; this one is a line's width.
+			z = Rect{g.Center().X - 1, g.MinY, g.Center().X + 1, g.MaxY}
+			pl.zoneOf[p] = z
+		}
+		z = pl.inRegion(z)
+		movePartCentre(p, Point{g.MinX + 40, g.MinY + 40}, p.Rotation)
+		pl.boxes[p] = pl.box(p)
+		pl.rebuildBuckets()
+		fg := pl.newFreeGrid()
+		if !pl.gridSeat(fg, p) {
+			continue
+		}
+		seated++
+		if hc := pl.hardCost(p); hc > 1e-6 {
+			t.Fatalf("%s seated at hard cost %g", p.Ref, hc)
+		}
+		if c := p.Body().Center(); c.X < z.MinX-1e-6 || c.X > z.MaxX+1e-6 || c.Y < z.MinY-1e-6 || c.Y > z.MaxY+1e-6 {
+			t.Fatalf("%s seated with its centre %v off its zone %v", p.Ref, c, z)
+		}
+	}
+	if seated == 0 {
+		t.Fatalf("none of %d bridges was seated", len(bridges))
+	}
+}
+
+// What the zone had no room for is asked again once a part has moved, and
+// a part whose own cells are free is searched whatever the cache says.
+func TestGridFullCacheForgetsOnAMove(t *testing.T) {
+	pl := testPlacer(t, "reference-4stage-compact.json")
+	var p *Part
+	for _, q := range pl.movable {
+		if !pl.c.IsBridge(q.Ref) && !hasTHT(q) {
+			p = q
+			break
+		}
+	}
+	if p == nil {
+		t.Skip("fixture has no surface-mount part")
+	}
+	pl.zoneOf[p] = pl.region
+	fg := pl.newFreeGrid()
+	zk := gridZone{pl.inRegion(pl.region), 4 + partSides(p)[0]}
+	fg.full[zk] = [][2]int{{1, 1}} // "not even one cell is free"
+	at := p.Body().Center()
+	if !pl.gridSeat(fg, p) {
+		t.Fatal("a part standing on free cells of its own was refused by the cache")
+	}
+	if len(fg.full) != 0 {
+		t.Fatal("the cache outlived a move")
+	}
+	if p.Body().Center().Dist(at) > 3*fg.g {
+		t.Fatalf("the part went from %v to %v with its own spot free", at, p.Body().Center())
+	}
+}

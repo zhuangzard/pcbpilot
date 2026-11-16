@@ -34,9 +34,11 @@ type freeGrid struct {
 	bits      [3][]uint64 // cnt != 0, a row of wpr words per grid row
 	cu        [3][]uint64 // copper-only keep-outs: they bar all but bridges
 	filed     map[*Part]Rect
-	// full[zone and sides] are the boxes (cells, wider side first) the grid
-	// had no room for: a box at least as large in both has none either,
-	// until the next pass of the legaliser asks again.
+	// full[zone and sides] are the boxes (cells, wider side first; as they
+	// stand when parts may not turn) the grid had no room for: a box at
+	// least as large in both has none either, until a part moves or the
+	// next pass of the legaliser asks again. The room a part leaves by
+	// being taken out itself is asked apart.
 	full map[gridZone][][2]int
 }
 
@@ -259,9 +261,23 @@ func (pl *placer) gridSeat(fg *freeGrid, p *Part) bool {
 		zk.sides += 16
 	}
 	dims := [2]int{max(turns[0].kw, turns[0].kh), min(turns[0].kw, turns[0].kh)}
-	for _, f := range fg.full[zk] {
-		if dims[0] >= f[0] && dims[1] >= f[1] {
-			return false
+	if pl.opt.NoRotate {
+		dims = [2]int{turns[0].kw, turns[0].kh}
+	}
+	// The cells p itself held are free now and were not when the zone was
+	// found full: if nothing else is on them, the search is run.
+	own := false
+	if ix0, iy0, ix1, iy1, ok := fg.cells(bx); ok {
+		own = true
+		for _, s := range sides {
+			own = own && fg.free(s, ix0, iy0, ix1-ix0+1, iy1-iy0+1, !bridge)
+		}
+	}
+	if !own {
+		for _, f := range fg.full[zk] {
+			if dims[0] >= f[0] && dims[1] >= f[1] {
+				return false
+			}
 		}
 	}
 	maxR := 0
@@ -332,7 +348,9 @@ search:
 			}
 		}
 	}
-	if !found {
+	if found {
+		clear(fg.full) // the spot p left may be the room another needs
+	} else {
 		movePartCentre(p, orig, rot0)
 		pl.boxes[p] = pl.box(p)
 		if tries == 0 && !cut {

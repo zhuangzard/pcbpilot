@@ -659,14 +659,19 @@ func (r *rulesRun) keepNote(u kicad.DRURule, j int, c kicad.DRUConstraint) (note
 // decides a rule order kicad rules did not report. No head block: nothing.
 func (r *kicadRun) reapplyKeepStricter(classed string, full *kicad.NetclassFull) error {
 	path := strings.TrimSuffix(classed, ".kicad_pcb") + ".kicad_dru"
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return nil
-	}
-	text := strings.ReplaceAll(string(b), "\r\n", "\n")
 	stale := func(why string) error {
 		return fmt.Errorf("RULES_STALE: the board's keep-stricter head block %s; rerun `pcbpilot kicad rules --apply --keep-stricter` with the same inputs, then route", why)
 	}
+	b, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil // no rules file: no head block
+	}
+	if err != nil {
+		// Unreadable is not "no head block": the generated rules would then
+		// stay behind the user's stricter ones without a word.
+		return stale("cannot be checked (" + err.Error() + ")")
+	}
+	text := strings.ReplaceAll(string(b), "\r\n", "\n")
 	_, head, err := kicad.SplitDRUHead(text)
 	if err != nil {
 		return stale("is malformed: " + err.Error())

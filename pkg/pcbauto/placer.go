@@ -2355,8 +2355,11 @@ func (pl *placer) metrics(res *PlaceResult) {
 		if z, ok := pl.zoneOf[p]; ok && z != pl.region && !pl.c.IsBridge(p.Ref) && outside(bi, z) > 1 {
 			m.OutOfZone++
 		}
+		// A part that does not move is where its owner put it (as for the
+		// outline above, and in illegalList): a locked connector inside a
+		// keep-out drawn around it failed every placement of the board.
 		for _, k := range pl.b.Keepouts {
-			if noPartsOn(k, p) && bi.OverlapArea(PolyBounds(k.Poly)) > 1 {
+			if !p.Fixed && noPartsOn(k, p) && bi.OverlapArea(PolyBounds(k.Poly)) > 1 {
 				m.KeepoutHits++
 			}
 		}
