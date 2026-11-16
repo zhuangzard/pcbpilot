@@ -64,6 +64,7 @@ type kicadRulesOpts struct {
 	planOut, applyPlan string
 	revision, report   string
 	replace            []string
+	keepStricter       bool
 	stage              string
 	contract           string       // order contract (kicad fab --preflight --contract)
 	env                *kfile.Env   // tests: lock identity
@@ -159,7 +160,34 @@ class pcbpilot's class would outrank to a different value, a user class with a
 pcbpilot name, a user .kicad_dru rule a pcbpilot rule would weaken) refuses the
 apply unless --replace NAME names it (a replaced user rule is removed from the
 .kicad_dru; a replaced user class is outranked, or removed when it carries a
-pcbpilot name).
+pcbpilot name). The conflict says whether the user rule is stricter or weaker
+than the generated one when both values are plain lengths.
+
+--keep-stricter resolves a clearance / creepage / edge_clearance conflict by
+rule ORDER instead, without touching the user's rule text (KiCad applies the
+last matching rule of a constraint type):
+  - user rule stricter than the generated minimum: the generated minimum is
+    written in a second owned block, "pcbpilot-rules-head", right after
+    (version ...) and BEFORE the user's rules (rule names "pcbpilot-rules
+    floor ..."), and leaves the generated block at the end. The user rule
+    wins where both match; the generated minimum still applies where only
+    it matches;
+  - user rule weaker than (or equal to) the generated minimum: the generated
+    rule stays last and wins where both match (nothing is lowered);
+  - the conflict stays, and blocks the apply, when no order works: the
+    generated rule would have to sit after one user rule and before another,
+    a value cannot be compared (an expression, an unknown unit, no minimum,
+    a severity other than error), the user clearance is below a planned
+    netclass clearance (a custom rule replaces the netclass value, whatever
+    the order), or it is a track_width rule (not reordered). The message
+    names the user rule, the generated rule and the reason.
+Two rules count as overlapping unless their conditions provably never match
+the same items (literal net / netclass names only). The report lists every
+decision under "keepStricter" (headBlock, generatedStaysLast, unresolved) and
+on stderr. A later --apply without --keep-stricter removes the head block and
+reports the conflicts again (it refuses until they are resolved); --check
+judges a board that carries a head block as it is; kicad route keeps the head
+block and fails RULES_STALE when the user's rules no longer give it.
 
 Exit: 0 pass, 6 fail, 5 cannot-check / incomplete plan, 4 KICAD_OPEN /
 E_FILE_CHANGED / E_REVISION_MISMATCH / E_WRITER_BUSY, 1 usage or tool error.
@@ -185,6 +213,7 @@ JSON report on stdout (and --report FILE.json); diagnostics on stderr.`,
 	f.StringVar(&o.revision, "revision", "", "the revision of --apply-plan; refused when the files no longer give it")
 	f.StringVar(&o.report, "report", "", "also write the JSON report to this .json")
 	f.StringArrayVar(&o.replace, "replace", nil, "a conflicting user netclass or .kicad_dru rule pcbpilot may replace, by name (repeatable)")
+	f.BoolVar(&o.keepStricter, "keep-stricter", false, "resolve a user clearance / creepage / edge_clearance rule conflict by rule order: where both match the stricter value applies, no user rule is changed (see the long help)")
 	f.StringVar(&o.stage, "stage", "routed", "--check: routed (copper checked) | placed (copper checks not applicable)")
 	f.StringVar(&o.contract, "contract", "", "order contract JSON (the one kicad fab --preflight --contract reads): raise the board's minimum track / clearance / drill / annular ring / via to its limits and check them")
 	return c
@@ -262,7 +291,16 @@ type rulesConflict struct {
 	Name     string `json:"name"`
 	Detail   string `json:"detail"`
 	Replaced bool   `json:"replaced"`
+	// Resolved: "keep-stricter" when --keep-stricter resolves it by rule
+	// order (the user rule stays as it is). UserVsGenerated: the user
+	// rule's minimum against the generated rule(s) it may overlap —
+	// stricter | weaker | equal | mixed | unknown — when known.
+	Resolved        string `json:"resolved,omitempty"`
+	UserVsGenerated string `json:"userVsGenerated,omitempty"`
 }
+
+// open: the conflict still blocks an apply.
+func (c rulesConflict) open() bool { return !c.Replaced && c.Resolved == "" }
 
 type rulesFile struct {
 	Path    string `json:"path"`
@@ -290,13 +328,15 @@ type rulesReport struct {
 	DRURouteRule int                `json:"druRouteRules"`
 	Sizes        *kicad.SizesResult `json:"predefinedSizes,omitempty"`
 	Conflicts    []rulesConflict    `json:"conflicts"`
-	Checks       []rulesCheck       `json:"checks"`
-	Files        []rulesFile        `json:"files"`
-	Committed    bool               `json:"committed"`
-	RolledBack   bool               `json:"rolledBack,omitempty"`
-	Errors       []rulesError       `json:"errors"`
-	Warnings     []string           `json:"warnings,omitempty"`
-	Assumptions  []string           `json:"assumptions,omitempty"`
+	// KeepStricter: what --keep-stricter did (nil without it).
+	KeepStricter *keepStricterReport `json:"keepStricter,omitempty"`
+	Checks       []rulesCheck        `json:"checks"`
+	Files        []rulesFile         `json:"files"`
+	Committed    bool                `json:"committed"`
+	RolledBack   bool                `json:"rolledBack,omitempty"`
+	Errors       []rulesError        `json:"errors"`
+	Warnings     []string            `json:"warnings,omitempty"`
+	Assumptions  []string            `json:"assumptions,omitempty"`
 }
 
 // rulesPlanFile is what --plan-out writes and --apply-plan reads.
@@ -359,6 +399,9 @@ type rulesRun struct {
 	// intentName: board net name → the intent's own name (onBoard renames).
 	intentName   map[string]string
 	maxConflicts []maxConflict
+	// keep: the keep-stricter analysis of the user rules (always computed:
+	// the conflict text says stricter / weaker without the flag too).
+	keep *keepPlan
 	// intentCopy: the captured intent bytes in the stage (for readers that
 	// take a path).
 	intentCopy string
@@ -818,11 +861,15 @@ func (r *rulesRun) derive() int {
 				uc.Info = append(uc.Info, c.Name+" (replaced by --replace): "+c.Detail)
 				continue
 			}
+			if c.Resolved != "" {
+				uc.Info = append(uc.Info, c.Name+" (kept, resolved by --keep-stricter): "+c.Detail)
+				continue
+			}
 			uc.Status = gate.Fail
 			uc.Items = append(uc.Items, c.Kind+" "+c.Name+": "+c.Detail)
 		}
 		if uc.Status == gate.Fail {
-			uc.Detail = fmt.Sprintf("%d user rule(s) conflict with the plan: apply refuses unless --replace names them", len(uc.Items))
+			uc.Detail = fmt.Sprintf("%d user rule(s) conflict with the plan: apply refuses unless --replace names them (or, for a clearance / creepage / edge_clearance rule, --keep-stricter can order them)", len(uc.Items))
 		}
 		rep.check(uc)
 	}
@@ -842,6 +889,12 @@ func (r *rulesRun) revision() string {
 	b, _ := json.Marshal(map[string]any{"request": r.ri.request(nil).Body(), "classes": r.full.ClassesNM, "sizes": r.full.Sizes,
 		"block": r.block, "replace": rep, "nets": r.rep.Nets, "conflicts": r.rep.Conflicts})
 	h.Write(b)
+	// --keep-stricter changes what is written: a plan made with it is
+	// applied with it (and the other way round).
+	if r.o.keepStricter {
+		kb, _ := json.Marshal(r.rep.KeepStricter)
+		fmt.Fprintf(h, "\x00keep-stricter\x00%s", kb)
+	}
 	return hex.EncodeToString(h.Sum(nil))
 }
 
@@ -861,6 +914,15 @@ func (r *rulesRun) writeStamp() {
 	old, _ := os.ReadFile(dru)
 	text, err := placeRulesBlock(string(old), rulesBlockText(r.block, r.rep.RequestSHA, owned))
 	if err == nil {
+		// The head block is this run's or none: without --keep-stricter an
+		// earlier one is removed (its conflicts are reported again).
+		var moves []keepMove
+		if r.keep != nil && r.keepActive() {
+			moves = r.keep.rep.Head
+		}
+		text, err = keepHeadBlock(text, moves)
+	}
+	if err == nil {
 		err = os.WriteFile(dru, []byte(text), 0o644)
 	}
 	if err == nil {
@@ -876,13 +938,13 @@ func (r *rulesRun) writeStamp() {
 func (r *rulesRun) refuseIncomplete() int {
 	var unresolved []string
 	for _, c := range r.rep.Conflicts {
-		if !c.Replaced {
+		if c.open() {
 			unresolved = append(unresolved, c.Name+": "+c.Detail)
 		}
 	}
 	if len(unresolved) > 0 {
 		return r.fail(errRulesConflict, r.o.pcb, strings.Join(unresolved, "; "),
-			"keep the user rule (change the intent instead), or let pcbpilot replace it with --replace <name>", 6)
+			"keep the user rule (change the intent instead), let pcbpilot replace it with --replace <name>, or — for a clearance / creepage / edge_clearance rule whose value can be compared — keep both with --keep-stricter (the stricter value applies where both match; the conflict text says when that cannot work)", 6)
 	}
 	for _, name := range []string{"plan-coverage", "isolation-coverage", "staged-readback"} {
 		switch st := r.rep.checkStatus(name); st {

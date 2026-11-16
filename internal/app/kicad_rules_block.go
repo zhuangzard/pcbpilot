@@ -167,6 +167,13 @@ func placeRulesBlock(dru, block string) (string, error) {
 	// LF only: KiCad's Python writes the route block in text mode (CRLF on
 	// Windows); the same rules must give the same bytes on every platform.
 	dru = strings.ReplaceAll(dru, "\r\n", "\n")
+	// A keep-stricter head block stays where it is: right after
+	// (version …), before the user's rules (SplitDRU's user part is
+	// without it).
+	_, head, err := kicad.SplitDRUHead(dru)
+	if err != nil {
+		return "", err
+	}
 	user, _, route, err := kicad.SplitDRU(dru)
 	if err != nil {
 		return "", err
@@ -178,7 +185,11 @@ func placeRulesBlock(dru, block string) (string, error) {
 	if !strings.Contains(text, "(version") {
 		text = "(version 1)\n" + text
 	}
-	return text + route + block, nil
+	text += route + block
+	if head != "" {
+		return insertHeadBlock(text, head)
+	}
+	return text, nil
 }
 
 // rulesTrackFloor resolves the track_width minimum KiCad applies to class
@@ -567,11 +578,19 @@ func (r *kicadRun) routeTrackMaxes(classed string, full *kicad.NetclassFull, cop
 	if err != nil {
 		return nil, nil, err
 	}
+	mx, bad := trackMaxCarry(rules, full.ClassesNM, copperLayers, r.routeIdentity(full), nil)
+	return mx, bad, nil
+}
+
+// routeIdentity gives every name of a board net for route's disjointness
+// tests: the net, the classes it is in on the routed-from board, the class
+// and the insulation / edge domain classes this derivation assigns it.
+func (r *kicadRun) routeIdentity(full *kicad.NetclassFull) func(net string) map[string]bool {
 	var snap struct {
 		NetClassOf map[string]string `json:"netClassOf"`
 	}
 	_ = json.Unmarshal(r.inRaw, &snap)
-	identity := func(net string) map[string]bool {
+	return func(net string) map[string]bool {
 		m := map[string]bool{net: true}
 		for _, c := range strings.Split(snap.NetClassOf[net], ",") {
 			if c != "" {
@@ -590,8 +609,6 @@ func (r *kicadRun) routeTrackMaxes(classed string, full *kicad.NetclassFull, cop
 		}
 		return m
 	}
-	mx, bad := trackMaxCarry(rules, full.ClassesNM, copperLayers, identity, nil)
-	return mx, bad, nil
 }
 
 // checkRulesBlock is route's check of the kicad rules block on the classed

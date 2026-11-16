@@ -280,6 +280,7 @@ pcbpilot kicad pcb-sync ... --in-place --apply-plan plan.json --revision <rev>
 pcbpilot kicad rules --pcb board.kicad_pcb --intent intent.json --sim sim.json [--requirements currents.json] \
     --plan [--plan-out rules.plan.json]                                   # 只读：打印将写的规则
 pcbpilot kicad rules … --apply [--replace <用户类或规则名>]                 # 计划 + 写入 + KiCad 回读
+pcbpilot kicad rules … --apply --keep-stricter                            # 保留用户规则，按“谁更严谁生效”排规则顺序
 pcbpilot kicad rules … --apply-plan rules.plan.json --revision <rev>      # 只写评审过的计划
 pcbpilot kicad rules … --check [--stage placed|routed] [--report r.json]  # 只读门禁（可布过线）
 ```
@@ -329,7 +330,7 @@ pcbpilot kicad rules … --check [--stage placed|routed] [--report r.json]  # �
   advisory warn，preflight 会判 fail，要自己改，绝不降契约）。`--check --contract` 按板现状判，低于契约 = fail。
   契约文件进 `inputs`（role `contract`），变了 revision 就变。
 - **最小线宽是 DRC 规则**：网络类线宽只是布线默认值，不是下限。`.kicad_dru` 里加 `# pcbpilot-rules:begin … end`
-  块，放在**最后**（用户规则 → route 块 `# pcbpilot:begin` → 本块）：KiCad 取最后匹配的规则，route 块的 inner 规则在
+  块，放在**最后**（[`--keep-stricter` 的 head 块 `# pcbpilot-rules-head:begin` →] 用户规则 → route 块 `# pcbpilot:begin` → 本块）：KiCad 取最后匹配的规则，route 块的 inner 规则在
   意图没写 `min` 时只带板最小线宽，排在后面会把下限削弱到板最小值；route 重跑把自己的块追加到末尾后，`kicad route`
   会把本块移回最后。每个 PP 类 `(layer outer)` / `(layer inner)`（有内层时）`track_width (min <下限>) (opt <线宽>)`；
   下限只由类的取值决定（`expectedFloor`，不从生成的文本反推）= 意图 `widthMil.min`（允许颈缩的极限），没有则为该层全线宽；
@@ -369,6 +370,33 @@ pcbpilot 生成的名字（`class-name`，重跑会删掉它）、用户 `.kicad
 clearance 会替换类间距，也会被对规则替换）；有绝缘对时 creepage、有域边距时 edge_clearance 一律冲突。只能按名
 `--replace <名>` 放行：被替换的用户 `.kicad_dru` 规则从文件删除；被替换的用户类保留但被 PP 类压过（前缀冲突的会被删除）。
 不冲突的用户类和规则原样保留。
+
+**`--keep-stricter`（可选，`--plan` / `--apply` / `--apply-plan` 都可带）：保留用户规则，靠规则顺序让更严的值生效，
+不删也不改任何用户规则文本。** 只处理生成的 clearance / creepage（绝缘对规则 `pcbpilot isolation …`）和
+edge_clearance（`pcbpilot edge …`）与用户同类型规则的 `dru-weakened` 冲突；track_width 冲突、用户类冲突不归它管，
+仍要 `--replace` 或改意图。逐条比较用户规则的 `min` 与可能同时匹配的生成规则（证明不了不重叠就按重叠算）：
+
+- **用户值 ≥ 生成值**：生成的那条最小值写进第二个自有块 `# pcbpilot-rules-head:begin … # pcbpilot-rules-head:end`，
+  紧跟 `(version …)`、排在用户规则**之前**（规则名 `pcbpilot-rules floor <isolation A|B 或 edge 类> <约束类型>`，
+  条件与原生成规则相同），并从末尾的 route 块里去掉这一条约束。KiCad 取最后匹配的规则：两者都匹配处用户的更严值
+  生效，其余地方生成的最小值照旧。
+- **用户值 < 生成值**：生成规则留在最后（和今天一样，生成值生效），用户规则原样保留，冲突记为已解决。
+- **仍是冲突并拒绝写入**（文本写明哪条用户规则、哪条生成规则、为什么）：同一条生成规则既要排在一条较弱的用户
+  规则之后、又要排在一条较严的用户规则之前；另一条较弱的生成规则可能匹配同样的物体且必须留在最后；用户值无法
+  比较（表达式、未知单位、没有 `min`）；用户规则 `severity` 不是 error；用户 clearance 低于它可能覆盖的计划类间距
+  （自定义规则在匹配处替换网络类间距，换顺序救不了）。
+
+报告：`conflicts[]` 每条带 `userVsGenerated`（stricter / weaker / equal / mixed / unknown），已按顺序解决的带
+`resolved: "keep-stricter"`；顶层 `keepStricter` = `headBlock[]`（移到前面的生成约束 + `yieldsTo` 让位给哪些用户规则）、
+`generatedStaysLast[]`（留在最后的生成约束 + `winsOver`）、`unresolved[]`；stderr 逐条打印同样内容。不带该参数时行为不变，
+只是 `dru-weakened` 的文本会同时给出 `--keep-stricter` 与 `--replace` 两条出路并标明更严 / 更弱。revision 绑定该选择。
+重复 `--apply --keep-stricter` 文件不变。之后**不带**该参数的运行：冲突重新报出并拒绝（文件不动，现有顺序仍让用户的
+更严值生效）；一旦写入（`--replace` 掉那条用户规则，或用户自己删了它），head 块被移除，生成值回到末尾。
+`--check` 看到板上有 head 块就按顺序语义校验（head 规则之后任何可能匹配的规则都必须不低于计划值且为 error）。
+`kicad route` 的 netclasses 步骤会把完整的 route 块重新追加到末尾，route 随后按同一分析把 head 块承载的约束再从
+route 块里去掉；如果用户规则或推导值变了、重算结果与板上的 head 块不一致 → `RULES_STALE`，重跑
+`kicad rules --apply --keep-stricter`。限制：用户更严规则生效处，绝缘对探针在去掉 pcbpilot 块的对照里同样报错，
+因此不计入“可归因于 `.kicad_dru`”的探针（靠线宽探针证明 `.kicad_dru` 被加载）。
 
 **验证**（R1：各自三态、分开报告；pass 只证明这些检查，不等于可投板）：
 - `plan-coverage`：每网线宽依据是否完整（上面的 pass / cannot-check / fail）。

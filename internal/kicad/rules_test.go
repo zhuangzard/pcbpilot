@@ -77,3 +77,35 @@ func TestReadStackupCopper(t *testing.T) {
 		t.Fatal("not a board")
 	}
 }
+
+// The keep-stricter head block: cut out by SplitDRUHead, never part of the
+// user text SplitDRU returns, and its rules parse as Block "head" in file
+// order before the user's.
+func TestSplitDRUHead(t *testing.T) {
+	head := DRUHeadBegin + "\n(rule \"" + DRUHeadPrefix + "isolation PPD_HV_A|PPD_LV_B clearance\"\n  (condition \"A.hasNetclass('PPD_HV_A') && B.hasNetclass('PPD_LV_B')\")\n  (constraint clearance (min 2mm)))\n" + DRUHeadEnd + "\n"
+	user := "(rule \"iso_gap\"\n  (severity warning)\n  (condition \"A.hasNetclass('PPD_HV_A')\")\n  (constraint clearance (min 4mm)))\n"
+	route := DRURouteBegin + "\n(rule \"pcbpilot isolation PPD_HV_A|PPD_LV_B\"\n  (condition \"A.hasNetclass('PPD_HV_A')\")\n  (constraint creepage (min 3mm)))\n" + DRURouteEnd + "\n"
+	text := "(version 1)\n" + head + user + route
+	rest, got, err := SplitDRUHead(text)
+	if err != nil || got != head || rest != "(version 1)\n"+user+route {
+		t.Fatalf("SplitDRUHead: %v\nhead %q\nrest %q", err, got, rest)
+	}
+	if rest, got, err := SplitDRUHead(rest); err != nil || got != "" || rest != "(version 1)\n"+user+route {
+		t.Fatalf("no head block: %v %q", err, got)
+	}
+	u, _, r, err := SplitDRU(text)
+	if err != nil || u != "(version 1)\n"+user || r != route {
+		t.Fatalf("SplitDRU: %v\nuser %q\nroute %q", err, u, r)
+	}
+	rules, err := ParseDRU(text)
+	if err != nil || len(rules) != 3 {
+		t.Fatalf("ParseDRU: %v %+v", err, rules)
+	}
+	if rules[0].Block != "head" || rules[1].Block != "" || rules[1].Name != "iso_gap" || rules[1].Severity != "warning" || rules[2].Block != "route" || rules[0].Severity != "" {
+		t.Fatalf("blocks / severity: %+v", rules)
+	}
+	// A begin marker without its end is an error, not user text.
+	if _, _, err := SplitDRUHead("(version 1)\n" + DRUHeadBegin + "\n" + user); err == nil {
+		t.Fatal("an unterminated head block is not an error")
+	}
+}
