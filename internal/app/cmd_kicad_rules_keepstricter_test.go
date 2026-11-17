@@ -162,6 +162,19 @@ func TestKicadRulesKeepStricterUserStricter(t *testing.T) {
 	if c := checkOf(rep, "effective-rules"); !strings.Contains(strings.Join(c.Items, "\n"), "still has its clearance constraint") {
 		t.Fatalf("a moved constraint also at the end passed --check: %+v", c)
 	}
+	// The intact head block moved behind the user's rules: its minimum
+	// wins over the stricter user rule again.
+	rest, head, err := kicad.SplitDRUHead(good)
+	if err != nil || head == "" || !strings.Contains(rest, kicad.DRURouteBegin) {
+		t.Fatalf("head block: %v %q", err, head)
+	}
+	if err := os.WriteFile(dru, []byte(strings.Replace(rest, kicad.DRURouteBegin, strings.TrimRight(head, "\n")+"\n"+kicad.DRURouteBegin, 1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rep, _, _ = runRules(t, chk)
+	if c := checkOf(rep, "effective-rules"); !strings.Contains(strings.Join(c.Items, "\n"), "the head block is the first thing after the version line") {
+		t.Fatalf("a head block behind the user's rules passed --check: %+v\n%s", c, keepTestRead(t, dru))
+	}
 	if err := os.WriteFile(dru, []byte(good), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -675,6 +688,19 @@ func TestRouteReapplyKeepStricter(t *testing.T) {
 	}
 	if err := r.reapplyKeepStricter(classed, full); err == nil || !strings.Contains(err.Error(), "RULES_STALE") || !strings.Contains(err.Error(), "--keep-stricter") {
 		t.Fatalf("stale: %v", err)
+	}
+	// The intact head block behind the user's rules: stale, not moved back
+	// without a word.
+	rest, hb, err := kicad.SplitDRUHead(bridged)
+	if err != nil || hb == "" {
+		t.Fatalf("head block: %v", err)
+	}
+	moved := strings.Replace(rest, kicad.DRURouteBegin, strings.TrimRight(hb, "\n")+"\n"+kicad.DRURouteBegin, 1)
+	if err := os.WriteFile(cdru, []byte(moved), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.reapplyKeepStricter(classed, full); err == nil || !strings.Contains(err.Error(), "RULES_STALE") || !strings.Contains(err.Error(), "not before every other rule") || keepTestRead(t, cdru) != moved {
+		t.Fatalf("stale position: %v", err)
 	}
 	// No head block: route does nothing.
 	plain := "(version 1)\n" + user

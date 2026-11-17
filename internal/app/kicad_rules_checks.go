@@ -1958,6 +1958,11 @@ func (r *rulesRun) carryProblems(rules []kicad.DRURule) []string {
 			}
 		}
 	}
+	// The head block is before every other rule: after a user rule its
+	// minimums would win over that rule again.
+	if before, head := headBlockMisplaced(rules); head != "" {
+		bad = append(bad, fmt.Sprintf("keep-stricter: the head rule %q is after the rule %q (the head block is the first thing after the version line: a rule before it loses to the generated minimums)", head, before))
+	}
 	gen := map[string]kicad.DRURule{}
 	var have []kicad.DRURule
 	for _, u := range rules {
@@ -2073,13 +2078,29 @@ func (r *rulesRun) clearanceEdgeProblems(rules []kicad.DRURule) (bad, unknown []
 					unknown = append(unknown, fmt.Sprintf("domain %s: the later rule %q may set edge_clearance with a value pcbpilot cannot compare", dom, later.Name))
 				case *c.Min < want:
 					bad = append(bad, fmt.Sprintf("domain %s: the later rule %q may lower edge_clearance to %s (plan %s)", dom, later.Name, kicad.MmOfNm(*c.Min), kicad.MmOfNm(want)))
-				case u.Block == "head" && later.Severity != "" && later.Severity != "error":
-					bad = append(bad, fmt.Sprintf("domain %s: the rule %q after the head rule %q has severity %q: an edge_clearance violation would not be an error", dom, later.Name, name, later.Severity))
+				case later.Severity != "" && later.Severity != "error":
+					// Whatever its value: the last matching rule also
+					// sets the severity of the violation.
+					bad = append(bad, fmt.Sprintf("domain %s: the rule %q after the rule %q has severity %q: an edge_clearance violation would not be an error", dom, later.Name, name, later.Severity))
 				}
 			}
 		}
 	}
 	return bad, unknown
+}
+
+// headBlockMisplaced: the first head-block rule that has a rule outside
+// the head block before it, and that rule ("" when the head block leads).
+func headBlockMisplaced(rules []kicad.DRURule) (before, head string) {
+	for _, u := range rules {
+		switch {
+		case u.Block != "head" && before == "":
+			before = u.Name
+		case u.Block == "head" && before != "":
+			return before, u.Name
+		}
+	}
+	return "", ""
 }
 
 func hasConstraint(u kicad.DRURule, typ string) bool {

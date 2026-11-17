@@ -910,6 +910,9 @@ func (r *kicadRun) reapplyKeepStricter(classed string, full *kicad.NetclassFull)
 	if err != nil {
 		return stale("cannot be read: " + err.Error())
 	}
+	if before, hn := headBlockMisplaced(rules); hn != "" {
+		return stale(fmt.Sprintf("is not before every other rule (its rule %q is after the rule %q, which would lose to it)", hn, before))
+	}
 	identity := r.routeIdentity(full)
 	env := keepEnv{nets: func(dom string) []string { return full.Domains[dom] }, domain: func(dom string) map[string]bool {
 		m := map[string]bool{"PPD_" + dom: true}
