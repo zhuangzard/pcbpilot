@@ -336,7 +336,7 @@ func TestKicadRulesKeepStricterCarry(t *testing.T) {
 			}
 		case carry:
 			at = i
-			want := "(A.NetName == 'HV' && B.NetName == 'VCC') && (" + isoCondition("PPD_domain_HVD", "PPD_domain_LV") + ")"
+			want := "((A.NetName == 'HV' && B.NetName == 'VCC') || (B.NetName == 'HV' && A.NetName == 'VCC')) && (" + isoCondition("PPD_domain_HVD", "PPD_domain_LV") + ")"
 			if u.Block != "route" || u.Condition != want || len(u.Constraints) != 1 || u.Constraints[0].Type != "clearance" || *u.Constraints[0].Min != 4000000 {
 				t.Fatalf("carry rule: %+v", u)
 			}
@@ -709,5 +709,30 @@ func TestRouteReapplyKeepStricter(t *testing.T) {
 	}
 	if err := r.reapplyKeepStricter(classed, full); err != nil || keepTestRead(t, cdru) != plain {
 		t.Fatalf("no head block: %v", err)
+	}
+}
+
+// A carry rule matches wherever the user rule and the generated rule both
+// match — also when KiCad matches them with the two items in opposite
+// orders (a user edge rule written on B, the generated one on A).
+func TestKeepCarryConditionEitherOrder(t *testing.T) {
+	for in, want := range map[string]string{
+		"B.hasNetclass('PPD_HV') && B.Type == 'Pad'":   "A.hasNetclass('PPD_HV') && A.Type == 'Pad'",
+		"A.NetName == 'A.B' && B.NetName != \"B.x\"":   "B.NetName == 'A.B' && A.NetName != \"B.x\"",
+		"AB.x == 1 && xA.y == 2 && A.B.c && (B.z)":     "AB.x == 1 && xA.y == 2 && B.B.c && (A.z)",
+		"A.Type == 'Via'&&!B.isPlated()||A.Net==B.Net": "B.Type == 'Via'&&!A.isPlated()||B.Net==A.Net",
+		"": "",
+	} {
+		if got := druSwapAB(in); got != want {
+			t.Errorf("druSwapAB(%q) = %q, want %q", in, got, want)
+		}
+	}
+	gen := "A.hasNetclass('PPD_HV')"
+	if got, want := keepCarryCondition("B.hasNetclass('PPD_HV') && B.Type == 'Pad'", gen), "((B.hasNetclass('PPD_HV') && B.Type == 'Pad') || (A.hasNetclass('PPD_HV') && A.Type == 'Pad')) && ("+gen+")"; got != want {
+		t.Errorf("carry condition %q, want %q", got, want)
+	}
+	// No item reference to exchange: the plain conjunction.
+	if got := keepCarryCondition("L == 'F.Cu'", gen); got != "(L == 'F.Cu') && ("+gen+")" {
+		t.Errorf("carry condition %q", got)
 	}
 }

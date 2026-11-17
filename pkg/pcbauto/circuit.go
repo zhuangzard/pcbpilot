@@ -675,9 +675,17 @@ func (c *Circuit) buildDomains(b *Board, an *Analysis) {
 				// ground decide among themselves.
 				byGround, sided = vote(passive, true)
 			}
-			id := busiest
+			// One ground with a strict majority names the domain. A part
+			// on two grounds votes for both, so two may reach a majority:
+			// then none does and the declaration is its own domain.
+			id, winners := busiest, map[string]bool{}
 			for _, g := range grounds {
-				if d := domOfGround[g]; 2*byGround[d] > sided && id == busiest {
+				if d := domOfGround[g]; 2*byGround[d] > sided {
+					winners[d] = true
+				}
+			}
+			if len(winners) == 1 {
+				for d := range winners {
 					id = d
 				}
 			}

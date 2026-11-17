@@ -6,7 +6,7 @@
   generated minimum that has to stay after a weaker user rule (or that another generated rule overlaps) could not also
   go before a stricter user rule, so the conflict stayed and the apply was refused. The generated rule now stays last
   and the user's minimum is written again after it as a rule `pcbpilot carry …` at the end of the generated block, with the
-  condition "the user's rule AND the generated rule" and the larger of the two values: the stricter value applies
+  condition "the user's rule (items in either order) AND the generated rule" and the larger of the two values: the stricter value applies
   exactly where both match and nothing else changes. The user's rule text is not touched. The report lists these
   rules under `keepStricter.carriedAfter`; `--check` verifies each one (place, condition, layer, value) and
   `kicad route` writes them back. A conflict still stays when a value cannot be compared, the user's condition

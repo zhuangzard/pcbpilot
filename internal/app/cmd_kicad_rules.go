@@ -178,7 +178,7 @@ last matching rule of a constraint type):
     generated rule, overlaps it) while a user rule is stricter: it stays
     last and the user's minimum is written again after it, as a rule
     "pcbpilot carry ..." at the end of the generated block whose condition is the
-    user's AND the generated rule's — the stricter value applies exactly
+    user's (with its items A and B in either order) AND the generated rule's — the stricter value applies exactly
     where both match, the user's rule text is not touched;
   - the conflict stays, and blocks the apply, when neither works: a value
     cannot be compared (an expression, an unknown unit, no minimum, a

@@ -368,3 +368,15 @@ func TestDeclaredNetBetweenBridgesKeepsItsDomain(t *testing.T) {
 		}
 	}
 }
+
+// A part on two grounds votes for both: a declaration without a ground
+// whose only voter is such a part has two "majorities" and so none — it is
+// its own domain, not whichever ground comes first.
+func TestDomainDeclaredDualGroundVoterSeedsItsOwn(t *testing.T) {
+	b := tieBoard(hvPart("U9", "CTRL-X", Point{1300, 2000}, smdPad("1", "MID", 0, 50, 40, 40), smdPad("2", "GND_A", -50, -50, 40, 40), smdPad("3", "GND_B", 50, -50, 40, 40)),
+		tiePart("R9", "", "10k", "MID", "OUT"))
+	c := Understand(b, Analyze(b, PowerSpec{Declared: []DeclaredDomain{{Nets: []string{"MID"}}}}, nil))
+	if got := c.DeclaredNet["MID"]; got != "MID" {
+		t.Fatalf("declared net MID is in domain %q, want its own (MID): %v", got, c.DeclaredNet)
+	}
+}

@@ -99,12 +99,45 @@ func keepCarryName(gen, typ string, n int) string {
 	return fmt.Sprintf("%s%s %s %d", keepCarryPrefix, typ, strings.TrimPrefix(gen, kicad.DRURoutePrefix), n)
 }
 
-// keepCarryCondition is the condition of a carry rule.
+// keepCarryCondition is the condition of a carry rule: the generated
+// rule's, AND the user's in either item order. KiCad tries a rule with its
+// two items as (A, B) and, when that does not match, as (B, A); the user
+// rule and the generated one may each match in a different order (a user
+// rule written on B, the generated one on A), where a plain conjunction
+// matches in neither and the carry would vanish.
 func keepCarryCondition(user, gen string) string {
 	if strings.TrimSpace(user) == "" {
 		return gen
 	}
+	if sw := druSwapAB(user); sw != user {
+		return "((" + user + ") || (" + sw + ")) && (" + gen + ")"
+	}
 	return "(" + user + ") && (" + gen + ")"
+}
+
+// druSwapAB is a rule condition with its two items exchanged: every
+// object reference "A." becomes "B." and the reverse (text in quotes is
+// left alone).
+func druSwapAB(cond string) string {
+	b := []byte(cond)
+	quote := byte(0)
+	word := func(c byte) bool {
+		return c == '_' || c == '.' || c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
+	}
+	for i := 0; i < len(b); i++ {
+		c := b[i]
+		switch {
+		case quote != 0:
+			if c == quote {
+				quote = 0
+			}
+		case c == '\'' || c == '"':
+			quote = c
+		case (c == 'A' || c == 'B') && i+1 < len(b) && b[i+1] == '.' && (i == 0 || !word(b[i-1])):
+			b[i] = 'A' + 'B' - c
+		}
+	}
+	return string(b)
 }
 
 // keepCarriable: the user rule's condition and layer can be written again
