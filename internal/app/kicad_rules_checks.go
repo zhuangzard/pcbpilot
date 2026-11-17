@@ -451,6 +451,10 @@ func (r *rulesRun) conflicts() {
 		add("dru-unreadable", filepath.Base(r.dru), err.Error())
 		return
 	}
+	// The order analysis (always: the conflict text says stricter / weaker
+	// without --keep-stricter too; with it, it decides).
+	r.keepAnalyse(rules, replace)
+	keepOn := r.keepActive()
 	ours := r.ownedNames()
 	var maxClr int64
 	for _, e := range rep.Nets {
@@ -471,7 +475,12 @@ func (r *rulesRun) conflicts() {
 			add("dru-name", u.Name, "a user rule outside pcbpilot's blocks carries a pcbpilot rule name")
 			continue
 		}
-		for _, c := range u.Constraints {
+		// One conflict per rule: the text of its first conflicting
+		// constraint, the keep-stricter judgement of every conflicting one
+		// (the rule is resolved by order only when each of them is).
+		first, resolved, relations := "", true, map[string]bool{}
+		var notes []string
+		for j, c := range u.Constraints {
 			why := ""
 			switch c.Type {
 			case "track_width":
@@ -517,11 +526,47 @@ func (r *rulesRun) conflicts() {
 					why = "a user edge_clearance rule that may cover pcbpilot's domain edge rules (the later rule wins)"
 				}
 			}
-			if why != "" {
-				add("dru-weakened", u.Name, why+" (condition "+strconvQuote(u.Condition)+")")
-				break
+			if why == "" {
+				continue
+			}
+			if first == "" {
+				first = why + " (condition " + strconvQuote(u.Condition) + ")"
+			}
+			ns, ok, rel := r.keepNote(u, j, c)
+			resolved = resolved && ok
+			if rel != "" {
+				relations[rel] = true
+			}
+			for _, n := range ns {
+				notes = append(notes, c.Type+": "+n)
 			}
 		}
+		if first == "" {
+			continue
+		}
+		cf := rulesConflict{Kind: "dru-weakened", Name: u.Name, Detail: first, Replaced: replace[u.Name]}
+		switch {
+		case len(relations) == 1:
+			for rel := range relations {
+				cf.UserVsGenerated = rel
+			}
+		case relations["unknown"]:
+			cf.UserVsGenerated = "unknown"
+		case len(relations) > 1:
+			cf.UserVsGenerated = "mixed"
+		}
+		switch {
+		case keepOn && resolved:
+			cf.Resolved = "keep-stricter"
+			cf.Detail += "; resolved by --keep-stricter, the user rule is kept as it is — " + strings.Join(notes, "; ")
+		case keepOn:
+			cf.Detail += "; NOT resolved by --keep-stricter — " + strings.Join(notes, "; ") + "; change the user rule or the intent, or remove the user rule with --replace " + strconvQuote(u.Name)
+		case resolved:
+			cf.Detail += "; options: --keep-stricter keeps the user rule and orders the rules so that the stricter value applies where both match (" + strings.Join(notes, "; ") + "), or --replace " + strconvQuote(u.Name) + " removes the user rule"
+		default:
+			cf.Detail += "; options: --replace " + strconvQuote(u.Name) + " removes the user rule; --keep-stricter would not resolve this one (" + strings.Join(notes, "; ") + ")"
+		}
+		rep.Conflicts = append(rep.Conflicts, cf)
 	}
 }
 
@@ -1068,6 +1113,22 @@ func (r *rulesRun) probeCheck(board, what string) rulesCheck {
 	for _, c := range r.full.ClassesNM {
 		maxClr = math.Max(maxClr, float64(c.NM.Clearance)/nmPerMil)
 	}
+	if r.keep != nil {
+		// A user clearance rule kept in force by --keep-stricter is larger
+		// than the pair clearance: rows must be that far apart too.
+		for _, m := range r.keep.rep.Head {
+			for _, y := range m.YieldsTo {
+				if m.Type == "clearance" {
+					maxClr = math.Max(maxClr, float64(y.MinNm)/nmPerMil)
+				}
+			}
+		}
+		for _, c := range r.keep.rep.Carried {
+			if c.Type == "clearance" {
+				maxClr = math.Max(maxClr, float64(c.MinNm)/nmPerMil)
+			}
+		}
+	}
 	for _, e := range r.rep.Nets {
 		for _, l := range []string{"outer", "inner"} {
 			maxW = math.Max(maxW, float64(r.planFloor(e, l))/nmPerMil)
@@ -1390,6 +1451,7 @@ func (r *rulesRun) effectiveRules() {
 	for _, p := range r.rep.Isolation {
 		chk.Items = append(chk.Items, r.isolationRuleProblems(rules, p)...)
 	}
+	chk.Items = append(chk.Items, r.carryProblems(rules)...)
 	bad, unknown := r.clearanceEdgeProblems(rules)
 	chk.Items = append(chk.Items, bad...)
 	cannot := append(floorCannot, unknown...)
@@ -1637,11 +1699,14 @@ func (r *rulesRun) placementProxy() {
 	}
 	// Board net → domain class, from the domain classes bridge netclasses
 	// put the board nets in (the membership the pair rules use); the pair
-	// ends ("domain:<id>") are keyed the same way (ClassA / ClassB).
-	domOf := map[string]string{}
+	// ends ("domain:<id>") are keyed the same way (ClassA / ClassB). A net
+	// is in every domain class that lists it (a pair end and an edge
+	// domain, two pairs' ends): all of them count, not whichever the map
+	// happened to give last.
+	domOf := map[string][]string{}
 	for dom, nets := range r.full.Domains {
 		for _, n := range nets {
-			domOf[n] = "PPD_" + dom
+			domOf[n] = append(domOf[n], "PPD_"+dom)
 		}
 	}
 	type part struct {
@@ -1662,7 +1727,7 @@ func (r *rulesRun) placementProxy() {
 			continue
 		}
 		for _, pd := range c.Pads {
-			if d := domOf[pd.Net]; d != "" {
+			for _, d := range domOf[pd.Net] {
 				p.doms[d] = true
 			}
 		}
@@ -1746,8 +1811,77 @@ func (r *rulesRun) isolationRuleProblems(rules []kicad.DRURule, p rulesIsoPlan) 
 			at = i
 		}
 	}
+	sa, sb := r.domainIdentity(strings.TrimPrefix(p.ClassA, "PPD_")), r.domainIdentity(strings.TrimPrefix(p.ClassB, "PPD_"))
+	// A constraint --keep-stricter wrote before the user's rules (head
+	// block): the rule carries it there; every later rule that may match
+	// the pair's items must then ask at least as much, as an error.
+	headOK := map[string]bool{}
+	for _, want := range []struct {
+		typ string
+		mm  float64
+	}{{"clearance", p.ClearanceMm}, {"creepage", p.CreepageMm}} {
+		if want.mm <= 0 || want.typ == "creepage" && !isoCreepageWritten(p.ClearanceMm, p.CreepageMm) {
+			continue
+		}
+		if at >= 0 && hasConstraint(rules[at], want.typ) {
+			continue // carried by the rule at the end
+		}
+		hn, need := keepHeadName(name, want.typ), int64(math.Round(want.mm*1e6))
+		hat := -1
+		for i, u := range rules {
+			if u.Name == hn && u.Block == "head" {
+				hat = i
+			}
+		}
+		if hat < 0 {
+			continue
+		}
+		h := rules[hat]
+		ok := h.Condition == cond && h.Layer == "" && (h.Severity == "" || h.Severity == "error")
+		for _, c := range h.Constraints {
+			if c.Type != want.typ || c.Min == nil || *c.Min < need {
+				ok = false
+			}
+		}
+		if !ok || !hasConstraint(h, want.typ) {
+			bad = append(bad, fmt.Sprintf("pair %s|%s: head rule %q is not %s min ≥ %g mm on the pair condition", p.A, p.B, hn, want.typ, want.mm))
+			continue
+		}
+		headOK[want.typ] = true
+		for _, later := range rules[hat+1:] {
+			// A later head rule too: KiCad applies the last one that matches.
+			if druDisjointPair(later.Condition, sa, sb) {
+				continue
+			}
+			for _, c := range later.Constraints {
+				if c.Type != want.typ {
+					continue
+				}
+				switch {
+				case c.Unparsed || c.Min == nil:
+					bad = append(bad, fmt.Sprintf("pair %s|%s: the rule %q after the head rule %q may set %s for the pair's items with a value pcbpilot cannot compare", p.A, p.B, later.Name, hn, want.typ))
+				case *c.Min < need:
+					bad = append(bad, fmt.Sprintf("pair %s|%s: the rule %q after the head rule %q may lower %s for the pair's items to %s (plan %g mm)", p.A, p.B, later.Name, hn, want.typ, kicad.MmOfNm(*c.Min), want.mm))
+				case later.Severity != "" && later.Severity != "error":
+					bad = append(bad, fmt.Sprintf("pair %s|%s: the rule %q after the head rule %q has severity %q: a %s violation of the pair would not be an error", p.A, p.B, later.Name, hn, later.Severity, want.typ))
+				}
+			}
+		}
+	}
 	if at < 0 {
-		return []string{fmt.Sprintf("pair %s|%s: no isolation rule %q in the .kicad_dru", p.A, p.B, name)}
+		// Every constraint the pair needs may sit in the head block.
+		for _, want := range []struct {
+			typ string
+			mm  float64
+		}{{"clearance", p.ClearanceMm}, {"creepage", p.CreepageMm}} {
+			if want.mm <= 0 || want.typ == "creepage" && !isoCreepageWritten(p.ClearanceMm, p.CreepageMm) {
+				continue
+			}
+			if !headOK[want.typ] {
+				return append(bad, fmt.Sprintf("pair %s|%s: no isolation rule %q in the .kicad_dru", p.A, p.B, name))
+			}
+		}
+		return bad
 	}
 	u := rules[at]
 	if u.Condition != cond {
@@ -1755,6 +1889,9 @@ func (r *rulesRun) isolationRuleProblems(rules []kicad.DRURule, p rulesIsoPlan) 
 	}
 	if u.Layer != "" {
 		bad = append(bad, fmt.Sprintf("pair %s|%s: rule %q is limited to layer %s", p.A, p.B, name, u.Layer))
+	}
+	if u.Severity != "" && u.Severity != "error" {
+		bad = append(bad, fmt.Sprintf("pair %s|%s: rule %q has severity %q: a violation of the pair's distances would not be an error", p.A, p.B, name, u.Severity))
 	}
 	for _, want := range []struct {
 		typ string
@@ -1768,7 +1905,7 @@ func (r *rulesRun) isolationRuleProblems(rules []kicad.DRURule, p rulesIsoPlan) 
 		if want.typ == "creepage" && !isoCreepageWritten(p.ClearanceMm, p.CreepageMm) {
 			continue
 		}
-		ok := false
+		ok := headOK[want.typ]
 		for _, c := range u.Constraints {
 			if c.Type == want.typ && c.Min != nil && *c.Min >= int64(math.Round(want.mm*1e6)) {
 				ok = true
@@ -1778,17 +1915,96 @@ func (r *rulesRun) isolationRuleProblems(rules []kicad.DRURule, p rulesIsoPlan) 
 			bad = append(bad, fmt.Sprintf("pair %s|%s: rule %q has no %s min ≥ %g mm", p.A, p.B, name, want.typ, want.mm))
 		}
 	}
-	sa, sb := r.domainIdentity(strings.TrimPrefix(p.ClassA, "PPD_")), r.domainIdentity(strings.TrimPrefix(p.ClassB, "PPD_"))
 	for _, later := range rules[at+1:] {
 		if druDisjointPair(later.Condition, sa, sb) {
 			continue
 		}
+		// A carry rule (--keep-stricter: a stricter user minimum written
+		// again after the generated rule) is judged by value; that it is
+		// the planned one is carryProblems' business.
+		carry := later.Block == "route" && strings.HasPrefix(later.Name, keepCarryPrefix)
 		for _, c := range later.Constraints {
-			if c.Type == "clearance" || c.Type == "creepage" {
-				bad = append(bad, fmt.Sprintf("pair %s|%s: the later rule %q may set %s for the pair's items and would win over %q", p.A, p.B, later.Name, c.Type, name))
-				break
+			if c.Type != "clearance" && c.Type != "creepage" {
+				continue
+			}
+			need := p.ClearanceMm
+			if c.Type == "creepage" {
+				need = p.CreepageMm
+			}
+			if carry && c.Min != nil && !c.Unparsed && *c.Min >= int64(math.Round(need*1e6)) && (later.Severity == "" || later.Severity == "error") {
+				continue
+			}
+			bad = append(bad, fmt.Sprintf("pair %s|%s: the later rule %q may set %s for the pair's items and would win over %q", p.A, p.B, later.Name, c.Type, name))
+			break
+		}
+	}
+	return bad
+}
+
+// carryProblems: the carry rules in the .kicad_dru are exactly the ones
+// the keep-stricter plan gives — each right after its generated rule (only
+// carries of that rule between them, in the plan's order), on the user
+// condition AND the generated one, with the planned minimum as an error.
+func (r *rulesRun) carryProblems(rules []kicad.DRURule) []string {
+	var plan []keepCarry
+	var moves []keepMove
+	if r.keep != nil && r.keepActive() {
+		plan, moves = r.keep.rep.Carried, r.keep.rep.Head
+	}
+	var bad []string
+	// A constraint the plan moved before the user's rules is not also at
+	// the end (there it would win over the stricter user rule again), and
+	// every head rule is a planned one.
+	headName := map[string]bool{}
+	for _, m := range moves {
+		headName[m.HeadRule] = true
+		for _, u := range rules {
+			if u.Block == "route" && u.Name == m.Generated && hasConstraint(u, m.Type) {
+				bad = append(bad, fmt.Sprintf("keep-stricter: the rule %q still has its %s constraint in the generated block at the end, after the user's stricter rules (the plan has it before them, as %q)", m.Generated, m.Type, m.HeadRule))
 			}
 		}
+	}
+	// The head block is before every other rule: after a user rule its
+	// minimums would win over that rule again.
+	if before, head := headBlockMisplaced(rules); head != "" {
+		bad = append(bad, fmt.Sprintf("keep-stricter: the head rule %q is after the rule %q (the head block is the first thing after the version line: a rule before it loses to the generated minimums)", head, before))
+	}
+	gen := map[string]kicad.DRURule{}
+	var have []kicad.DRURule
+	for _, u := range rules {
+		carry := strings.HasPrefix(u.Name, keepCarryPrefix)
+		switch {
+		case u.Block == "head" && strings.HasPrefix(u.Name, kicad.DRUHeadPrefix) && !headName[u.Name]:
+			bad = append(bad, fmt.Sprintf("keep-stricter: the head rule %q is not in the plan (the user rules or the derived minimums changed after it was written)", u.Name))
+		case carry && u.Block != "route":
+			bad = append(bad, fmt.Sprintf("keep-stricter: the rule %q is outside the generated block", u.Name))
+		case carry:
+			have = append(have, u)
+		case u.Block == "route" && len(have) > 0:
+			bad = append(bad, fmt.Sprintf("keep-stricter: the rule %q is after the carry rule %q (carry rules are the last rules of the generated block)", u.Name, have[0].Name))
+		case u.Block == "route":
+			gen[u.Name] = u
+		}
+	}
+	// The carry rules are the planned ones, one by one, in plan order.
+	for i, c := range plan {
+		if i >= len(have) {
+			bad = append(bad, fmt.Sprintf("keep-stricter: no rule %q at the end of the generated block (it carries the user rule %q, min %s, where it and %q both match)", c.Rule, c.UserRule, kicad.MmOfNm(c.UserMinNm), c.Generated))
+			continue
+		}
+		u, g := have[i], gen[c.Generated]
+		ok := u.Name == c.Rule && hasConstraint(g, c.Type) && u.Condition == keepCarryCondition(c.Condition, g.Condition) && u.Layer == c.Layer &&
+			(u.Severity == "" || u.Severity == "error") && len(u.Constraints) == 1
+		if ok {
+			k := u.Constraints[0]
+			ok = k.Type == c.Type && k.Min != nil && !k.Unparsed && *k.Min == c.MinNm
+		}
+		if !ok {
+			bad = append(bad, fmt.Sprintf("keep-stricter: carry rule %d of the generated block (%q) is not the planned %q (%s min %s on the user rule %q's condition and that of %q)", i+1, u.Name, c.Rule, c.Type, kicad.MmOfNm(c.MinNm), c.UserRule, c.Generated))
+		}
+	}
+	for _, u := range have[min(len(plan), len(have)):] {
+		bad = append(bad, fmt.Sprintf("keep-stricter: the rule %q is not in the plan (the user rules or the derived minimums changed after it was written)", u.Name))
 	}
 	return bad
 }
@@ -1802,12 +2018,12 @@ func (r *rulesRun) isolationRuleProblems(rules []kicad.DRURule, p rulesIsoPlan) 
 func (r *rulesRun) clearanceEdgeProblems(rules []kicad.DRURule) (bad, unknown []string) {
 	for _, e := range r.rep.Nets {
 		cls, _ := r.classOf(e.Net)
-		names := r.netNames(e)
+		names, it := r.netNames(e), r.item(e.Net, nil)
 		for _, u := range rules {
-			if strings.HasPrefix(u.Name, "pcbpilot isolation ") && u.Block == "route" {
+			if strings.HasPrefix(u.Name, "pcbpilot isolation ") && u.Block == "route" || strings.HasPrefix(u.Name, kicad.DRUHeadPrefix+"isolation ") && u.Block == "head" {
 				continue // pair-only; judged by isolationRuleProblems
 			}
-			if druDisjointFor(u.Condition, names, true) {
+			if druDisjointFor(u.Condition, names, true) || druNeverGoverns(u.Condition, it) {
 				continue
 			}
 			for _, c := range u.Constraints {
@@ -1832,8 +2048,11 @@ func (r *rulesRun) clearanceEdgeProblems(rules []kicad.DRURule) (bad, unknown []
 		cond := "A.hasNetclass('" + cls + "')"
 		names := r.domainIdentity(dom)
 		at := -1
+		// The rule at the end, or — moved before the user's rules by
+		// --keep-stricter — its head-block rule: every later rule that may
+		// match is then judged by value below.
 		for i, u := range rules {
-			if u.Name == name && u.Block != "" {
+			if u.Name == name && u.Block != "" && u.Block != "head" || u.Name == keepHeadName(name, "edge_clearance") && u.Block == "head" {
 				at = i
 			}
 		}
@@ -1842,14 +2061,15 @@ func (r *rulesRun) clearanceEdgeProblems(rules []kicad.DRURule) (bad, unknown []
 			continue
 		}
 		u := rules[at]
-		ok := u.Condition == cond && u.Layer == ""
+		name = u.Name
+		ok := u.Condition == cond && u.Layer == "" && (u.Severity == "" || u.Severity == "error")
 		for _, c := range u.Constraints {
 			if c.Type == "edge_clearance" && (c.Min == nil || *c.Min < want) {
 				ok = false
 			}
 		}
 		if !ok || !hasConstraint(u, "edge_clearance") {
-			bad = append(bad, fmt.Sprintf("domain %s: rule %q is not edge_clearance min %s on %q", dom, name, kicad.MmOfNm(want), cond))
+			bad = append(bad, fmt.Sprintf("domain %s: rule %q is not edge_clearance min %s on %q, as an error", dom, name, kicad.MmOfNm(want), cond))
 		}
 		for _, later := range rules[at+1:] {
 			if druDisjoint(later.Condition, names) {
@@ -1864,11 +2084,29 @@ func (r *rulesRun) clearanceEdgeProblems(rules []kicad.DRURule) (bad, unknown []
 					unknown = append(unknown, fmt.Sprintf("domain %s: the later rule %q may set edge_clearance with a value pcbpilot cannot compare", dom, later.Name))
 				case *c.Min < want:
 					bad = append(bad, fmt.Sprintf("domain %s: the later rule %q may lower edge_clearance to %s (plan %s)", dom, later.Name, kicad.MmOfNm(*c.Min), kicad.MmOfNm(want)))
+				case later.Severity != "" && later.Severity != "error":
+					// Whatever its value: the last matching rule also
+					// sets the severity of the violation.
+					bad = append(bad, fmt.Sprintf("domain %s: the rule %q after the rule %q has severity %q: an edge_clearance violation would not be an error", dom, later.Name, name, later.Severity))
 				}
 			}
 		}
 	}
 	return bad, unknown
+}
+
+// headBlockMisplaced: the first head-block rule that has a rule outside
+// the head block before it, and that rule ("" when the head block leads).
+func headBlockMisplaced(rules []kicad.DRURule) (before, head string) {
+	for _, u := range rules {
+		switch {
+		case u.Block != "head" && before == "":
+			before = u.Name
+		case u.Block == "head" && before != "":
+			return before, u.Name
+		}
+	}
+	return "", ""
 }
 
 func hasConstraint(u kicad.DRURule, typ string) bool {

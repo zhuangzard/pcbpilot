@@ -215,7 +215,12 @@ type SpecIsolation struct {
 	B           string  `json:"b"`
 	ClearanceMm float64 `json:"clearanceMm,omitempty"`
 	CreepageMm  float64 `json:"creepageMm,omitempty"`
-	Why         string  `json:"why,omitempty"`
+	// Insulation states the pair's grade (basic | supplementary | double |
+	// reinforced) in place of the derived one — the owner's decision, for
+	// which Why is required: mains to protective earth is basic where the
+	// earth is the other means of protection.
+	Insulation string `json:"insulation,omitempty"`
+	Why        string `json:"why,omitempty"`
 }
 
 // SpecRules override fabrication minimums (mil).
@@ -266,8 +271,17 @@ func ParseSpec(b []byte) (*Spec, error) {
 		if strings.TrimSpace(d.A) == "" || strings.TrimSpace(d.B) == "" {
 			return nil, fmt.Errorf("spec.isolation[%d]: a and b must name a net (or domain:<id>) of each domain", i)
 		}
-		if !finiteNonNeg(d.ClearanceMm) || !finiteNonNeg(d.CreepageMm) || d.ClearanceMm == 0 && d.CreepageMm == 0 {
-			return nil, fmt.Errorf("spec.isolation[%d]: give clearanceMm and/or creepageMm (non-negative mm)", i)
+		if !finiteNonNeg(d.ClearanceMm) || !finiteNonNeg(d.CreepageMm) || d.ClearanceMm == 0 && d.CreepageMm == 0 && d.Insulation == "" {
+			return nil, fmt.Errorf("spec.isolation[%d]: give clearanceMm and/or creepageMm (non-negative mm), or insulation", i)
+		}
+		switch d.Insulation {
+		case "":
+		case "basic", "supplementary", "double", "reinforced":
+			if strings.TrimSpace(d.Why) == "" {
+				return nil, fmt.Errorf("spec.isolation[%d]: insulation %q needs a why (the clause or the protective measure that makes it so)", i, d.Insulation)
+			}
+		default:
+			return nil, fmt.Errorf("spec.isolation[%d].insulation %q: want basic|supplementary|double|reinforced", i, d.Insulation)
 		}
 	}
 	for i, r := range s.Rails {

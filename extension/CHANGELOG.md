@@ -2,6 +2,111 @@
 
 ## [Unreleased]
 
+## [0.12.11] — 2026-11-17
+
+- **`kicad rules --check`: the placement check no longer misses an insulation pair at random.** A net that is in two
+  domain classes (a pair end and a board-edge domain of the same nets) was counted in only one of them, picked by map
+  order: when it was the edge class, the parts of that domain were not compared with the other side of the pair and
+  `isolation-placement` passed. A net now counts in every domain class that lists it, so the result is the same on
+  every run.
+- **`kicad rules --keep-stricter`: a stricter user rule is kept even when the generated rule must stay last.** A
+  generated minimum that has to stay after a weaker user rule (or that another generated rule overlaps) could not also
+  go before a stricter user rule, so the conflict stayed and the apply was refused. The generated rule now stays last
+  and the user's minimum is written again after it as a rule `pcbpilot carry …` at the end of the generated block, with the
+  condition "the user's rule (items in either order) AND the generated rule" and the larger of the two values: the stricter value applies
+  exactly where both match and nothing else changes. The user's rule text is not touched. The report lists these
+  rules under `keepStricter.carriedAfter`; `--check` verifies each one (place, condition, layer, value) and
+  `kicad route` writes them back. A conflict still stays when a value cannot be compared, the user's condition
+  cannot be written inside another rule, or the carried value would be below another generated minimum that may
+  match the same items.
+- **`intent derive`: `spec.isolation[].insulation` states a pair's insulation grade.** A pair between a hazardous and
+  a touchable domain is derived as reinforced; where the other means of protection exists (mains to protective earth),
+  the spec can now say `"insulation": "basic"` with a required `why`. The pair's distances follow the declared grade,
+  the pair's `why` names the declaration, and a grade below the derived one is reported as the warning
+  `declared-insulation-lowered`. The pair's declaration is more specific than the product-level
+  `spec.standard.mopCount`: the pair counts one means of protection for basic or supplementary and two for double or
+  reinforced — also when the declared grade is the derived one — and both the `why` and the warning state the
+  changed count.
+- **`intent derive`: a declared net between two isolation parts is in its declared domain.** A net that only
+  isolation parts sit on (an isolator's output into an isolated converter) had no part to carry it into a domain, so a
+  net declared in a mains domain ended in none and got no insulation pair. It is now in the domain it was declared in.
+- **`kicad rules --check`: a weaker `--keep-stricter` head rule after a stricter one is reported.** Two head rules
+  that may govern the same pair were each accepted on their own value; KiCad applies the last one that matches.
+
+- **`kicad rules`: a user rule that cannot match a net is no longer reported as lowering its clearance.** A user
+  clearance rule whose condition has a nested alternative (`A.hasNetclass('X') && (B.hasNetclass('Y') || ...)`) or a
+  negated class (`!B.hasNetclass('X')`) was taken to cover every planned net, so `staged-readback` failed with "may
+  lower its clearance" and `--keep-stricter` left the conflict open. The condition is now evaluated for each net with
+  the classes the net is in: a rule that provably matches no pair with that net is left out. Anything not decided by
+  net and class names alone (a property, a function, a wildcard) still counts as a possible match.
+- **`intent derive`: a declared domain whose return is not a ground net is a domain of its own.** A domain declared in
+  the spec with no ground-named net among its nets (a primary whose return is a bus net) had no reference, so the first
+  Y capacitor from it to another circuit carried that circuit's domain over all of it: one "mains" domain holding nearly
+  every net, referenced to the secondary's ground, and an insulation distance applied board-wide. Its declared nets now
+  seed their own reference domain; a rail declared only to give a grounded domain its kind changes nothing.
+- **`kicad place`: an overlap between two parts that do not move is not illegal.** Two locked or fixed parts whose
+  courtyards overlap (a through-hole part over a part on the other side) failed the placement, which the placer cannot
+  change. Such pairs are now listed in the report's `fixedOverlaps` with a note, are not counted in `illegal`, and are
+  left for DRC to judge.
+- **`kicad place`: a domain may be given several zone rectangles.** `--mech` zones that name the same domain more than
+  once used to keep only the last rectangle, so an L-shaped or split domain lost most of its room. Every rectangle now
+  counts: the domain's parts are shared among them by the room each has, and a part is legal inside any of them. The
+  report's `zoneFill` lists each rectangle that holds parts.
+- **`kicad place --sides`: put parts on the bottom (or the top) before placing.** The placer never changed a part's
+  side, so a board that only fits with parts on both sides could not be placed. `--sides sides.json`
+  (`{"top": [designators], "bottom": [designators]}`) flips each named part that is on the other side first, on a staged
+  copy in a directory of its own, and places the result; the input board is not changed. The run is refused, before
+  anything is written, when a named part is unknown or named for both sides, or would have to flip but is locked or
+  fixed by `--mech`.
+- **`kicad place`: a rule area on some layers no longer blocks the other side.** A KiCad rule area on the top and inner
+  layers was read as a keep-out on every layer, so nothing could be placed under it on the bottom. Its layer list is
+  now kept: it blocks only the sides it is on.
+- **`kicad place`: a locked part inside a keep-out no longer fails the placement.** The illegal count included every
+  locked or fixed part lying in a no-parts keep-out, which the placer cannot move and the `illegal` list did not name,
+  so such a board could never reach `verdict: pass`. Only parts the placer may move are counted.
+- **`kicad place`: `zoneFill` is counted per board side.** The fill of a zone compared all its parts with one side's
+  area, so a zone that is full on top and empty below read the same as one evenly filled. The report now gives the
+  fill of the top and of the bottom (through-hole parts count on both).
+- **`kicad place`: boards of many hundreds of parts are legalised in minutes, not hours.** With 800 or more movable
+  parts the legaliser now finds free room for a part through an occupancy grid of each board side instead of a spiral
+  scan of up to 2.5 million poses per part, and the isolation cost looks up each pad's domain once instead of once per
+  pad pair. Smaller boards are placed exactly as before.
+- **`intent derive`: the mains domain no longer spreads over a large mixed board.** The AC line used to be followed
+  through every resistor, so a sense divider, a pull-up or a bleeder could carry it to nearly every net, and one such
+  net made a whole low-voltage domain "mains". The line is now followed only through real series parts (fuse,
+  thermistor, choke, varistor, a resistor known to be 10 Ω or less, relay contacts), never into a ground, a supply rail
+  or a net the spec declares in a non-mains domain, and a domain is mains only when a conducting part connects it to the
+  line. Two grounds are no longer joined by a Y capacitor (`CX…`/`CY…` are now capacitors), a resistor known to be
+  100 kΩ or more, or an unrecognised two-pin part; a 0 Ω link, ferrite, net-tie or a resistor without a readable value
+  still joins them. `TX…` is a transformer. Domains declared in the spec win: grounds declared in different domains are
+  never joined, and a ground declared SELV, isolated or patient is never tied to the line. A new `domain-flood` warning
+  names the parts responsible when one mains or hazardous domain still holds more than 60 % of the nets of a board that
+  has isolation parts.
+- **`kicad board outline`: a footprint with its own slot or cut-out no longer blocks the board outline.** Any footprint
+  that draws on Edge.Cuts (a connector with a slot, for example) made the command refuse every new outline with
+  `E_BOARD_OUTLINE_EXISTS`, with or without `--replace`. Closed Edge.Cuts contours inside a footprint that lie wholly
+  inside the new outline now stay as they are and count as cut-outs of the board (`summary.footprintCutouts`, and a
+  warning names the footprints); `--replace` is needed only when the board has its own outline drawings. The command
+  still refuses, naming each footprint and the reason, when a footprint's Edge.Cuts is open, crosses or touches the new
+  outline, or lies outside it, and when a new cutout lands on a footprint's cut-out. Footprint graphics are never changed.
+- **`kicad rules --keep-stricter`: keep your own clearance rules instead of replacing them.** When a rule you wrote in
+  the `.kicad_dru` overlaps a clearance, creepage or edge-clearance rule pcbpilot generates, `kicad rules` used to offer
+  only `--replace`, which deletes your rule. With the new opt-in `--keep-stricter` your rule text is never changed or
+  removed: where your rule is at least as strict, pcbpilot writes its own minimum in a small block *before* your rules
+  (`# pcbpilot-rules-head:begin … end`), so KiCad applies your stricter value where both match and pcbpilot's minimum
+  everywhere else; where your rule is weaker, pcbpilot's rule stays last as before. If no order can satisfy both (for
+  example one generated rule would have to come after one of your rules and before another), or a value cannot be
+  compared, the conflict stays, nothing is written, and the message names your rule, the generated rule and the reason.
+  The plan and the report list every rule that was moved and which of your rules wins over it. Without the flag nothing
+  changes, except that the conflict message now says whether your rule is stricter or weaker and mentions both options.
+  Width (`track_width`) conflicts are not covered by this mode.
+- **`kicad drc --timeout <duration>`** (for example `--timeout 90m`) sets the time limit of the kicad-cli DRC run;
+  `kicad fab --preflight` takes `--drc-timeout`. The flag wins over `PCBPILOT_KICAD_DRC_TIMEOUT`, which wins over the
+  computed limit; a zero or negative value is refused. The computed limit now also grows with the project's custom
+  rules file: 5 minutes per 100 kB of `<board>.kicad_dru`, on top of 2 minutes per MB of board file, still at most
+  2 hours (a board with a 400 kB rules file ran into the old limit and came back cannot-check). A timeout message
+  names the flag, the environment variable and, when the rules file is 100 kB or larger, its size.
+
 ## [0.12.10] — 2026-11-15
 
 **CLI, daemon, Skills, MCP and the connector move to 0.12.10. The connector runtime is unchanged from 0.12.9; import the

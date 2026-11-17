@@ -280,6 +280,14 @@ func regionKeepout(r map[string]any) *Keepout {
 	}
 	if l := int(num(r["layer"])); l != 0 && l != LayerMulti {
 		k.Layers = []int{l}
+	} else if ls, ok := r["layers"].([]any); ok && len(ls) > 0 {
+		// A KiCad rule area on several layers but not all of them (the top
+		// and an inner layer, say) reaches those layers only.
+		for _, v := range ls {
+			if l := int(num(v)); l != 0 && l != LayerMulti {
+				k.Layers = append(k.Layers, l)
+			}
+		}
 	}
 	k.Poly = sourcePoints(r["source"])
 	if len(k.Poly) < 3 {

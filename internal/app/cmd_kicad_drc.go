@@ -19,6 +19,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/zhuangzard/pcbpilot/internal/gate"
@@ -128,7 +129,8 @@ type kicadDRCOptions struct {
 	baselineJSON, baselinePCB string
 	waivers                   []gateWaiver
 	tolMm                     float64
-	outDir                    string // raw reports are kept here when set
+	outDir                    string        // raw reports are kept here when set
+	timeout                   time.Duration // > 0: the limit of each kicad-cli run (--timeout)
 }
 
 func newKicadDRCCmd(stdout, stderr io.Writer) *cobra.Command {
@@ -170,7 +172,12 @@ baseline ones that disappeared. A raw kicad-cli baseline is
 attributed with the current board (deleted objects stay unresolved) and carries no
 project policy, so the policy check is judged in full.
 
-Exit: 0 pass, 6 fail, 5 cannot-check (kicad-cli failed, unreadable report or baseline).
+Each kicad-cli run has a time limit: 30 min + 2 min per MB of board file + 5 min per
+100 kB of the project's custom rules (<board>.kicad_dru), at most 2 h. --timeout
+(e.g. 90m) sets it for this command; without the flag PCBPILOT_KICAD_DRC_TIMEOUT
+does. A run that reaches the limit is cannot-check, never a pass.
+
+Exit: 0 pass, 6 fail, 5 cannot-check (kicad-cli failed or timed out, unreadable report or baseline).
 The JSON report goes to stdout; --out DIR also keeps drc-report.json and the raw
 kicad-cli report(s).`,
 		Args: cobra.NoArgs,
@@ -192,6 +199,9 @@ kicad-cli report(s).`,
 			}
 			if o.tolMm <= 0 {
 				return fmt.Errorf("--tolerance-mm must be positive")
+			}
+			if err := drcTimeoutFlag(cmd, "timeout", o.timeout); err != nil {
+				return err
 			}
 			ws, err := loadWaivers(waiverPath)
 			if err != nil {
@@ -233,7 +243,17 @@ kicad-cli report(s).`,
 	f.StringVar(&waiverPath, "waivers", "", "signed waiver file (JSON list of {gate, match, reason, by})")
 	f.Float64Var(&o.tolMm, "tolerance-mm", 0.5, "position tolerance for matching a baseline violation (mm)")
 	f.StringVar(&o.outDir, "out", "", "also write drc-report.json and the raw kicad-cli report(s) here")
+	f.DurationVar(&o.timeout, "timeout", 0, "time limit of each kicad-cli DRC run, e.g. 90m (default: "+kicad.EnvDRCTimeout+", else 30m + 2m per MB of board + 5m per 100 kB of .kicad_dru, at most 2h)")
 	return c
+}
+
+// drcTimeoutFlag refuses a DRC time limit flag given with a value that is
+// not positive (0 is the flag's "not given" default only).
+func drcTimeoutFlag(cmd *cobra.Command, name string, d time.Duration) error {
+	if cmd.Flags().Changed(name) && d <= 0 {
+		return fmt.Errorf("--%s must be positive (a duration such as 45m or 1h30m), got %s", name, d)
+	}
+	return nil
 }
 
 // printDRCSummary writes one line per check to w.
@@ -270,13 +290,13 @@ func runKicadDRC(o kicadDRCOptions) *kicadDRCReport {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		cur, curErr = kicad.RunDRC(kicad.DRCRunOptions{PCB: o.pcb, SchematicParity: o.parity, Schematic: o.sch, CLI: o.cli, SaveRaw: curRaw})
+		cur, curErr = kicad.RunDRC(kicad.DRCRunOptions{PCB: o.pcb, SchematicParity: o.parity, Schematic: o.sch, CLI: o.cli, SaveRaw: curRaw, Timeout: o.timeout})
 	}()
 	if o.baselinePCB != "" {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			old, oldErr = kicad.RunDRC(kicad.DRCRunOptions{PCB: o.baselinePCB, SchematicParity: o.parity, Schematic: o.sch, CLI: o.cli, SaveRaw: oldRaw})
+			old, oldErr = kicad.RunDRC(kicad.DRCRunOptions{PCB: o.baselinePCB, SchematicParity: o.parity, Schematic: o.sch, CLI: o.cli, SaveRaw: oldRaw, Timeout: o.timeout})
 		}()
 	}
 	wg.Wait()

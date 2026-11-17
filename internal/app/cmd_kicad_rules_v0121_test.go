@@ -79,6 +79,31 @@ func TestKicadRulesPrefixedPairsProbedAndPlaced(t *testing.T) {
 	}
 }
 
+// A net in two domain classes (the pair end "domain:HVD" and the edge
+// domain "HVD") is in both for the placement proxy: the pair is seen on
+// every run, not only when the map gives the pair's class last.
+func TestKicadRulesPlacementSeesNetInTwoDomainClasses(t *testing.T) {
+	f := newRulesFixture(t)
+	in := strings.Replace(rulesPrefixedIntent, `"copper":`, rulesEdgeIntent+`"copper":`, 1)
+	if err := os.WriteFile(f.o.intent, []byte(in), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a := f.o
+	a.apply = true
+	if rep, code, stderr := runRules(t, a); code != 0 {
+		t.Fatalf("apply exit %d %+v\n%s", code, rep.Checks, stderr)
+	}
+	c := f.o
+	c.check, c.stage = true, "placed"
+	for i := 0; i < 12; i++ {
+		rep, _, _ := runRules(t, c)
+		pp := checkOf(rep, "isolation-placement")
+		if pp.Status != gate.Warn || !strings.Contains(strings.Join(pp.Items, "\n"), "J1 ↔ U1") {
+			t.Fatalf("run %d: placement %+v", i, pp)
+		}
+	}
+}
+
 // A domain whose nets are not on the board: cannot-check, apply refused,
 // placement not a pass.
 func TestKicadRulesEmptyDomainIsCannotCheck(t *testing.T) {

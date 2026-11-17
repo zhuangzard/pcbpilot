@@ -119,6 +119,75 @@ class GeometryTest(unittest.TestCase):
         self.assertAlmostEqual(board.sdf({"slot": {"x1": 0, "y1": 0, "x2": 10, "y2": 0, "width": 2}}, (12, 0)), 1)
 
 
+def seg(a, b):
+    return {"kind": "segment", "start": a, "end": b}
+
+
+def slot_edges(x1, x2, y, r):
+    """A horizontal slot as a footprint draws it: two lines and two half arcs."""
+    return [seg((x1, y - r), (x2, y - r)), {"kind": "arc", "start": (x2, y - r), "mid": (x2 + r, y), "end": (x2, y + r)},
+            seg((x1, y + r), (x2, y + r)), {"kind": "arc", "start": (x1, y - r), "mid": (x1 - r, y), "end": (x1, y + r)}]
+
+
+class FootprintCutoutTest(unittest.TestCase):
+    """Footprint Edge.Cuts under a new outline: closed contours inside it are
+    kept as cut-outs, anything else is refused with the footprint named."""
+
+    def run_cutouts(self, fps, outer, cutouts=()):
+        P = board.Problems()
+        return board.footprint_cutouts(fps, outer, list(cutouts), P), P
+
+    def test_slot_and_circle_inside_are_kept(self):
+        fps = {"J1": slot_edges(10, 14, 10, 0.5), "H1": [{"kind": "circle", "center": (30, 20), "radius": 1.5}],
+               "K1": [{"kind": "rect", "points": square(40, 40, 42, 43)}]}
+        kept, P = self.run_cutouts(fps, rect_item(0, 0, 50, 50))
+        self.assertFalse(P)
+        self.assertEqual(sorted(r for r, _ in kept), ["H1", "J1", "K1"])
+        slot = next(lp for r, lp in kept if r == "J1")
+        self.assertAlmostEqual(min(p[0] for p in slot), 9.5, places=3)
+        self.assertAlmostEqual(max(p[0] for p in slot), 14.5, places=3)
+
+    def test_arc_direction(self):
+        pts = board.arc_points((1, 0), (0, 1), (-1, 0))
+        self.assertTrue(all(p[1] >= -1e-9 and abs(math.hypot(*p) - 1) < 1e-9 for p in pts))
+        pts = board.arc_points((1, 0), (0, -1), (-1, 0))
+        self.assertTrue(all(p[1] <= 1e-9 for p in pts))
+
+    def test_refusals_name_the_footprint_and_reason(self):
+        outer = rect_item(0, 0, 50, 50)
+        cases = {
+            "open end": [seg((5, 5), (10, 5)), seg((10, 5), (10, 10))],
+            "branch": [seg((5, 5), (10, 5)), seg((10, 5), (10, 10)), seg((10, 5), (15, 5))],
+            "outside the new outline": [{"kind": "circle", "center": (80, 20), "radius": 1}],
+            "crosses or touches the new outline": [{"kind": "rect", "points": square(45, 10, 55, 12)}],
+            "PCB_TEXT": [{"kind": "PCB_TEXT"}],
+        }
+        for want, edges in cases.items():
+            kept, P = self.run_cutouts({"J7": edges, "H1": [{"kind": "circle", "center": (30, 20), "radius": 1.5}]}, outer)
+            self.assertEqual(kept, [], want)
+            self.assertEqual([p["code"] for p in P], ["E_BOARD_OUTLINE_EXISTS"], want)
+            self.assertIn("J7 (", P[0]["detail"], want)
+            self.assertIn(want, P[0]["detail"])
+            self.assertNotIn("H1", P[0]["detail"], want)
+
+    def test_tangent_to_the_outline_is_refused(self):
+        _, P = self.run_cutouts({"H1": [{"kind": "circle", "center": (1.0005, 20), "radius": 1}]}, rect_item(0, 0, 50, 50))
+        self.assertIn("crosses or touches", P[0]["detail"])
+
+    def test_nested_footprint_contours(self):
+        fps = {"A1": [{"kind": "circle", "center": (20, 20), "radius": 5}], "B1": [{"kind": "circle", "center": (20, 20), "radius": 1}]}
+        _, P = self.run_cutouts(fps, rect_item(0, 0, 50, 50))
+        self.assertIn("B1 (overlaps or nests", P[0]["detail"])
+
+    def test_new_cutout_on_a_footprint_slot(self):
+        fps = {"J1": slot_edges(10, 14, 10, 0.5)}
+        _, P = self.run_cutouts(fps, rect_item(0, 0, 50, 50), [dict(circle_item(12, 10, 0.4), kind="circle")])
+        self.assertEqual([(p["code"], p["field"]) for p in P], [("E_BOARD_GEOMETRY", "cutouts[0]")])
+        self.assertIn("J1", P[0]["detail"])
+        _, P = self.run_cutouts(fps, rect_item(0, 0, 50, 50), [dict(circle_item(30, 30, 4), kind="circle")])
+        self.assertFalse(P)
+
+
 HOLE = {"x": 4, "y": 5, "drill": 3.2, "pad": 6.4, "type": "pth", "net": "GND"}
 ZONE = {"net": "GND", "clearance": 0.3, "minWidth": 0.25, "thermalGap": 0.5, "spokeWidth": 0.4, "connection": "thermal",
         "priority": 2, "name": "gnd", "fill": True}

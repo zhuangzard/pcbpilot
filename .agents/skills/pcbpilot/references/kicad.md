@@ -280,6 +280,7 @@ pcbpilot kicad pcb-sync ... --in-place --apply-plan plan.json --revision <rev>
 pcbpilot kicad rules --pcb board.kicad_pcb --intent intent.json --sim sim.json [--requirements currents.json] \
     --plan [--plan-out rules.plan.json]                                   # 只读：打印将写的规则
 pcbpilot kicad rules … --apply [--replace <用户类或规则名>]                 # 计划 + 写入 + KiCad 回读
+pcbpilot kicad rules … --apply --keep-stricter                            # 保留用户规则，按“谁更严谁生效”排规则顺序
 pcbpilot kicad rules … --apply-plan rules.plan.json --revision <rev>      # 只写评审过的计划
 pcbpilot kicad rules … --check [--stage placed|routed] [--report r.json]  # 只读门禁（可布过线）
 ```
@@ -329,7 +330,7 @@ pcbpilot kicad rules … --check [--stage placed|routed] [--report r.json]  # �
   advisory warn，preflight 会判 fail，要自己改，绝不降契约）。`--check --contract` 按板现状判，低于契约 = fail。
   契约文件进 `inputs`（role `contract`），变了 revision 就变。
 - **最小线宽是 DRC 规则**：网络类线宽只是布线默认值，不是下限。`.kicad_dru` 里加 `# pcbpilot-rules:begin … end`
-  块，放在**最后**（用户规则 → route 块 `# pcbpilot:begin` → 本块）：KiCad 取最后匹配的规则，route 块的 inner 规则在
+  块，放在**最后**（[`--keep-stricter` 的 head 块 `# pcbpilot-rules-head:begin` →] 用户规则 → route 块 `# pcbpilot:begin` → 本块）：KiCad 取最后匹配的规则，route 块的 inner 规则在
   意图没写 `min` 时只带板最小线宽，排在后面会把下限削弱到板最小值；route 重跑把自己的块追加到末尾后，`kicad route`
   会把本块移回最后。每个 PP 类 `(layer outer)` / `(layer inner)`（有内层时）`track_width (min <下限>) (opt <线宽>)`；
   下限只由类的取值决定（`expectedFloor`，不从生成的文本反推）= 意图 `widthMil.min`（允许颈缩的极限），没有则为该层全线宽；
@@ -369,6 +370,43 @@ pcbpilot 生成的名字（`class-name`，重跑会删掉它）、用户 `.kicad
 clearance 会替换类间距，也会被对规则替换）；有绝缘对时 creepage、有域边距时 edge_clearance 一律冲突。只能按名
 `--replace <名>` 放行：被替换的用户 `.kicad_dru` 规则从文件删除；被替换的用户类保留但被 PP 类压过（前缀冲突的会被删除）。
 不冲突的用户类和规则原样保留。
+
+**`--keep-stricter`（可选，`--plan` / `--apply` / `--apply-plan` 都可带）：保留用户规则，靠规则顺序让更严的值生效，
+不删也不改任何用户规则文本。** 只处理生成的 clearance / creepage（绝缘对规则 `pcbpilot isolation …`）和
+edge_clearance（`pcbpilot edge …`）与用户同类型规则的 `dru-weakened` 冲突；track_width 冲突、用户类冲突不归它管，
+仍要 `--replace` 或改意图。逐条比较用户规则的 `min` 与可能同时匹配的生成规则（证明不了不重叠就按重叠算）：
+
+- **用户值 ≥ 生成值**：生成的那条最小值写进第二个自有块 `# pcbpilot-rules-head:begin … # pcbpilot-rules-head:end`，
+  紧跟 `(version …)`、排在用户规则**之前**（规则名 `pcbpilot-rules floor <isolation A|B 或 edge 类> <约束类型>`，
+  条件与原生成规则相同），并从末尾的 route 块里去掉这一条约束。KiCad 取最后匹配的规则：两者都匹配处用户的更严值
+  生效，其余地方生成的最小值照旧。
+- **用户值 < 生成值**：生成规则留在最后（和今天一样，生成值生效），用户规则原样保留，冲突记为已解决。
+- **生成规则必须留在最后、同时又有更严的用户规则**（同一条生成规则既要排在一条较弱的用户规则之后、又要排在
+  一条较严的用户规则之前；或另一条较弱的生成规则可能匹配同样的物体且必须留在最后）：生成规则留在最后，并在
+  route 块末尾（所有生成规则之后）再写一条**承接规则** `pcbpilot carry <约束类型> <isolation A|B 或 edge 类> <序号>`，条件 =
+  `(用户规则条件) && (生成规则条件)`（用户条件引用了 A/B 时写成 `((用户条件) || (A/B 对调后的用户条件)) && (生成规则条件)`：KiCad 会把两个物体正反各试一次，两条规则可能各在一个方向上匹配），`min` = 用户值与生成值中较大者，用户规则带 `(layer …)` 时一并带上。只在两条
+  规则都匹配处生效，所以更严的用户值在那里仍然生效，别处不受影响；用户规则文本不动。从第一条更严的用户规则起，
+  之后与该生成规则重叠的同类型用户规则各写一条；全部承接规则按用户规则在文件里的顺序排列，保持用户自己的先后关系。head 块此时也会写出（哪怕没有
+  移动任何规则），用注释行记录每条承接规则。
+- **仍是冲突并拒绝写入**（文本写明哪条用户规则、哪条生成规则、为什么）：用户值无法比较（表达式、未知单位、没有
+  `min`）；用户规则 `severity` 不是 error 且更严；需要承接的用户规则条件里有双引号或反斜杠（无法写进另一条规则的
+  条件）；承接值低于另一条可能匹配同样物体的生成规则的最小值（承接规则排在所有生成规则之后，会把它压低）；
+  用户 clearance 低于它可能覆盖的计划类间距（自定义规则在匹配处替换网络类间距，换顺序救不了）。
+
+报告：`conflicts[]` 每条带 `userVsGenerated`（stricter / weaker / equal / mixed / unknown），已按顺序解决的带
+`resolved: "keep-stricter"`；顶层 `keepStricter` = `headBlock[]`（移到前面的生成约束 + `yieldsTo` 让位给哪些用户规则）、
+`carriedAfter[]`（承接规则：`rule` / `generated` / `type` / `minNm` / `userRule` / `userMinNm` / `condition` / `layer`）、
+`generatedStaysLast[]`（留在最后的生成约束 + `winsOver`）、`unresolved[]`；stderr 逐条打印同样内容。不带该参数时行为不变，
+只是 `dru-weakened` 的文本会同时给出 `--keep-stricter` 与 `--replace` 两条出路并标明更严 / 更弱。revision 绑定该选择。
+重复 `--apply --keep-stricter` 文件不变。之后**不带**该参数的运行：冲突重新报出并拒绝（文件不动，现有顺序仍让用户的
+更严值生效）；一旦写入（`--replace` 掉那条用户规则，或用户自己删了它），head 块被移除，生成值回到末尾。
+`--check` 看到板上有 head 块就按顺序语义校验（head 规则之后任何可能匹配的规则都必须不低于计划值且为 error；
+承接规则必须逐条与计划一致——位置、条件、层、值——多出、缺失或被改弱都报 `effective-rules`；已移到 head 块的约束
+若又出现在 route 块、或 head 块里有计划外的规则，同样报出）。
+`kicad route` 的 netclasses 步骤会把完整的 route 块重新追加到末尾，route 随后按同一分析把 head 块承载的约束再从
+route 块里去掉、把承接规则写回；如果用户规则或推导值变了、重算结果与板上的 head 块不一致 → `RULES_STALE`，重跑
+`kicad rules --apply --keep-stricter`。限制：用户更严规则生效处，绝缘对探针在去掉 pcbpilot 块的对照里同样报错，
+因此不计入“可归因于 `.kicad_dru`”的探针（靠线宽探针证明 `.kicad_dru` 被加载）。
 
 **验证**（R1：各自三态、分开报告；pass 只证明这些检查，不等于可投板）：
 - `plan-coverage`：每网线宽依据是否完整（上面的 pass / cannot-check / fail）。
@@ -523,7 +561,7 @@ pcbpilot kicad route --pcb board-b-v5a.kicad_pcb --intent intent.json --sim sim.
    制造合法性（环宽、孔、径 对板子最小值、自定义规则和合同）与首选尺寸（类过孔）分开判：不合法一律失败，输入板已有的过孔也失败但绝不改；尺寸不符只有 input（列在 Info）和声明的例外放行，
    route 自己的意图逃逸过孔是内建的 neckdown-escape 例外（列在 Info）。`--via-policy FILE`（JSON：`contract` 合同路径；`exceptions` 每项 `kind` = neckdown-escape / stitching（要 `nets`，只免首选尺寸）或 microvia / blind-buried（要 `minDrillMm`、`minAnnularMm`，非通孔按它判合法性），都要 `reason`）。
    孔径不小于外径在任何跨层上都是失败（退出 6），未确认跨层的 cannot-check 证据照留；合法性、首选尺寸与尺寸步骤同一容差 100 nm。来源 unknown 不享受任何例外（microvia / blind-buried 声明对它也无效）；跨层未确认为通孔（层 id 缺失或为 0、非通孔）且未声明的、带条件或数值读不出的 via_diameter / hole_size / annular_width 自定义规则判 cannot-check。
-   **DRC 时限**：kicad-cli DRC 的时限按板文件大小放大（15 min + 每 MB 2 min，最多 2 h；`PCBPILOT_KICAD_DRC_TIMEOUT` 覆盖），
+   **DRC 时限**：kicad-cli DRC 的时限按板文件和工程自定义规则文件的大小放大（15 min + 每 MB 板文件 2 min + 板旁同名 `.kicad_dru` 每 100 kB 5 min，最多 2 h；`PCBPILOT_KICAD_DRC_TIMEOUT` 覆盖；`kicad drc --timeout` / `kicad fab --preflight --drc-timeout` 优先于环境变量），
    超时报 `kicad-cli pcb drc on <板> timed out after <时限>`。铺铜后的 starved-thermal 修复、widen 的 DRC 回退是可选步骤：
    它们的 DRC 没跑成（超时）时记一个 cannot-check 门禁（`starved-thermals` / `widen-drc`），照样写 routed 板、跑其余门禁，
    不再中止整个 route。
@@ -603,6 +641,9 @@ pcbpilot kicad drc --pcb board.kicad_pcb --baseline drc/drc-report.json --waiver
   用 pcbpilot 的隔离 KiCad 配置（空的全局库表，kicadenv.go）运行 `kicad-cli pcb drc --format json --severity-all`；工程自己的
   `fp-lib-table` / `sym-lib-table` 随副本带上，`${KIPRJMOD}` 指回原目录，所以工程库照常解析，只在全局库里的封装出 `lib_footprint_*`
   环境类警告。工程目录不新增 `.kicad_prl`、锁文件或任何改动（演示板副本前后哈希一致）。子图在工程目录外 → cannot-check。
+- **时限 `--timeout <时长>`**（如 `90m`）：每次 kicad-cli 运行的时限，默认 30 min + 每 MB 板文件 2 min + 同名 `.kicad_dru` 每 100 kB 5 min，最多 2 h
+  （几千条自定义规则的 `.kicad_dru` 会让 DRC 慢很多）。优先级：`--timeout` > 环境变量 `PCBPILOT_KICAD_DRC_TIMEOUT` > 计算值；非正值直接报错。
+  超时 = cannot-check（退出 5），报错写明时限、`.kicad_dru` 大小（≥ 100 kB 时）以及这两个调节办法。`kicad fab --preflight` 用 `--drc-timeout`。
 - **`--sch ROOT.kicad_sch`**（v0.12.2，隐含 `--schematic-parity`）：板写到了别的目录（`kicad place --out place/…`）时，
   把该根原理图及其层次复制到副本里板的旁边（根图改名为 `<板>.kicad_sch`），parity 照常比对；不给时只认板旁边的同名根图，
   没有就是 cannot-check。

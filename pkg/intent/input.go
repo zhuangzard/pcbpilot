@@ -100,7 +100,7 @@ func buildBoard(d *powersim.Design, rules pcbauto.Rules, layers int) (*pcbauto.B
 	b := &pcbauto.Board{Rules: rules, CopperLayers: layers}
 	for i, p := range d.Parts {
 		dev := firstNonEmpty(p.MPN, p.DeviceName, p.Value)
-		part := &pcbauto.Part{Ref: p.Ref, Device: dev, Pos: pcbauto.Point{X: float64(i%20) * 2000, Y: float64(i/20) * 2000}, Side: pcbauto.LayerTop}
+		part := &pcbauto.Part{Ref: p.Ref, Device: dev, Value: strings.TrimSpace(p.Value), Pos: pcbauto.Point{X: float64(i%20) * 2000, Y: float64(i/20) * 2000}, Side: pcbauto.LayerTop}
 		for j, pin := range p.Pins {
 			c := pcbauto.Point{X: part.Pos.X + float64(j%10)*50, Y: part.Pos.Y + float64(j/10)*50}
 			part.Pads = append(part.Pads, &pcbauto.Pad{Part: p.Ref, Number: pin.Number, Net: pin.Net, Layer: pcbauto.LayerTop,

@@ -62,8 +62,21 @@ type PowerSpec struct {
 	// widths/currents/vias/clearances and net classes win over inference,
 	// and its domains/pairs drive the isolation rules.
 	Intent *Intent `json:"-"`
+	// Declared are reference domains the caller already knows (the intent
+	// spec's "domains"): they win over what the netlist suggests, see
+	// DeclaredDomain.
+	Declared []DeclaredDomain `json:"-"`
 	// boost is IR-drop feedback for a re-route (see simBoost).
 	boost map[string]simBoost
+}
+
+// DeclaredDomain is a set of nets the caller declares to be one reference
+// domain. Grounds declared in different domains are never joined, whatever
+// part sits between them, and a ground of a domain that is not Line (SELV,
+// isolated, patient …) is never tied to the AC line.
+type DeclaredDomain struct {
+	Nets []string
+	Line bool
 }
 
 // NetPlan is the per-net electrical decision.
@@ -382,6 +395,8 @@ type Analysis struct {
 	// rated: the currents come from an intent or a simulation, so a via
 	// array's count is an electrical requirement (viafix.go), not a hint.
 	rated bool
+	// declared are PowerSpec.Declared (reference domains that win over the netlist).
+	declared []DeclaredDomain
 }
 
 // SimSummary is the provenance of the simulated currents.
@@ -422,6 +437,7 @@ func Analyze(b *Board, spec PowerSpec, stack *Stackup) *Analysis {
 	r := b.Rules
 	a := &Analysis{ByNet: map[string]*NetPlan{}, TempRiseC: spec.TempRiseC, IRBudget: DefaultIRBudget()}
 	a.rated = spec.Intent != nil || spec.Sim != nil
+	a.declared = spec.Declared
 	if spec.Intent != nil {
 		a.Iso = buildIsoRules(b, spec.Intent)
 		a.spans = intentSpans(b, spec.Intent)
