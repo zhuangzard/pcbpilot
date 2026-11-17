@@ -21,10 +21,18 @@ import (
 // ZoneFill is one placement zone's room: the courtyards (plus half the
 // placement spacing) of the movable parts assigned to it and of the fixed
 // parts inside it, against the zone's area inside the placement region
-// minus keep-outs and holes (mm²).
+// minus keep-outs and holes (mm²). Room is counted per board side; the
+// numbers here are the fuller side's, Sides has both when they differ.
 type ZoneFill struct {
-	Domain  string  `json:"domain"` // "board": parts without a domain zone
-	Parts   int     `json:"parts"`
+	Domain string `json:"domain"` // "board": parts without a domain zone
+	// Zone numbers the rectangle (from 1, --mech order) when the domain or
+	// block was given several.
+	Zone  int `json:"zone,omitempty"`
+	Parts int `json:"parts"`
+	// Side is the fuller side ("top" / "bottom") the numbers below are of;
+	// empty when the bottom side holds none of the zone's parts and offers
+	// the same room.
+	Side    string  `json:"side,omitempty"`
 	NeedMm2 float64 `json:"needMm2"`
 	// FixedMm2 is the part of NeedMm2 that parts which do not move (fixed,
 	// mechanical) and bridges inside the zone take.
@@ -42,6 +50,22 @@ type ZoneFill struct {
 	// Illegal counts the illegal placements (overlaps, zone exits) of its
 	// parts in the final placement.
 	Illegal int `json:"illegal,omitempty"`
+	// Sides is the room per board side (top, bottom).
+	Sides []ZoneSideFill `json:"sides,omitempty"`
+}
+
+// ZoneSideFill is one board side of a ZoneFill: the zone's parts on that
+// side (through-hole parts count on both), what they and the parts that do
+// not move need, and the area the side's keep-outs and holes leave.
+type ZoneSideFill struct {
+	Side     string   `json:"side"`
+	Parts    int      `json:"parts"`
+	NeedMm2  float64  `json:"needMm2"`
+	FixedMm2 float64  `json:"fixedMm2,omitempty"`
+	OfferMm2 float64  `json:"offerMm2"`
+	Fill     *float64 `json:"fill"`
+	OverFull bool     `json:"overFull,omitempty"`
+	Tight    bool     `json:"tight,omitempty"`
 }
 
 const mil2ToMm2 = 0.00064516
@@ -61,18 +85,45 @@ const courtyardGap = 2.0
 
 // overlapPairs are the colliding part pairs whose courtyards overlap by
 // more than 1 mil² (metrics' Overlaps; resolveOverlaps can move only the
-// movable ones).
+// movable ones). A pair of two parts that do not move is not among them:
+// see fixedOverlapList.
 func (pl *placer) overlapPairs() [][2]*Part {
 	var out [][2]*Part
 	parts := pl.b.Parts
 	for i, p := range parts {
 		bi := p.Body()
 		for _, q := range parts[i+1:] {
-			if collide(p, q) && bi.OverlapArea(q.Body()) > 1 {
+			if !(p.Fixed && q.Fixed) && collide(p, q) && bi.OverlapArea(q.Body()) > 1 {
 				out = append(out, [2]*Part{p, q})
 			}
 		}
 	}
+	return out
+}
+
+// fixedOverlapList names the courtyard overlaps between two parts that do
+// not move (metrics' FixedOverlaps), sorted: the placer can do nothing
+// about them, and a through-hole part's courtyard over a part on the other
+// side is often meant.
+func (pl *placer) fixedOverlapList() []string {
+	var out []string
+	parts := pl.b.Parts
+	for i, p := range parts {
+		if !p.Fixed {
+			continue
+		}
+		bi := p.Body()
+		for _, q := range parts[i+1:] {
+			if q.Fixed && collide(p, q) && bi.OverlapArea(q.Body()) > 1 {
+				a, b := p.Ref, q.Ref
+				if a > b {
+					a, b = b, a
+				}
+				out = append(out, sprintf("overlap %s %s (%.0f mil²)", a, b, bi.OverlapArea(q.Body())))
+			}
+		}
+	}
+	sort.Strings(out)
 	return out
 }
 
@@ -147,7 +198,7 @@ func (pl *placer) resolveTerms(p *Part) resolveCost {
 		}
 	}
 	for _, k := range pl.b.Keepouts {
-		if (k.NoParts || k.NoCopper) && k.Owner != p.Ref && !(pl.c.IsBridge(p.Ref) && !k.NoParts) {
+		if pl.repelsPart(k, p) {
 			c.keepouts = append(c.keepouts, 20*bx.OverlapArea(PolyBounds(k.Poly)))
 		}
 	}
@@ -338,13 +389,15 @@ func (pl *placer) zoneNoWorse(sc *spiralCtx, bx Rect, before resolveCost) bool {
 
 // zoneFill measures every placement zone's room (ZoneFill) and counts the
 // illegal placements of its parts, zones in board order of their first
-// part. res.Zones names the domain zones; the rest is "board".
+// part. res.Zones names the domain and block zones; the rest is "board".
+// Room is measured per board side: a surface-mount part needs room on its
+// own side only, a through-hole part on both, and a keep-out takes room
+// from the sides it names. The zone's headline numbers are its fuller side.
 func (pl *placer) zoneFill(res *PlaceResult, pairs [][2]*Part) []ZoneFill {
 	type zk struct {
-		r           Rect
-		fill        ZoneFill
-		need, fixed float64
-		parts       map[*Part]bool
+		r     Rect
+		fill  ZoneFill
+		parts map[*Part]bool
 	}
 	var zs []*zk
 	byRect := map[Rect]*zk{}
@@ -352,16 +405,34 @@ func (pl *placer) zoneFill(res *PlaceResult, pairs [][2]*Part) []ZoneFill {
 	for _, p := range pl.movable {
 		movable[p] = true
 	}
-	name := func(r Rect) string {
+	name := func(r Rect) (string, int) {
 		if r == pl.region {
-			return "board"
+			return "board", 0
 		}
 		for _, z := range res.Zones {
-			if z.Rect == r && z.Domain != "" {
-				return z.Domain
+			id := z.Domain
+			if z.Block != "" {
+				id = z.Block
 			}
+			if z.Rect != r || id == "" {
+				continue
+			}
+			// Its number among the rectangles of the same domain or block.
+			n, at := 0, 0
+			for _, o := range res.Zones {
+				if o.Domain == z.Domain && o.Block == z.Block {
+					n++
+					if o.Rect == r && at == 0 {
+						at = n
+					}
+				}
+			}
+			if n < 2 {
+				at = 0
+			}
+			return id, at
 		}
-		return "zone"
+		return "zone", 0
 	}
 	for _, p := range pl.movable {
 		if pl.c.IsBridge(p.Ref) {
@@ -370,50 +441,57 @@ func (pl *placer) zoneFill(res *PlaceResult, pairs [][2]*Part) []ZoneFill {
 		r := pl.zoneOf[p]
 		k := byRect[r]
 		if k == nil {
-			k = &zk{r: r, fill: ZoneFill{Domain: name(r)}, parts: map[*Part]bool{}}
+			d, n := name(r)
+			k = &zk{r: r, fill: ZoneFill{Domain: d, Zone: n}, parts: map[*Part]bool{}}
 			byRect[r] = k
 			zs = append(zs, k)
 		}
 		k.fill.Parts++
 		k.parts[p] = true
-		k.need += p.Body().Expand(pl.spacing / 2).Area()
 	}
+	mm2 := func(a float64) float64 { return math.Round(a*mil2ToMm2*10) / 10 }
 	for _, k := range zs {
-		in := k.r
-		if in != pl.region {
-			// The zone's part inside the placement region.
-			in = Rect{math.Max(in.MinX, pl.region.MinX), math.Max(in.MinY, pl.region.MinY), math.Min(in.MaxX, pl.region.MaxX), math.Min(in.MaxY, pl.region.MaxY)}
-		}
-		offer := in.Area()
-		for _, kp := range pl.b.Keepouts {
-			if kp.NoParts || kp.NoCopper {
-				offer -= in.OverlapArea(PolyBounds(kp.Poly))
+		in := pl.inRegion(k.r) // the zone's part inside the placement region
+		var sides []ZoneSideFill
+		worst, bottomUsed := 0, false
+		for _, side := range []int{LayerTop, LayerBottom} {
+			sf := ZoneSideFill{Side: sideName(side)}
+			need := 0.0
+			for _, p := range pl.movable {
+				if k.parts[p] && (p.Side == side || hasTHT(p)) {
+					need += p.Body().Expand(pl.spacing / 2).Area()
+					sf.Parts++
+				}
+			}
+			// Keep-outs and holes come off the offer; parts that do not
+			// move and bridges take the rest of their room from the need
+			// (zoneOccupied counts them alike).
+			blocked, fixedRs := pl.sideBlockers(in, side, movable, k.parts)
+			off := unionArea(in, blocked)
+			fixed := unionArea(in, append(append([]Rect(nil), blocked...), fixedRs...)) - off
+			offer := math.Max(0, in.Area()-off)
+			need += fixed
+			sf.NeedMm2, sf.FixedMm2, sf.OfferMm2 = mm2(need), mm2(fixed), mm2(offer)
+			if offer > 0 {
+				f := math.Round(need/offer*100) / 100
+				sf.Fill = &f
+				sf.OverFull, sf.Tight = need > offer, f > ZoneTightFill
+			} else {
+				sf.OverFull = need > 0
+			}
+			if side == LayerBottom && (sf.Parts > 0 || fixed > 0) {
+				bottomUsed = true
+			}
+			sides = append(sides, sf)
+			if len(sides) > 1 && sf.fuller(sides[worst]) {
+				worst = len(sides) - 1
 			}
 		}
-		for _, h := range pl.b.Holes {
-			if h.Owner == "" {
-				offer -= in.OverlapArea(h.Bounds().Expand(h.Keep))
-			}
-		}
-		for _, q := range pl.b.Parts {
-			if !k.parts[q] && (!movable[q] || pl.c.IsBridge(q.Ref)) {
-				// Parts that do not move and bridges take their room from
-				// the zone (zoneOccupied counts them alike).
-				a := in.OverlapArea(q.Body().Expand(pl.spacing / 2))
-				k.need += a
-				k.fixed += a
-			}
-		}
-		offer = math.Max(offer, 0)
-		k.fill.NeedMm2 = math.Round(k.need*mil2ToMm2*10) / 10
-		k.fill.OfferMm2 = math.Round(offer*mil2ToMm2*10) / 10
-		k.fill.FixedMm2 = math.Round(k.fixed*mil2ToMm2*10) / 10
-		if offer > 0 {
-			f := math.Round(k.need/offer*100) / 100
-			k.fill.Fill = &f
-			k.fill.OverFull, k.fill.Tight = k.need > offer, f > ZoneTightFill
-		} else {
-			k.fill.OverFull = k.need > 0
+		w := sides[worst]
+		k.fill.NeedMm2, k.fill.FixedMm2, k.fill.OfferMm2, k.fill.Fill = w.NeedMm2, w.FixedMm2, w.OfferMm2, w.Fill
+		k.fill.OverFull, k.fill.Tight = w.OverFull, w.Tight
+		if bottomUsed || sides[0].OfferMm2 != sides[1].OfferMm2 {
+			k.fill.Side, k.fill.Sides = w.Side, sides
 		}
 		for _, pr := range pairs {
 			if k.parts[pr[0]] || k.parts[pr[1]] {
@@ -431,6 +509,25 @@ func (pl *placer) zoneFill(res *PlaceResult, pairs [][2]*Part) []ZoneFill {
 		out[i] = k.fill
 	}
 	return out
+}
+
+func sideName(side int) string {
+	if side == LayerBottom {
+		return "bottom"
+	}
+	return "top"
+}
+
+// fuller reports whether side s is fuller than o: over-full first, then
+// the higher fill.
+func (s ZoneSideFill) fuller(o ZoneSideFill) bool {
+	if s.OverFull != o.OverFull {
+		return s.OverFull
+	}
+	if s.Fill == nil || o.Fill == nil {
+		return s.Fill == nil && o.Fill != nil && s.NeedMm2 > 0
+	}
+	return *s.Fill > *o.Fill
 }
 
 // illegalList names every illegal placement of the final layout: the
@@ -462,7 +559,7 @@ func (pl *placer) illegalList(pairs [][2]*Part) []string {
 			out = append(out, "outside its zone "+p.Ref)
 		}
 		for _, k := range pl.b.Keepouts {
-			if k.NoParts && k.Owner != p.Ref && bi.OverlapArea(PolyBounds(k.Poly)) > 1 {
+			if noPartsOn(k, p) && bi.OverlapArea(PolyBounds(k.Poly)) > 1 {
 				out = append(out, "inside a keep-out "+p.Ref)
 				break
 			}

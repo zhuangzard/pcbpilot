@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zhuangzard/pcbpilot/internal/kicad"
 )
@@ -19,6 +20,9 @@ func fakeKiCadDRC(args []string) int {
 		if args[i] == "-o" {
 			out = args[i+1]
 		}
+	}
+	if ms, _ := strconv.Atoi(os.Getenv("PCBPILOT_FAKE_DRC_SLEEP_MS")); ms > 0 {
+		time.Sleep(time.Duration(ms) * time.Millisecond) // a DRC that outlives its limit
 	}
 	b, err := os.ReadFile(os.Getenv("PCBPILOT_FAKE_KICAD_DRC"))
 	if err != nil || out == "" || os.WriteFile(out, b, 0o644) != nil {

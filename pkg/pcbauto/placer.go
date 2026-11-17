@@ -4,6 +4,7 @@ import (
 	"math"
 	"math/rand"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -97,11 +98,16 @@ type PlaceMetrics struct {
 	WirelengthIn float64 `json:"weightedWirelengthIn"`
 	StartWireIn  float64 `json:"startWirelengthIn"`
 	Overlaps     int     `json:"overlaps"`
-	OutOfBoard   int     `json:"outOfBoard"`
-	OutOfZone    int     `json:"outOfZone"`
-	KeepoutHits  int     `json:"keepoutHits"`
-	HeightHits   int     `json:"heightHits"`
-	DecapMeanMil float64 `json:"decapToPinMeanMil"`
+	// FixedOverlaps are the courtyard overlaps between two parts that do
+	// not move (locked, fixed by the mechanics): where their owner put
+	// them, not a placement of this run, so they are named and not counted
+	// as illegal.
+	FixedOverlaps int     `json:"fixedOverlaps,omitempty"`
+	OutOfBoard    int     `json:"outOfBoard"`
+	OutOfZone     int     `json:"outOfZone"`
+	KeepoutHits   int     `json:"keepoutHits"`
+	HeightHits    int     `json:"heightHits"`
+	DecapMeanMil  float64 `json:"decapToPinMeanMil"`
 	// TetherExcessMil sums how far every tethered auxiliary sits beyond its
 	// role's slack from the pin it serves (0 = every relation satisfied).
 	TetherExcessMil float64 `json:"tetherExcessMil"`
@@ -136,6 +142,9 @@ type PlaceResult struct {
 	// placement zone's room.
 	Illegal  []string   `json:"illegal,omitempty"`
 	ZoneFill []ZoneFill `json:"zoneFill,omitempty"`
+	// FixedOverlaps names the courtyard overlaps between two parts that do
+	// not move (see PlaceMetrics.FixedOverlaps).
+	FixedOverlaps []string `json:"fixedOverlaps,omitempty"`
 	// Aesthetics is what the aesthetics stage moved (nil when skipped).
 	Aesthetics *AesPlaceReport `json:"aesthetics,omitempty"`
 }
@@ -178,12 +187,21 @@ type placer struct {
 	reserve  []portReserve   // connector pin-side strips kept for the port's own parts
 	pairOf   map[*Part]*Part // same step of the other half of a diff pair
 	hardOnly bool            // partCost: constraint terms only (legalisation)
-	apart    [][2]*Part      // core pairs to keep apart (noisy vs sensitive)
-	spacing  float64
-	bucket   *bucketGrid
-	boxes    map[*Part]Rect
-	rudy     *rudy // congestion grid, live during annealing only
-	intimate map[[2]*Part]bool
+	// spiralRings caps the spiral's rings (0: spiralMaxRing).
+	spiralRings int
+	// isoCost's lookups, built as parts are first asked about: each pad's
+	// isolation domain by index, the pair of two domain indices, and two
+	// buffers of pad bounds.
+	isoDoms      map[*Part][]int32
+	isoDomIdx    map[string]int32
+	isoPairs     [][]*IsoPair
+	isoPB, isoQB []Rect
+	apart        [][2]*Part // core pairs to keep apart (noisy vs sensitive)
+	spacing      float64
+	bucket       *bucketGrid
+	boxes        map[*Part]Rect
+	rudy         *rudy // congestion grid, live during annealing only
+	intimate     map[[2]*Part]bool
 	// intimateOf[p] are p's intimate partners (intimate, indexed by part:
 	// the overlap term asks once per part, not once per neighbour).
 	intimateOf map[*Part]map[*Part]bool
@@ -358,6 +376,9 @@ func Place(b *Board, an *Analysis, c *Circuit, m *Mechanics, opt PlaceOptions) (
 	pl.metrics(res)
 	pairs := pl.overlapPairs()
 	res.Illegal = pl.illegalList(pairs)
+	if res.FixedOverlaps = pl.fixedOverlapList(); len(res.FixedOverlaps) > 0 {
+		res.Notes = append(res.Notes, sprintf("%d courtyard overlap(s) between parts that do not move (locked or fixed): left where they are and not counted as illegal — see fixedOverlaps, and let DRC judge them", len(res.FixedOverlaps)))
+	}
 	res.ZoneFill = pl.zoneFill(res, pairs)
 	for _, z := range res.ZoneFill {
 		switch {
@@ -642,6 +663,10 @@ func coreOf(c *Circuit, ref string) string {
 func (pl *placer) zones(res *PlaceResult) {
 	b, c := pl.b, pl.c
 	userZone := map[string]Rect{}
+	// Every rectangle a domain or a block was given, in --mech order: one
+	// is the zone itself, several are shared out between the parts
+	// (shareRects). A block's rectangles go before its domain's.
+	domRects, blockRects := map[string][]Rect{}, map[string][]Rect{}
 	// A re-placement (place/route loop pass) replaces the previous pass's
 	// isolation strips instead of stacking another copy.
 	ks := b.Keepouts[:0]
@@ -653,8 +678,11 @@ func (pl *placer) zones(res *PlaceResult) {
 	b.Keepouts = ks
 	stripOf := map[[2]string]Rect{}
 	for _, z := range pl.m.Zones {
-		if z.Domain != "" {
+		if z.Block != "" {
+			blockRects[z.Block] = append(blockRects[z.Block], z.Rect)
+		} else if z.Domain != "" {
 			userZone[z.Domain] = z.Rect
+			domRects[z.Domain] = append(domRects[z.Domain], z.Rect)
 		}
 		res.Zones = append(res.Zones, z)
 	}
@@ -729,11 +757,34 @@ func (pl *placer) zones(res *PlaceResult) {
 			x += w + gap
 		}
 	}
+	type shareKey struct {
+		block bool
+		id    string
+	}
+	shared := map[shareKey][]*Part{}
+	var sharedOrder []shareKey
 	for _, p := range pl.movable {
 		d := c.DomainOf[p.Ref]
-		if r, ok := userZone[d]; ok && !c.IsBridge(p.Ref) {
-			pl.zoneOf[p] = r
-			continue
+		if !c.IsBridge(p.Ref) {
+			k, rs := shareKey{true, c.BlockOf[p.Ref]}, blockRects[c.BlockOf[p.Ref]]
+			if k.id == "" || len(rs) == 0 {
+				k, rs = shareKey{false, d}, domRects[d]
+			}
+			if len(rs) > 1 {
+				if shared[k] == nil {
+					sharedOrder = append(sharedOrder, k)
+				}
+				shared[k] = append(shared[k], p)
+				continue
+			}
+			if len(rs) == 1 {
+				pl.zoneOf[p] = rs[0]
+				continue
+			}
+			if r, ok := userZone[d]; ok {
+				pl.zoneOf[p] = r
+				continue
+			}
 		}
 		pl.zoneOf[p] = pl.region
 		if c.IsBridge(p.Ref) && len(res.Barriers) > 0 {
@@ -747,6 +798,18 @@ func (pl *placer) zones(res *PlaceResult) {
 			}
 			pl.zoneOf[p] = Rect{s.Center().X - 1, pl.region.MinY, s.Center().X + 1, pl.region.MaxY}
 		}
+	}
+	for _, k := range sharedOrder {
+		rs, what := domRects[k.id], "domain"
+		if k.block {
+			rs, what = blockRects[k.id], "block"
+		}
+		counts := pl.shareRects(rs, shared[k], !k.block)
+		ns := make([]string, len(counts))
+		for i, n := range counts {
+			ns[i] = strconv.Itoa(n)
+		}
+		res.Notes = append(res.Notes, sprintf("%s %s: its %d parts are shared between its %d zone rectangles, in --mech order %s (whole blocks together, each nearest what it connects to)", what, k.id, len(shared[k]), len(rs), strings.Join(ns, " / ")))
 	}
 }
 
@@ -981,12 +1044,10 @@ func (pl *placer) partCostLim(p *Part, lim float64) float64 {
 		}
 	}
 	for _, k := range pl.b.Keepouts {
-		if (k.NoParts || k.NoCopper) && k.Owner != p.Ref {
-			kb := PolyBounds(k.Poly)
-			if pl.c.IsBridge(p.Ref) && !k.NoParts {
-				continue // bridges straddle isolation strips by design
-			}
-			cost += 20 * bx.OverlapArea(kb)
+		// Not its own, on its side; bridges straddle isolation strips by
+		// design (repelsPart).
+		if pl.repelsPart(k, p) {
+			cost += 20 * bx.OverlapArea(PolyBounds(k.Poly))
 		}
 	}
 	for _, h := range pl.b.Holes {
@@ -1085,12 +1146,8 @@ func (pl *placer) newSpiralCtx(p *Part) *spiralCtx {
 	bridge := pl.c.IsBridge(p.Ref)
 	sc.zoneBody = !bridge && sc.z != pl.region
 	for _, k := range pl.b.Keepouts {
-		if (k.NoParts || k.NoCopper) && k.Owner != p.Ref {
-			kb := PolyBounds(k.Poly)
-			if bridge && !k.NoParts {
-				continue
-			}
-			sc.keepouts = append(sc.keepouts, kb)
+		if pl.repelsPart(k, p) {
+			sc.keepouts = append(sc.keepouts, PolyBounds(k.Poly))
 		}
 	}
 	for _, h := range pl.b.Holes {
@@ -1752,8 +1809,19 @@ func (pl *placer) legalise() {
 	// (a transformer straddling the isolation strip) costs 10–40 s; with its
 	// local cost unchanged the same search finds the same nothing.
 	stuck := map[*Part]float64{}
+	// A large board seats each part through the free-space grid first
+	// (placer_grid.go); the spiral is left to lessen what found no room.
+	var grid *freeGrid
+	if len(pl.movable) >= gridLegaliseParts {
+		grid = pl.newFreeGrid()
+	}
+	pl.spiralRings = 0
+	defer func() { pl.spiralRings = 0 }()
 	for pass := 0; pass < 3 && !pl.overBudget(); pass++ {
 		moved := false
+		if grid != nil {
+			clear(grid.full)
+		}
 		for _, p := range order {
 			if pl.overBudget() {
 				break
@@ -1765,7 +1833,28 @@ func (pl *placer) legalise() {
 			if c, ok := stuck[p]; ok && c == hc {
 				continue
 			}
-			if pl.spiral(p) {
+			if grid != nil {
+				if pl.gridSeat(grid, p) {
+					grid.put(p, pl.boxes[p])
+					moved = true
+					delete(stuck, p)
+					continue
+				}
+				grid.take(p)
+				pl.spiralRings = gridSpiralRings
+				if pl.c.IsBridge(p.Ref) {
+					pl.spiralRings = 0
+				}
+			}
+			at := pl.boxes[p]
+			ok := pl.spiral(p)
+			if grid != nil {
+				grid.put(p, pl.boxes[p])
+				if pl.boxes[p] != at { // moved or turned
+					clear(grid.full) // the room it left may be what another needs
+				}
+			}
+			if ok {
 				moved = true
 				delete(stuck, p)
 			} else {
@@ -1858,8 +1947,17 @@ func (pl *placer) spiral(p *Part) bool {
 	// there from its own spot, and every ring is a full search for nothing.
 	// Spiral around the nearest point of the zone instead.
 	centre := orig
+	rings := spiralMaxRing
 	if z, ok := pl.zoneOf[p]; ok {
 		centre = spiralCentre(orig, z, step)
+		if pl.spiralRings > 0 && pl.spiralRings < rings {
+			// A short spiral (legalise, after the grid): from the zone's
+			// nearest point whenever the zone is beyond its reach.
+			rings = pl.spiralRings
+			if in := (Point{clamp(orig.X, z.MinX, z.MaxX), clamp(orig.Y, z.MinY, z.MaxY)}); !z.Empty() && in.Dist(orig) > float64(rings)*step {
+				centre = in
+			}
+		}
 	}
 	for _, rot := range rots {
 		if pl.overBudget() {
@@ -1873,7 +1971,7 @@ func (pl *placer) spiral(p *Part) bool {
 		nrot := normDeg(rot)
 		rel, relOK := p.relBody[nrot]
 		relOK = relOK && len(p.Pads) > 0
-		for ring := 0; ring < spiralMaxRing && bestCost > 1e-6; ring++ {
+		for ring := 0; ring < rings && bestCost > 1e-6; ring++ {
 			r := float64(ring) * step
 			n := max(8*ring, 1)
 			if ring&15 == 15 && pl.overBudget() {
@@ -2258,7 +2356,11 @@ func (pl *placer) metrics(res *PlaceResult) {
 		m.PartAreaIn2 += bi.Area() / 1e6
 		for _, q := range parts[i+1:] {
 			if collide(p, q) && bi.OverlapArea(q.Body()) > 1 {
-				m.Overlaps++
+				if p.Fixed && q.Fixed {
+					m.FixedOverlaps++
+				} else {
+					m.Overlaps++
+				}
 			}
 		}
 		if len(pl.b.Outline) >= 3 && !p.Fixed {
@@ -2272,8 +2374,11 @@ func (pl *placer) metrics(res *PlaceResult) {
 		if z, ok := pl.zoneOf[p]; ok && z != pl.region && !pl.c.IsBridge(p.Ref) && outside(bi, z) > 1 {
 			m.OutOfZone++
 		}
+		// A part that does not move is where its owner put it (as for the
+		// outline above, and in illegalList): a locked connector inside a
+		// keep-out drawn around it failed every placement of the board.
 		for _, k := range pl.b.Keepouts {
-			if k.NoParts && k.Owner != p.Ref && bi.OverlapArea(PolyBounds(k.Poly)) > 1 {
+			if !p.Fixed && noPartsOn(k, p) && bi.OverlapArea(PolyBounds(k.Poly)) > 1 {
 				m.KeepoutHits++
 			}
 		}
@@ -3390,31 +3495,53 @@ func (pl *placer) isoCost(p *Part, bx Rect) float64 {
 	if pl.an == nil || pl.an.Iso == nil || len(pl.an.Iso.Pairs) == 0 {
 		return 0
 	}
-	iso := pl.an.Iso
-	if false {
+	// The legaliser asks this for every pose it tries, of thousands of parts:
+	// the domain of each pad and the pair of two domains are looked up once
+	// (by index, not by net name per pad pair), and a pad's bounds are
+	// computed once per call, not once per pad it is compared with.
+	pd := pl.isoPadDomains(p)
+	if pd == nil {
 		return 0
 	}
+	iso := pl.an.Iso
 	reach := iso.MaxClearanceMil()
 	cost := 0.0
+	pb := pl.isoPB[:0]
+	for _, a := range p.Pads {
+		pb = append(pb, a.Box.Bounds())
+	}
+	pl.isoPB = pb
 	pl.forBucketsOnce(bx.Expand(reach), func(q *Part) bool {
 		if q == p {
 			return true
 		}
-		for _, a := range p.Pads {
-			da := iso.NetDomain[a.Net]
-			if da == "" {
+		qd := pl.isoPadDomains(q)
+		if qd == nil {
+			return true
+		}
+		qb, have := pl.isoQB[:0], false
+		for i, a := range p.Pads {
+			da := pd[i]
+			if da == 0 {
 				continue
 			}
-			for _, c := range q.Pads {
-				ip := iso.Pair(da, iso.NetDomain[c.Net])
+			row := pl.isoPairs[da]
+			for k, c := range q.Pads {
+				ip := row[qd[k]]
 				if ip == nil {
 					continue
+				}
+				if !have {
+					for _, c := range q.Pads {
+						qb = append(qb, c.Box.Bounds())
+					}
+					pl.isoQB, have = qb, true
 				}
 				// Exact pad-to-pad copper gap: the centre-minus-half-width
 				// estimate read an elongated inductor pad as 30 mil narrower
 				// than it is and left it 8 mil inside a Y capacitor's
 				// creepage (flyback stress board).
-				gap := isoPadGap(a, c, ip.CreepageMil)
+				gap := isoPadGapIn(a, c, pb[i], qb[k], ip.CreepageMil)
 				if short := ip.CreepageMil - gap; short > 0 {
 					cost += 800 * short
 				}
@@ -3425,12 +3552,60 @@ func (pl *placer) isoCost(p *Part, bx Rect) float64 {
 	return cost
 }
 
+// isoPadDomains is the isolation domain of each pad of p, as an index into
+// pl.isoPairs (0: none); nil when no pad of p is in a domain. Nets do not
+// change while a board is placed, so it is worked out once per part.
+func (pl *placer) isoPadDomains(p *Part) []int32 {
+	if d, ok := pl.isoDoms[p]; ok {
+		return d
+	}
+	iso := pl.an.Iso
+	if pl.isoDoms == nil {
+		pl.isoDoms = map[*Part][]int32{}
+		pl.isoDomIdx = map[string]int32{"": 0}
+		pl.isoPairs = [][]*IsoPair{{nil}}
+	}
+	var d []int32
+	for i, a := range p.Pads {
+		name := iso.NetDomain[a.Net]
+		ix, ok := pl.isoDomIdx[name]
+		if !ok {
+			// A new domain: a row and a column of the pair table.
+			ix = int32(len(pl.isoPairs))
+			pl.isoDomIdx[name] = ix
+			names := make([]string, ix+1)
+			for n, k := range pl.isoDomIdx {
+				names[k] = n
+			}
+			row := make([]*IsoPair, ix+1)
+			for k := range pl.isoPairs {
+				ip := iso.Pair(names[k], name)
+				pl.isoPairs[k] = append(pl.isoPairs[k], ip)
+				row[k] = iso.Pair(name, names[k])
+			}
+			pl.isoPairs = append(pl.isoPairs, row)
+		}
+		if ix != 0 {
+			if d == nil {
+				d = make([]int32, len(p.Pads))
+			}
+			d[i] = ix
+		}
+	}
+	pl.isoDoms[p] = d
+	return d
+}
+
 // isoPadGap is the copper gap of two pads, exact but cheap: the bounding-box
 // gap (a lower bound) settles pads already farther than need apart and is
 // exact for axis-aligned rectangles; only near round / rotated pads is the
 // polygon distance computed (the legaliser calls this millions of times).
 func isoPadGap(a, c *Pad, need float64) float64 {
-	ab, cb := a.Box.Bounds(), c.Box.Bounds()
+	return isoPadGapIn(a, c, a.Box.Bounds(), c.Box.Bounds(), need)
+}
+
+// isoPadGapIn is isoPadGap with the two pads' bounds at hand.
+func isoPadGapIn(a, c *Pad, ab, cb Rect, need float64) float64 {
 	dx := math.Max(0, math.Max(ab.MinX-cb.MaxX, cb.MinX-ab.MaxX))
 	dy := math.Max(0, math.Max(ab.MinY-cb.MaxY, cb.MinY-ab.MaxY))
 	g := math.Hypot(dx, dy)

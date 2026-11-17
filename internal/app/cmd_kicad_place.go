@@ -26,6 +26,7 @@ import (
 type kicadPlaceOpts struct {
 	pcb, out, report         string
 	mech, power, sim, intent string
+	sides                    string
 	domainZones              string
 	groups                   []string
 	placeSeeds, candidates   int
@@ -65,7 +66,11 @@ type kicadPlaceReport struct {
 	Verdict  gate.Status        `json:"verdict"`
 	Illegal  []string           `json:"illegal,omitempty"`
 	ZoneFill []pcbauto.ZoneFill `json:"zoneFill,omitempty"`
-	Notes    []string           `json:"notes,omitempty"`
+	// FixedOverlaps are the courtyard overlaps between two parts that do
+	// not move (locked, fixed by --mech): not placements of this run, so
+	// they do not fail the verdict; DRC judges them.
+	FixedOverlaps []string `json:"fixedOverlaps,omitempty"`
+	Notes         []string `json:"notes,omitempty"`
 
 	path string // where the report was written
 }
@@ -101,6 +106,11 @@ copied beside every written board. Locked footprints and mounting holes stay put
 designator is shared (two H1) or a placeholder (empty, REF**, G***, R?): they are
 fixed obstacles, listed in the report notes. Moving parts invalidates the
 copper: tracks and vias are removed and zones unfilled in the output.
+
+--sides names the board side of parts ({"bottom": ["C12", "R7"], "top":
+[...]}): each one on the other side is flipped before the placement, so
+the placer packs it — pads and courtyard mirrored — on the side asked.
+The placer itself never changes a part's side.
 
 --time-budget bounds the placement search in wall time (all seeds run in
 parallel against the same deadline; snapshot and board writing come on
@@ -146,6 +156,7 @@ its parts need vs. what it offers), stderr warns, and the exit code is
 	c.Flags().StringVar(&o.report, "report", "", "report JSON (default: <out>.report.json)")
 	c.Flags().StringVar(&o.domainZones, "domain-zones", "strips", "insulation domain layout: strips (full-height, the default) | edge (each small domain against its connector, the largest domain the largest rectangle left; refused when it does not fit)")
 	c.Flags().StringVar(&o.mech, "mech", "", "mechanical spec JSON (pcb auto --mech; mm from the board's lower-left corner, y up)")
+	c.Flags().StringVar(&o.sides, "sides", "", `board side per part, JSON {"top": [designators], "bottom": [designators]}: a part named for the side it is not on is flipped there before the placement (in place, same rotation); parts not named keep their side`)
 	c.Flags().StringVar(&o.power, "power", "", "power spec JSON (rails with voltage/currentA, diffPairs)")
 	c.Flags().StringVar(&o.sim, "sim", "", "simulated per-pin currents (pcbpilot sim power JSON)")
 	c.Flags().StringVar(&o.intent, "intent", "", "intent.json: declared net currents/classes weight the placement; the report adds loopIR per seed")
@@ -174,6 +185,7 @@ func runKicadPlace(o kicadPlaceOpts, deps kicadPlaceDeps, stderr io.Writer) (*ki
 	if o.report == "" {
 		o.report = base + ".report.json"
 	}
+	srcPCB := o.pcb
 	raw, err := deps.snapshot(o.pcb)
 	if err != nil {
 		return nil, err
@@ -181,6 +193,59 @@ func runKicadPlace(o kicadPlaceOpts, deps kicadPlaceDeps, stderr io.Writer) (*ki
 	b, fixed, kept, err := kicadBoard(raw)
 	if err != nil {
 		return nil, err
+	}
+	var sideNotes []string
+	if o.sides != "" {
+		// --sides: flip the named parts on a staged copy first, and place
+		// that copy — the model then has their pads and courtyards as they
+		// are on the new side.
+		var mechFixed []string
+		if o.mech != "" {
+			mraw, err := os.ReadFile(o.mech)
+			if err != nil {
+				return nil, err
+			}
+			mech, err := pcbauto.ParseMech(mraw)
+			if err != nil {
+				return nil, err
+			}
+			for _, f := range mech.Fixed {
+				mechFixed = append(mechFixed, f.Ref)
+			}
+		}
+		flips, notes, err := kicadPlaceSides(o.sides, b, fixed, mechFixed, kept)
+		if err != nil {
+			return nil, err
+		}
+		sideNotes = notes
+		if len(flips) > 0 {
+			// The copy lives in a directory of its own, made for this run
+			// and removed with it: no name of the user's can be the same.
+			if err := os.MkdirAll(filepath.Dir(base), 0o755); err != nil {
+				return nil, err
+			}
+			tmp, err := os.MkdirTemp(filepath.Dir(base), filepath.Base(base)+".sides-staged-*")
+			if err != nil {
+				return nil, err
+			}
+			defer os.RemoveAll(tmp)
+			staged := filepath.Join(tmp, filepath.Base(base)+".kicad_pcb")
+			if _, err := deps.place(o.pcb, flips, staged); err != nil {
+				return nil, fmt.Errorf("--sides: %w", err)
+			}
+			// The copy is read and placed as the input would be: with its
+			// net classes and custom rules, which then go on to the output.
+			if _, err := copyKicadSidecars(o.pcb, staged); err != nil {
+				return nil, fmt.Errorf("--sides: %w", err)
+			}
+			o.pcb = staged
+			if raw, err = deps.snapshot(staged); err != nil {
+				return nil, err
+			}
+			if b, fixed, kept, err = kicadBoard(raw); err != nil {
+				return nil, err
+			}
+		}
 	}
 	power, err := kicadPlacePower(o)
 	if err != nil {
@@ -199,8 +264,12 @@ func runKicadPlace(o kicadPlaceOpts, deps kicadPlaceDeps, stderr io.Writer) (*ki
 		fmt.Fprintf(stderr, "placement: WARNING %s\n", note)
 		placeNotes = append(placeNotes, note)
 	}
-	rep := &kicadPlaceReport{PCB: o.pcb, Out: o.out, Fixed: fixed, path: o.report}
+	rep := &kicadPlaceReport{PCB: srcPCB, Out: o.out, Fixed: fixed, path: o.report}
 	rep.Notes = append(rep.Notes, placeNotes...)
+	for _, n := range sideNotes {
+		rep.Notes = append(rep.Notes, n)
+		fmt.Fprintf(stderr, "placement: %s\n", n)
+	}
 	for _, n := range kicadKeptNotes(kept) {
 		rep.Notes = append(rep.Notes, n)
 		fmt.Fprintf(stderr, "placement: %s\n", n)
@@ -388,15 +457,30 @@ func runKicadPlace(o kicadPlaceOpts, deps kicadPlaceDeps, stderr io.Writer) (*ki
 	}
 	best := outs[0]
 	rep.Illegal, rep.ZoneFill, rep.Verdict = best.Result.Illegal, best.Result.ZoneFill, gate.Pass
+	if rep.FixedOverlaps = best.Result.FixedOverlaps; len(rep.FixedOverlaps) > 0 {
+		fmt.Fprintf(stderr, "placement: note: %d courtyard overlap(s) between parts that do not move (locked or fixed) are left as they are and not counted as illegal (see fixedOverlaps in the report; DRC judges them)\n", len(rep.FixedOverlaps))
+	}
 	for _, z := range rep.ZoneFill {
 		fill := "none usable"
 		if z.Fill != nil {
 			fill = fmt.Sprintf("%.2f", *z.Fill)
 		}
+		zname, side, other := z.Domain, "", ""
+		if z.Zone > 0 {
+			zname = fmt.Sprintf("%s (rectangle %d)", z.Domain, z.Zone)
+		}
+		if z.Side != "" {
+			side = " on the " + z.Side + " side"
+			for _, s := range z.Sides {
+				if s.Side != z.Side && s.Fill != nil {
+					other = fmt.Sprintf("; the %s side is at fill %.2f (%.0f of %.0f mm²)", s.Side, *s.Fill, s.NeedMm2, s.OfferMm2)
+				}
+			}
+		}
 		if z.OverFull || z.Tight && z.Illegal > 0 {
-			fmt.Fprintf(stderr, "placement: WARNING zone %s: parts need %.0f mm² (fixed parts %.0f), zone offers %.0f mm² (fill %s, %d illegal) — enlarge the zone or move parts out of it\n", z.Domain, z.NeedMm2, z.FixedMm2, z.OfferMm2, fill, z.Illegal)
+			fmt.Fprintf(stderr, "placement: WARNING zone %s: parts need %.0f mm²%s (fixed parts %.0f), zone offers %.0f mm² (fill %s, %d illegal)%s — enlarge the zone, move parts out of it or to the other side\n", zname, z.NeedMm2, side, z.FixedMm2, z.OfferMm2, fill, z.Illegal, other)
 		} else if z.Illegal > 0 {
-			fmt.Fprintf(stderr, "placement: WARNING zone %s: %d illegal placement(s) although it has room (need %.0f of %.0f mm², fill %s)\n", z.Domain, z.Illegal, z.NeedMm2, z.OfferMm2, fill)
+			fmt.Fprintf(stderr, "placement: WARNING zone %s: %d illegal placement(s) although it has room (need %.0f of %.0f mm²%s, fill %s)%s\n", zname, z.Illegal, z.NeedMm2, z.OfferMm2, side, fill, other)
 		}
 	}
 	if v, n := kicadPlaceVerdict(rep.Illegal, best.Trial.Illegal); v == gate.Fail {
@@ -775,6 +859,75 @@ func isMountingHole(c kicadSnapComp) bool {
 		}
 	}
 	return true
+}
+
+// kicadPlaceSides reads --sides ({"top": [refs], "bottom": [refs]}) and
+// returns the pose of every named part that is on the other side: where it
+// stands, on the side asked (the writer flips it). A part named twice, not
+// on the board, or one that would have to flip but is locked or fixed by
+// --mech, is refused: the file says where parts go, and one that cannot go
+// there is a mistake to fix, not to skip.
+func kicadPlaceSides(path string, b *pcbauto.Board, fixed, mechFixed []string, kept kicadKept) (map[string]kicad.Pose, []string, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	var doc map[string][]string
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return nil, nil, fmt.Errorf(`--sides %s: want {"top": [designators], "bottom": [designators]}: %w`, path, err)
+	}
+	want := map[string]string{}
+	var bad []string
+	for side, refs := range doc {
+		if side != "top" && side != "bottom" {
+			return nil, nil, fmt.Errorf(`--sides %s: key %q is not "top" or "bottom"`, path, side)
+		}
+		for _, ref := range refs {
+			if o, ok := want[ref]; ok && o != side {
+				bad = append(bad, ref+" (named for both sides)")
+			}
+			want[ref] = side
+		}
+	}
+	flips := map[string]kicad.Pose{}
+	n := map[string]int{}
+	for _, ref := range slices.Sorted(maps.Keys(want)) {
+		side := want[ref]
+		p := b.Part(ref)
+		_, isKept := kept[ref]
+		switch {
+		case p == nil || isKept:
+			bad = append(bad, ref+" (no single footprint with this designator)")
+			continue
+		}
+		on := "top"
+		if p.Side == pcbauto.LayerBottom {
+			on = "bottom"
+		}
+		if on == side {
+			continue
+		}
+		if slices.Contains(fixed, ref) {
+			bad = append(bad, ref+" (locked or a mounting hole: it stays where it is)")
+			continue
+		}
+		if slices.Contains(mechFixed, ref) {
+			bad = append(bad, ref+" (fixed by --mech: give its side there)")
+			continue
+		}
+		flips[ref] = kicad.Pose{XMil: p.Pos.X, YMil: 0 - p.Pos.Y, RotationDeg: p.Rotation, Side: side}
+		n[side]++
+	}
+	if len(bad) > 0 {
+		return nil, nil, fmt.Errorf("--sides %s: %d part(s) cannot take the side asked: %s", path, len(bad), strings.Join(firstN(bad, 12), ", "))
+	}
+	var notes []string
+	if len(flips) > 0 {
+		notes = append(notes, fmt.Sprintf("--sides: %d part(s) flipped before the placement (%d to the bottom, %d to the top); %d named part(s) were already on their side", len(flips), n["bottom"], n["top"], len(want)-len(flips)))
+	} else {
+		notes = append(notes, fmt.Sprintf("--sides: all %d named part(s) are already on their side", len(want)))
+	}
+	return flips, notes, nil
 }
 
 // posesFromBoard converts the model (mil, y up) to KiCad poses (mil, y

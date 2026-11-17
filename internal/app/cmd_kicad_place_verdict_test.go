@@ -41,9 +41,10 @@ func TestKicadPlaceVerdictPass(t *testing.T) {
 	}
 }
 
-// Two locked footprints on top of each other cannot be legalised: the run
-// fails (exit 6, like kicad drc), names the pair and warns on stderr.
-func TestKicadPlaceVerdictFailNamesTheOverlap(t *testing.T) {
+// Two locked footprints on top of each other are not a placement of this
+// run: the pair is named in fixedOverlaps and on stderr, never silently
+// dropped, and it does not fail the verdict (DRC judges it).
+func TestKicadPlaceNamesTheFixedOverlap(t *testing.T) {
 	var snap map[string]any
 	if err := json.Unmarshal(tinyKicadSnapshot(), &snap); err != nil {
 		t.Fatal(err)
@@ -66,14 +67,17 @@ func TestKicadPlaceVerdictFailNamesTheOverlap(t *testing.T) {
 	snap["components"] = append(comps, j2)
 	blob, _ := json.Marshal(snap)
 	rep, stderr := placeTiny(t, blob)
-	if rep.Verdict != gate.Fail || rep.Verdict.ExitCode() != 6 {
-		t.Fatalf("verdict %q, want fail (exit 6)", rep.Verdict)
+	if rep.Verdict != gate.Pass {
+		t.Fatalf("verdict %q, want pass: illegal %v", rep.Verdict, rep.Illegal)
 	}
-	if len(rep.Illegal) == 0 || !strings.Contains(strings.Join(rep.Illegal, ";"), "overlap J1 J2") {
-		t.Fatalf("illegal %v, want the J1/J2 overlap", rep.Illegal)
+	if strings.Contains(strings.Join(rep.Illegal, ";"), "overlap J1 J2") {
+		t.Fatalf("illegal %v names the fixed pair", rep.Illegal)
 	}
-	if !strings.Contains(stderr, "WARNING best seed") || !strings.Contains(stderr, "overlap J1 J2") {
-		t.Fatalf("stderr lacks the warning:\n%s", stderr)
+	if len(rep.FixedOverlaps) != 1 || !strings.HasPrefix(rep.FixedOverlaps[0], "overlap J1 J2 (") {
+		t.Fatalf("fixedOverlaps %v, want the J1/J2 overlap", rep.FixedOverlaps)
+	}
+	if !strings.Contains(stderr, "1 courtyard overlap(s) between parts that do not move") {
+		t.Fatalf("stderr lacks the note:\n%s", stderr)
 	}
 }
 

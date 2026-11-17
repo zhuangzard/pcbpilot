@@ -32,7 +32,7 @@
 | 命令 | 作用 | 要点 |
 |---|---|---|
 | `new --out X.kicad_pcb [--layers 2\|4\|6]` | 空板 + 工程文件 | 空板没有网：铺铜/带网孔要等原理图同步（或已有网的板） |
-| `outline --rect W,H [--origin X,Y] [--corner-radius R]` / `--polygon "x,y …"` / `--circle X,Y,D` | Edge.Cuts 板框（线段 + 真圆弧） | 已有板框 → `E_BOARD_OUTLINE_EXISTS`，只有 `--replace` 才删掉板级 Edge.Cuts 重画；板框由封装的 Edge.Cuts 画出时不支持替换（`--replace` 也拒绝，写明封装位号）；写后外轮廓数必须正好是 1；自交/重复点/零面积 → `E_BOARD_GEOMETRY` |
+| `outline --rect W,H [--origin X,Y] [--corner-radius R]` / `--polygon "x,y …"` / `--circle X,Y,D` | Edge.Cuts 板框（线段 + 真圆弧） | 已有板框 → `E_BOARD_OUTLINE_EXISTS`，只有 `--replace` 才删掉板级 Edge.Cuts 重画；封装自己画在 Edge.Cuts 上的闭合轮廓（连接器槽孔、挖空）只要整个落在新板框内就原样保留、算作板框的挖空（`summary.footprintCutouts`，并给一条 warning），板上没有板级板框时不需要 `--replace`；只有封装的 Edge.Cuts 不是新板框内的闭合轮廓（不闭合、与新板框相交/相切、在新板框外，即它会构成或切断外轮廓）才拒绝，写明封装位号和原因（封装图形从不改动）；写后外轮廓数必须正好是 1；自交/重复点/零面积 → `E_BOARD_GEOMETRY` |
 | `outline … --slot X1,Y1,X2,Y2,W` / `--cutout-circle` / `--cutout-rect` / `--cutout-polygon` | 槽孔、挖空 | 必须整个在板内且互不重叠；不给外形时加到现有板框上（没有闭合板框 → `E_BOARD_NO_OUTLINE`）；板边缺口画进外形多边形 |
 | `stackup --layers 2\|4\|6 [--thickness 1.6] [--outer-copper 0.035] [--inner-copper 0.0175] [--dielectric t1,t2,…] [--finish ENIG]` | 层数 + 物理层叠 | 介质 core/prepreg 交替、默认 FR4 εr 4.5；板厚 = 全部层之和（含阻焊）；减层时被删的内层上还有走线/铺铜/图形，或有焊盘显式用到它（SMD、连接器焊盘、只在部分层上的孔；贯穿全部铜层的通孔焊盘不算）→ `E_BOARD_LAYER_IN_USE` |
 | `holes --at X,Y … --drill D [--type pth --pad P --net GND] [--ref H5]` | 安装孔 | 每孔一个锁定、board-only 的 `pcbpilot:MountingHole_*` 封装；必须先有闭合板框（否则 `E_BOARD_NO_OUTLINE`）；NPTH 不能带网/焊环；PTH 必须给 `--pad`；出板、碰到或包住挖空、钻孔与已有钻孔重叠、钻孔穿过任何铜（不论网：焊盘真实形状、过孔、走线/圆弧）、PTH 焊环压到别的网（或无网）的铜（同网只允许焊环相接） → `E_BOARD_OVERLAP`；孔间距、孔间隙、铜间距（含网络类与自定义规则）由 DRC 判 |

@@ -871,6 +871,12 @@ func newKicadBoardOutlineCmd(stdout io.Writer) *cobra.Command {
 		Long: `Draws the outline as Edge.Cuts segments and true arcs. An existing outline is
 replaced only with --replace (every board-level Edge.Cuts drawing is removed
 first). Without an outer shape the cutouts are added to the existing outline.
+Footprint graphics are never changed: closed Edge.Cuts contours drawn inside a
+footprint (a connector's slot, a cut-out) that lie wholly inside the new outline
+stay as its cut-outs and are counted in the check (summary.footprintCutouts);
+the outline is refused (E_BOARD_OUTLINE_EXISTS, footprints and reason named)
+only when a footprint's Edge.Cuts is not a closed contour inside it — open, or
+crossing, touching or outside the new outline.
 Cutouts must lie wholly inside the outline and apart from each other (a notch
 in the edge belongs in the outline polygon). Checked after the write: pcbnew
 builds one closed outline with the expected cutouts and bbox, and kicad-cli
@@ -952,7 +958,7 @@ Spec file (--spec, mm):
 	c.Flags().StringArrayVar(&cCircles, "cutout-circle", nil, "round cutout X,Y,D (repeatable; mm)")
 	c.Flags().StringArrayVar(&cSlots, "slot", nil, "slot X1,Y1,X2,Y2,W: centre line and width (repeatable; mm)")
 	c.Flags().StringArrayVar(&cPolys, "cutout-polygon", nil, `polygon cutout "x,y x,y x,y" (repeatable; mm)`)
-	c.Flags().BoolVar(&replace, "replace", false, "remove the existing board-level Edge.Cuts drawings first")
+	c.Flags().BoolVar(&replace, "replace", false, "remove the existing board-level Edge.Cuts drawings first (footprint slots / cut-outs inside the new outline are kept)")
 	c.Flags().Float64Var(&width, "line-width", 0, "Edge.Cuts line width (mm; default 0.05)")
 	return c
 }

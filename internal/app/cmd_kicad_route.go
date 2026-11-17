@@ -694,6 +694,16 @@ func (r *kicadRun) run() error {
 			return fmt.Errorf("pre-route gate: kicad rules block: %w", err)
 		}
 	}
+	// A keep-stricter head block (kicad rules --keep-stricter) must keep
+	// its meaning: bridge just re-appended the complete route block, with
+	// the minimums the head block carries — behind the user's stricter
+	// rules they would win over them.
+	if err := r.reapplyKeepStricter(classed, full); err != nil {
+		if kr, _ := r.summary["kicadRules"].(map[string]any); kr != nil {
+			kr["stale"] = true
+		}
+		return fmt.Errorf("pre-route gate: %w", err)
+	}
 	if len(ncRes.MissingNets) > 0 {
 		fmt.Fprintf(r.stderr, "warning: %d intent net(s) not on the board (ignored): %s\n", len(ncRes.MissingNets), strings.Join(ncRes.MissingNets, ", "))
 	}

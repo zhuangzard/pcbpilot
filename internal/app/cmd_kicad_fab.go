@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/zhuangzard/pcbpilot/internal/kicad"
@@ -16,6 +17,7 @@ import (
 func newKiCadFabCmd(stdout, stderr io.Writer) *cobra.Command {
 	var pcb, sch, out, overrides, contract, waiverPath string
 	var noAssembly, verbose, preflight bool
+	var drcTimeout time.Duration
 	c := &cobra.Command{
 		Use:   "fab",
 		Short: "Export JLCPCB manufacturing files (Gerber+drill zip, BOM, CPL) with kicad-cli",
@@ -81,6 +83,9 @@ Override file (JSON), designator entries win over footprint entries:
 				if pcb == "" {
 					return fmt.Errorf("--pcb is required")
 				}
+				if err := drcTimeoutFlag(cmd, "drc-timeout", drcTimeout); err != nil {
+					return err
+				}
 				ws, err := loadWaivers(waiverPath)
 				if err != nil {
 					return err
@@ -90,7 +95,7 @@ Override file (JSON), designator entries win over footprint entries:
 					return err
 				}
 				rep := runFabPreflight(fabPreflightOptions{pcb: pcb, sch: sch, contract: contract, overrides: overrides,
-					cli: cli, noAssembly: noAssembly, waivers: ws})
+					cli: cli, noAssembly: noAssembly, waivers: ws, drcTimeout: drcTimeout})
 				if out != "" {
 					rep.Notes = append(rep.Notes, "--preflight wrote nothing to "+out)
 				}
@@ -103,8 +108,8 @@ Override file (JSON), designator entries win over footprint entries:
 				}
 				return nil
 			}
-			if contract != "" || waiverPath != "" {
-				return fmt.Errorf("--contract and --waivers are --preflight flags")
+			if contract != "" || waiverPath != "" || cmd.Flags().Changed("drc-timeout") {
+				return fmt.Errorf("--contract, --waivers and --drc-timeout are --preflight flags")
 			}
 			if pcb == "" || out == "" {
 				return fmt.Errorf("--pcb and --out are required")
@@ -166,6 +171,7 @@ Override file (JSON), designator entries win over footprint entries:
 	f.BoolVar(&preflight, "preflight", false, "read-only: DRC + fab checks against --contract, one verdict, no outputs written")
 	f.StringVar(&contract, "contract", "", "--preflight: order contract JSON (vendor, layers, finish, assembly.sides, limits, sources)")
 	f.StringVar(&waiverPath, "waivers", "", "--preflight: signed waiver file for the DRC checks (JSON list of {gate, match, reason, by})")
+	f.DurationVar(&drcTimeout, "drc-timeout", 0, "--preflight: time limit of the kicad-cli DRC run, e.g. 90m (default: as `kicad drc --timeout`)")
 	return c
 }
 

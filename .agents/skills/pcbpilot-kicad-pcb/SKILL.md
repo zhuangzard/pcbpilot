@@ -4,7 +4,7 @@ description: "用 pcbpilot 离线完成 KiCad 板子的板级设置、布局、�
 license: MIT
 metadata:
   author: "zhuangzard (pcbpilot); original easyeda-agent by zhoushoujianwork"
-  version: "0.12.10"
+  version: "0.12.11"
   homepage: "https://github.com/zhuangzard/pcbpilot"
 ---
 
@@ -82,6 +82,9 @@ post-layout 仿真 → 签核 → 保存（复制回工程）。板框、层叠�
    ```
    输出最佳种子 + `board.seed-N.kicad_pcb` 备选 + `board.report.json`；**输出板的走线/过孔被清除、铺铜未灌**，后面必须
    重新布线。`--time-budget` 到点交出当前最优并在报告标 `budgetHit`（进度在 stderr）。最优种子有非法摆放则退出码 6、`verdict: fail`：看报告 `illegal` 与 `zoneFill`（域装不下就扩域/移件），不要直接布线。`mech.json` 的写法见 [mech-spec.md](../pcbpilot/references/recipes/mech-spec.md)。
+   布局器不会自己换面：要放到背面（或回正面）的件写进 `--sides sides.json`（`{"top": [位号], "bottom": [位号]}`），它先在
+   暂存副本上翻面再布局，输入板不动；位号不存在、已锁定、被 `--mech` 固定或两面都点名则整次拒绝。`--mech` 里同一个域可以
+   给多个 `zones` 矩形（L 形、分块的域），`zoneFill` 按矩形、按正/背面分别给填充率；只在部分层上的规则区只挡它所在的面。
    密板布不通时加布线余量：`--halo-mil N`（每个可动件每边多留 N mil）、`--halo-ic-mil N`（6 脚以上的件改用 N mil，给扇出过孔环留地方）；
    默认 0，布局只按线长打包。
 3a. **规则复查**：`pcbpilot kicad rules … --check --stage placed`：`effective-rules` 必须 pass；`isolation-placement` 是
@@ -116,6 +119,8 @@ post-layout 仿真 → 签核 → 保存（复制回工程）。板框、层叠�
   留在连接器旁。
 - **去耦靠脚**：去耦电容必须在其 IC 电源脚旁；看 `report.json` 每个种子的 `decapToPinMeanMil`，偏大说明分组或意图缺失。
 - **热与噪声隔离**：功率件、电感、开关节点与模拟/时钟/RF 分开；高压域由意图的 `domains` / `pairs` 自动分区。
+  意图 spec 里声明的域即使没有地网络（回路是母线负端的一次侧）也自成一域；派生后先看 `domains` 各域的网络数是否
+  与声明相当，某个域占了全板大部分网络就是串域，先修 spec 再布局。
 - **共用 / 占位位号**（v0.10.2 起；更早版本直接报 duplicate designator 失败）：两个 `H1`、logo 的 `REF**` 等不会被移动，作为固定障碍列在 `report.json` 的 `fixed` 与 `notes`；
   要让它们参与布局，请用户在原理图里重新标注成唯一位号再同步。
 
@@ -123,6 +128,7 @@ post-layout 仿真 → 签核 → 保存（复制回工程）。板框、层叠�
 
 1. 跑 `kicad place`，读 `report.json`：每个种子 `illegal`（必须 0）、`labelBlocked`、`metrics.overlaps` / `outOfBoard` /
    `keepoutHits`、`weightedWirelengthIn` 对比 `startWirelengthIn`（原始布局的线长）。
+   两个都不动的件（锁定/固定，如插件压在背面贴片上）互相重叠不算非法，列在 `fixedOverlaps`，交给 DRC 判断。
 2. 最佳种子比原布局线长更长、或关键关系（去耦、晶振、接口保护）变差 → 保留原布局，不为“自动”而换。
 3. 请用户在 KiCad 里看最佳板和备选板，确认可接受的部分；把确认的器件 Lock（或加进 `fixed[]`），这就是**锁定集**，
    只增不减。
@@ -180,5 +186,5 @@ post-layout 仿真 → 签核 → 保存（复制回工程）。板框、层叠�
 | 布线后 `drill_out_of_range` / `via_diameter`（过孔小于 Board Setup 的最小孔/最小过孔） | 已有 `.kicad_pro` 时过孔尺寸没跟板约束对齐（KiCad 演示板实测） | 对照板约束与快照 `rules.viaDrillMil` / `viaDiameterMil`，显式给 `--via-dia-mil` / `--via-drill-mil` 重跑；不降低板约束 |
 | `netclasses.kept` 里很多 “width kept at …” | 用户类（含 Default）比意图更宽，保留用户值 | 预期；报告写明这些网的线宽来自用户类而非意图 |
 | `kicad route` 报 `RULES_STALE` | 板上的 `kicad rules` 规则与 route 的意图/sim/requirements 推导不一致 | 用同样的输入重跑 `kicad rules --apply`，再布线；不要删 `.kicad_dru` 块绕过 |
-| `kicad rules --apply` 退出 6、`E_USER_RULE_CONFLICT` | 用户类/规则会被覆盖或削弱 | 把 `conflicts[]` 原样给用户；用户同意后按名 `--replace <名>`，或改意图 |
+| `kicad rules --apply` 退出 6、`E_USER_RULE_CONFLICT` | 用户类/规则会被覆盖或削弱 | 把 `conflicts[]` 原样给用户；用户同意后按名 `--replace <名>`（删用户规则），或改意图；想保留用户的 clearance / creepage / edge_clearance 规则时用 `--keep-stricter`（不删不改用户规则，按顺序让更严的值生效；生成规则必须留在最后时，在它后面补一条 `pcbpilot carry …` 承接规则让用户更严值继续生效；值无法比较的冲突仍会拒绝并说明原因） |
 | `kicad rules` 退出 5、`plan-coverage` cannot-check | 电源网缺电流证据 | 给 `--sim`（或在意图 / requirements JSON 声明 `peakA` / `rmsA`）后重跑；不猜 |

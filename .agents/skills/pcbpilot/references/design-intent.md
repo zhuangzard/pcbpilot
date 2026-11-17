@@ -157,6 +157,11 @@ HDMI/MIPI/LVDS 同一端口的多对按网名自动成等长组（`<前缀>_LANE
 max(标准推导, 声明)，爬电不低于间隙；只在有声明时多出 `derivedClearanceMm/derivedCreepageMm`、
 `declaredClearanceMm/declaredCreepageMm`、`clearanceSource/creepageSource`（`derived` / `declared`）并在 `why` 里写明——
 没有声明的 intent 与以前逐字节相同。声明对不上任何绝缘对 → `declared-isolation-unmatched` warn（不静默失效）。
+`spec.isolation[].insulation`（`basic` / `supplementary` / `double` / `reinforced`，必须同时写 `why`）按对声明绝缘等级，
+取代推导的等级：危险域对可触及域默认 reinforced，另一重保护已存在时（市电对保护地）由设计负责人声明 `basic`；距离随
+声明的等级走，低于推导等级时报 `declared-insulation-lowered` warn（负责人的决定，agent 不得代写）。按对声明比产品级
+`spec.standard.mopCount` 更具体：该对的 `mopCount` 随声明的等级（basic/supplementary = 1，double/reinforced = 2；声明等级与推导等级相同时也一样，计数因此变小时同样报 warn），
+`why` 与 warn 里写明"N × MOPP for this pair instead of M"。
 `kicad rules` / `kicad route` / `signoff-safety` 都用这个取大后的值。电路理解调用 `pcbauto.Understand`（核心/外围、转换器、域与隔离桥）。
 
 ## 3. 正例：ESP32 mini（`pkg/powersim/testdata/esp32mini`，offline-verified）
@@ -184,8 +189,15 @@ SELV↔MAINS reinforced（桥 PS1、K1），ISO↔SELV functional（桥 U3）；
   reinforced = 2× basic）+ 污染等级、海拔、IEC 60601-1 MOPP 下限；是否开槽按“爬电 > 5 mm（常见隔离件
   焊盘排间距）”估计，真实焊盘几何由 pcb 阶段复核。完整标准表由 `pkg/safety` 提供，接入只需
   `intent.SafetyProvider = safety.Distances`。所有 `standardRef` 都带 “confirm”，不是认证结论。
-- 市电识别靠网名（L/N/AC_L/LINE/…）或 `spec.mains.nets`，再沿保险丝/电阻/电感/压敏电阻/继电器触点
-  传播；pcbauto 的域划分只认标准网名，非常规命名请在 spec 中声明。
+- 市电识别靠网名（L/N/AC_L/LINE/…）或 `spec.mains.nets`，再只沿**真正的串联件**传播：两端的
+  保险丝/热敏/电感/压敏、**已知 ≤ 10 Ω** 的电阻、共模电感的绕组（已声明 `windings` 按绕组；未声明时须两条线都在
+  它上面）、继电器触点。阻值更大或**未知**的电阻（采样分压、泄放）不传播，也不会传进地、电源轨或 spec 声明为
+  非市电域的网。一个域只有在**导通件**（非电容、非隔离件、非 ≥ 100 kΩ/未知阻值电阻）接到市电线时才是 mains 域。
+  两个地之间：0 Ω/已知 < 100 kΩ 或未知阻值的电阻、磁珠、net-tie/跳线才合并；Y 电容（`C…`/`CX…`/`CY…`）、
+  ≥ 100 kΩ 泄放电阻和其它不认识的两脚件不合并。`spec.domains` 声明的域优先：声明在不同域的地永不合并，声明为
+  非 mains/hazardous 的地永不并入市电。若一个 mains/hazardous 域占了全板 > 60 % 的网、板上有隔离件、且它是由
+  多个地经可疑连接并成的，会报 `domain-flood` 警告并列出这些件（给电阻填阻值，或在 spec 里声明域）。
+  pcbauto 的域划分只认标准网名，非常规命名请在 spec 中声明。
 - 块分类是启发式：分不清的核心归 `other`（summary 仍给器件与网），无关系的零件归 `MISC`。
 
 ## 5. 流向

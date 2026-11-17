@@ -337,12 +337,24 @@ func (f *rulesFakeKiCad) NetclassesReq(pcb string, req kicad.NetclassRequest, ou
 	if err != nil {
 		return nil, err
 	}
+	// Like bridge netclasses: only the route block is regenerated (complete,
+	// at the end); every other line — a keep-stricter head block too —
+	// stays where it is.
+	_, head, err := kicad.SplitDRUHead(strings.ReplaceAll(string(src), "\r\n", "\n"))
+	if err != nil {
+		return nil, err
+	}
 	text := user + ours
 	if len(rules) > 0 {
 		if !strings.Contains(text, "(version") {
 			text = "(version 1)\n" + text
 		}
 		text = strings.TrimRight(text, "\n") + "\n" + kicad.DRURouteBegin + "\n" + strings.Join(rules, "\n") + "\n" + kicad.DRURouteEnd + "\n"
+	}
+	if head != "" {
+		if text, err = insertHeadBlock(text, head); err != nil {
+			return nil, err
+		}
 	}
 	if strings.TrimSpace(text) != "" {
 		if err := os.WriteFile(boardSibling(out, ".kicad_dru"), []byte(text), 0o644); err != nil {
@@ -414,19 +426,53 @@ func (f *rulesFakeKiCad) DRC(pcb, out string) (*kicad.DRCReport, error) {
 		}
 		gap := int64(math.Round(math.Abs(b.StartY-a.StartY)*25400)) - (a.WidthNm+b.WidthNm)/2
 		need := max(p.effective(a.Net).Clearance, p.effective(b.Net).Clearance)
+		// Like KiCad: of the rules that match the two items the LAST one
+		// with a clearance constraint decides. An isolation rule (at the
+		// end, or its keep-stricter head rule) matches its two domain
+		// classes; a user rule matches when every quoted name of its
+		// condition is a class or the net of one of the two items.
+		custom, byUser := int64(-1), false
+		ea, eb := p.effective(a.Net).Class, p.effective(b.Net).Class
 		for _, r := range rules {
-			if strings.HasPrefix(r.Name, "pcbpilot isolation ") {
-				x, y, _ := strings.Cut(strings.TrimPrefix(r.Name, "pcbpilot isolation "), "|")
-				ea, eb := p.effective(a.Net).Class, p.effective(b.Net).Class
+			name := r.Name
+			if gen, typ, ok := keepHeadOrigin(name); ok && r.Block == "head" {
+				if typ != "clearance" {
+					continue
+				}
+				name = gen
+			}
+			user := false
+			if strings.HasPrefix(name, "pcbpilot isolation ") && r.Block != "" {
+				x, y, _ := strings.Cut(strings.TrimPrefix(name, "pcbpilot isolation "), "|")
 				if !(hasClass(ea, x) && hasClass(eb, y) || hasClass(ea, y) && hasClass(eb, x)) {
 					continue
 				}
-				for _, c := range r.Constraints {
-					if c.Type == "clearance" && c.Min != nil && *c.Min > need {
-						need = *c.Min
+			} else if r.Block == "" && r.Condition != "" {
+				user = true
+				parts := strings.Split(r.Condition, "'")
+				hit := len(parts) >= 3
+				for k := 1; k < len(parts); k += 2 {
+					if q := parts[k]; !(hasClass(ea, q) || hasClass(eb, q) || q == a.Net || q == b.Net) {
+						hit = false
 					}
 				}
+				if !hit {
+					continue
+				}
+			} else {
+				continue
 			}
+			for _, c := range r.Constraints {
+				if c.Type == "clearance" && c.Min != nil {
+					custom, byUser = *c.Min, user
+				}
+			}
+		}
+		switch {
+		case custom >= 0 && byUser:
+			need = custom
+		case custom > need:
+			need = custom
 		}
 		if gap < need {
 			rep.Violations = append(rep.Violations, kicad.Violation{Rule: "clearance", Objs: []string{ids[i], ids[i+1]}})

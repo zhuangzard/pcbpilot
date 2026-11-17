@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The test binary doubles as a fake kicad-cli (PCBPILOT_FAKE_KICAD_CLI=1),
@@ -81,6 +82,9 @@ func fakeKiCadCLI(args []string) int {
 			cwd, _ := os.Getwd()
 			b, _ := json.Marshal(map[string]any{"args": args, "cwd": cwd, "configHome": os.Getenv("KICAD_CONFIG_HOME")})
 			_ = os.WriteFile(log, b, 0o644)
+		}
+		if ms, _ := strconv.Atoi(os.Getenv("PCBPILOT_FAKE_DRC_SLEEP_MS")); ms > 0 {
+			time.Sleep(time.Duration(ms) * time.Millisecond) // a DRC that outlives its limit
 		}
 		code, _ := strconv.Atoi(os.Getenv("PCBPILOT_FAKE_EXIT"))
 		if strings.HasSuffix(os.Getenv("PCBPILOT_FAKE_DRC"), "NO-REPORT") {
