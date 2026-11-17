@@ -11,7 +11,8 @@
   default is unchanged, and the distance across such a slot is still held by the pair's clearance / creepage rules.
 - **`spec.edge.domainInsulation`: the edge grade of one domain.** `spec.edge.insulation` sets one grade for every
   hazardous domain; `domainInsulation: {"<domain or net>": "basic"}` sets it for one (an edge that faces an earthed
-  enclosure, say) and leaves the others reinforced. Two keys of the same domain: the stricter one counts.
+  enclosure, say) and leaves the others reinforced. Two keys of the same domain: the stricter one counts. A key is a domain id first, a net name second; a key
+  that names several domains can only raise their grade.
 
 ## [0.12.11] — 2026-11-17
 

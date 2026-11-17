@@ -41,6 +41,38 @@ func (c *ctx) buildEdge() {
 		e.VcutMil = 0
 	}
 	edgeDom := &Domain{ID: "EDGE", Kind: "SELV"}
+	// A domainInsulation key names one domain: by its id, else by one of
+	// its nets. A key that would name several (a net listed in two
+	// domains) lowers none of them — it must not relax a domain the owner
+	// did not mean — but still raises each of them.
+	keyDomain := map[string]string{}
+	raiseOnly := map[string][]string{}
+	for _, key := range sortedStringKeys(se.DomainInsulation) {
+		var byID, byNet []string
+		for _, d := range c.out.Domains {
+			if d.ID == key {
+				byID = append(byID, d.ID)
+			} else if has(d.Nets, key) {
+				byNet = append(byNet, d.ID)
+			}
+		}
+		owners := byID
+		if len(owners) == 0 {
+			owners = byNet
+		}
+		switch len(owners) {
+		case 1:
+			keyDomain[key] = owners[0]
+			if len(byID) == 1 && len(byNet) > 0 {
+				e.Why = append(e.Why, fmt.Sprintf("spec.edge.domainInsulation[%s] is the domain %s, not the net of that name in %s", key, key, strings.Join(byNet, ", ")))
+			}
+		case 0:
+			e.Why = append(e.Why, fmt.Sprintf("spec.edge.domainInsulation[%s] ignored: no domain or net of that name", key))
+		default:
+			raiseOnly[key] = owners
+			e.Why = append(e.Why, fmt.Sprintf("spec.edge.domainInsulation[%s] names several domains (%s): it can only raise their grade, never lower it — use a domain id", key, strings.Join(owners, ", ")))
+		}
+	}
 	st := c.out.Standard
 	for _, d := range c.out.Domains {
 		hazard := hazardKind(d.Kind)
@@ -49,7 +81,7 @@ func (c *ctx) buildEdge() {
 		}
 		ins, insFrom := strings.ToLower(se.Insulation), ""
 		for _, key := range sortedStringKeys(se.DomainInsulation) {
-			if key != d.ID && !has(d.Nets, key) {
+			if keyDomain[key] != d.ID {
 				continue
 			}
 			if g := strings.ToLower(se.DomainInsulation[key]); insFrom == "" || insulRank[g] > insulRank[ins] {
@@ -60,6 +92,11 @@ func (c *ctx) buildEdge() {
 			ins = "reinforced"
 			if !hazard {
 				ins = "basic"
+			}
+		}
+		for _, key := range sortedStringKeys(se.DomainInsulation) {
+			if g := strings.ToLower(se.DomainInsulation[key]); has(raiseOnly[key], d.ID) && insulRank[g] > insulRank[ins] {
+				ins, insFrom = g, key
 			}
 		}
 		p := Pair{A: "domain:" + d.ID, B: pcbauto.EdgeAccessible, WorkingVrms: d.WorkingVrms, WorkingVpeak: d.WorkingVpeak, Insulation: ins}
