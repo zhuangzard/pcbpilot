@@ -90,6 +90,12 @@ func TestDomainLineTieSkipsBleederAndYCap(t *testing.T) {
 		{"10R", tiePart("R1", "", "10R", "AC_N", "GND_B"), true},
 		{"resistor of unknown value", tiePart("R1", "RC0603FR-07XXX", "", "AC_N", "GND_B"), false},
 		{"diode", tiePart("D1", "1N4007", "", "AC_N", "GND_B"), true},
+		{"unrecognised part named Y1", tiePart("E1", "2.2nF Y1", "", "AC_N", "GND_B"), false},
+		{"unrecognised part of value Y1", tiePart("E1", "", "Y1", "AC_N", "GND_B"), false},
+		{"spark gap", tiePart("SG1", "", "", "AC_N", "GND_B"), false},
+		{"spark gap by device", tiePart("E2", "SPARK-GAP", "", "AC_N", "GND_B"), false},
+		{"varistor", tiePart("RV1", "10D471K", "", "AC_N", "GND_B"), false},
+		{"unrecognised conducting part", tiePart("E3", "XYZ-123", "", "AC_N", "GND_B"), true},
 	} {
 		b := tieBoard(inlet, tc.part)
 		c := Understand(b, Analyze(b, PowerSpec{}, nil))

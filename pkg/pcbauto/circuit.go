@@ -340,6 +340,30 @@ var (
 	reMains = regexp.MustCompile(`(?i)^(AC_?L|AC_?N|L_?IN|N_?IN|LINE|NEUTRAL|MAINS|AC\d*|~|220V|230V|110V|120V|VAC|L|N|PE)$`)
 )
 
+var (
+	// Surge parts stand across a barrier and conduct nothing in normal
+	// operation: spark gap, gas discharge tube, varistor.
+	reSurgeRef = regexp.MustCompile(`^(SG|GDT|MOV|RV|VAR|VDR)\d`)
+	reSurgeDev = regexp.MustCompile(`(?i)spark.?gap|varistor|gas.?discharge|(^|[^A-Z0-9])(GDT|MOV|VDR)([^A-Z0-9]|$)`)
+)
+
+// BarrierPart reports whether a part of no recognised kind is, by its
+// designator or its device / value text, one that stands across a barrier
+// without joining its two sides: a safety (X / Y class) capacitor that was
+// not recognised as a capacitor, a spark gap, a gas discharge tube, a
+// varistor. Such a part ties nothing to the AC line.
+func BarrierPart(ref string, texts ...string) bool {
+	if r := upper(ref); reSafetyCapRef.MatchString(r) || reSurgeRef.MatchString(r) {
+		return true
+	}
+	for _, s := range texts {
+		if reSafetyCapDev.MatchString(s) || reSurgeDev.MatchString(s) {
+			return true
+		}
+	}
+	return false
+}
+
 // isGlobalNet marks nets that connect everything and carry no "belonging".
 func isGlobalNet(an *Analysis, net string, r Rules) bool {
 	p := an.Plan(net, r)
@@ -427,7 +451,8 @@ func (c *Circuit) buildDomains(b *Board, an *Analysis) {
 	}
 	// lineGrounds: the line net and the grounds a conducting part sits on.
 	// Isolating parts (transformer, opto, isolator, relay), capacitors (X/Y
-	// caps) and resistors not known to be below 100 kΩ (the bleeder beside a
+	// caps), parts of no recognised kind named as a safety capacitor or a
+	// surge part (BarrierPart) and resistors not known to be below 100 kΩ (the bleeder beside a
 	// Y capacitor, a protective impedance; one whose value cannot be read
 	// is not taken for a tie to the line, as in lineTied) conduct nothing
 	// that ties.
@@ -437,6 +462,9 @@ func (c *Circuit) buildDomains(b *Board, an *Analysis) {
 			return "", nil
 		}
 		if v, ok := partOhms(p); k == KindResistor && (!ok || v >= BleederOhms) {
+			return "", nil
+		}
+		if k == KindOther && BarrierPart(p.Ref, p.Device, p.Value) {
 			return "", nil
 		}
 		for _, pd := range p.Pads {

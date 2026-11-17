@@ -593,6 +593,11 @@ func (c *ctx) lineTied(pd *pcbauto.Domain) bool {
 		if v, ok := pcbauto.ResistorOhms(p.Value); k == pcbauto.KindResistor && (!ok || v >= pcbauto.BleederOhms) {
 			continue
 		}
+		// A spark gap, a varistor or a safety capacitor that was not
+		// recognised as a capacitor reaches the line across a barrier.
+		if k == pcbauto.KindOther && pcbauto.BarrierPart(p.Ref, p.DeviceName, p.Value, p.MPN) {
+			continue
+		}
 		for _, pin := range p.Pins {
 			if c.mains[pin.Net] {
 				return true
