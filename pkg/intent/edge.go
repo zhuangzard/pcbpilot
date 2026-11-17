@@ -47,7 +47,15 @@ func (c *ctx) buildEdge() {
 		if !hazard && d.Kind != "patient" {
 			continue
 		}
-		ins := strings.ToLower(se.Insulation)
+		ins, insFrom := strings.ToLower(se.Insulation), ""
+		for _, key := range sortedStringKeys(se.DomainInsulation) {
+			if key != d.ID && !has(d.Nets, key) {
+				continue
+			}
+			if g := strings.ToLower(se.DomainInsulation[key]); insFrom == "" || insulRank[g] > insulRank[ins] {
+				ins, insFrom = g, key
+			}
+		}
 		if ins == "" {
 			ins = "reinforced"
 			if !hazard {
@@ -68,8 +76,13 @@ func (c *ctx) buildEdge() {
 		ed.Mil = math.Ceil(math.Max(cl, cr)/0.0254*10) / 10
 		ed.Why = append(ed.Why, fmt.Sprintf("%s (%s, %s Vrms / %s V peak) to the board edge and metal mounting holes — accessible or earthed surfaces: %s insulation, clearance %.2f mm, creepage %.2f mm (%s); the straight copper-to-edge path is both the air gap and the surface path, so it keeps the larger (%.1f mil)",
 			d.ID, d.Kind, trimFloat(d.WorkingVrms, 3), trimFloat(d.WorkingVpeak, 3), ins, cl, cr, ref, ed.Mil))
-		if se.Insulation == "" && hazard {
-			ed.Why = append(ed.Why, "reinforced because the edge is treated as accessible; spec.edge.insulation \"basic\" when the enclosure or protective earthing provides the other means of protection")
+		switch {
+		case insFrom != "":
+			ed.Why = append(ed.Why, fmt.Sprintf("spec.edge.domainInsulation[%s] = %s: the owner's statement of what the edge of this domain faces", insFrom, ins))
+		case se.Insulation != "":
+			ed.Why = append(ed.Why, fmt.Sprintf("spec.edge.insulation = %s: the owner's statement of what the board edge faces", ins))
+		case hazard:
+			ed.Why = append(ed.Why, "reinforced because the edge is treated as accessible; spec.edge.insulation \"basic\" (or spec.edge.domainInsulation for one domain) when the enclosure or protective earthing provides the other means of protection")
 		}
 		if tw != "" {
 			ed.Why = append(ed.Why, tw)
@@ -101,5 +114,19 @@ func (c *ctx) buildEdge() {
 	} else {
 		e.Why = append(e.Why, "no hazardous, mains or patient domain: SELV copper uses the layer defaults")
 	}
+	if se.FootprintCutouts == pcbauto.EdgeCutoutsInternal {
+		e.FootprintCutouts = pcbauto.EdgeCutoutsInternal
+		e.Why = append(e.Why, "spec.edge.footprintCutouts = internal: an Edge.Cuts shape inside a footprint (an isolation slot, a cut-out under a part) is not an accessible edge, so the domain edge distance is not applied to it — the fabricator's edge clearance and the pair clearance / creepage across the slot still are; the board outline, cut-outs drawn on the board and mounting holes keep the domain distance")
+	}
 	c.out.Edge = e
+}
+
+// sortedStringKeys are a string map's keys in order.
+func sortedStringKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }

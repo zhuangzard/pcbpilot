@@ -119,7 +119,9 @@ pcbpilot intent derive --connectivity sch-p1.json --connectivity sch-p2.json \
 附加：`edge`（板边安全距离：`outerMil` 20 / `innerMil` 30 / `vcutMil` / `edgeKind` routed|vcut|mixed /
 `byDomain{域:{mil,clearanceMm,creepageMm,insulation,why}}` —— 危险/市电/病人域到板边与金属安装孔的
 max(间隙, 爬电)，默认加强绝缘；来自 `spec.edge`（`edgeKind`、`outerMil/innerMil/vcutMil` 覆盖但不低于工艺
-下限、`insulation`、`domainMil`）；类型就是 `pcbauto.IntentEdge`，`pcb auto` / `pcb rules apply` /
+下限、`insulation`（全板一个等级）、`domainInsulation{域或网: 等级}`（单个域的等级，盖过 `insulation`；同一域两个键取严者）、
+`domainMil`（只能加大）、`footprintCutouts: "internal"`（封装里的 Edge.Cuts 图形是板内隔离槽而不是可触及面，KiCad 的域板边规则
+不量到它们；默认 `"edge"` 全量；板级开槽与安装孔始终按域距离量）；类型就是 `pcbauto.IntentEdge`，`pcb auto` / `pcb rules apply` /
 `pcb check` / 设计报告读同一份数，见 `pcb-design-rules.md` §5.4）、`copper`（层数/铜厚/温升/参考高度/εr/叠层名/工艺最小值）、`simulation`（场景、收敛、警告、假设）、
 `definitions`（约定说明）。
 

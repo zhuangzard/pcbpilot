@@ -986,8 +986,16 @@ def netclasses(pcb, reqs_path, out):
         if not ed.get("mil"):
             continue
         d = "%sD_%s" % (CLASS_PREFIX, re.sub(r"[^A-Za-z0-9_]", "_", str(ed.get("domain"))))
-        rules.append('(rule "pcbpilot edge %s"\n  (condition "A.hasNetclass(\'%s\')")\n  (constraint edge_clearance (min %smm)))'
-                     % (d, d, ("%.4f" % (float(ed["mil"]) * 0.0254)).rstrip("0").rstrip(".")))
+        cond = "A.hasNetclass('%s')" % d
+        if ed.get("footprintCutouts") == "internal":
+            # The owner's statement (intent edge.footprintCutouts): an
+            # Edge.Cuts shape inside a footprint is an isolation slot, not
+            # an accessible edge. Holes of footprints (mounting holes) and
+            # everything drawn on the board keep the distance. The same
+            # text as kicadEdgeCond (cmd_kicad.go).
+            cond += " && !(B.memberOfFootprint('*') && B.Layer == 'Edge.Cuts')"
+        rules.append('(rule "pcbpilot edge %s"\n  (condition "%s")\n  (constraint edge_clearance (min %smm)))'
+                     % (d, cond, ("%.4f" % (float(ed["mil"]) * 0.0254)).rstrip("0").rstrip(".")))
     if rules:
         if not re.search(r"\(version\s+\d+\)", text):
             text = "(version 1)\n" + text

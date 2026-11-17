@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+- **`kicad rules`: a slot drawn inside a footprint no longer has to count as the board edge.** The generated domain
+  edge rule (`pcbpilot edge PPD_<domain>`) measured the domain's copper to every Edge.Cuts shape, so the isolation slot
+  inside the footprint of a part that bridges two domains was held to the full touchable-edge distance. The owner can
+  now state `spec.edge.footprintCutouts: "internal"`; the edge rule then leaves the Edge.Cuts shapes of footprints
+  alone (the board outline, cut-outs drawn on the board and the NPTH holes of footprints are still measured), the
+  report lists it under `assumptions`, and `--check` fails when the rule on the board and the intent disagree. The
+  default is unchanged, and the distance across such a slot is still held by the pair's clearance / creepage rules.
+- **`spec.edge.domainInsulation`: the edge grade of one domain.** `spec.edge.insulation` sets one grade for every
+  hazardous domain; `domainInsulation: {"<domain or net>": "basic"}` sets it for one (an edge that faces an earthed
+  enclosure, say) and leaves the others reinforced. Two keys of the same domain: the stricter one counts.
+
 ## [0.12.11] — 2026-11-17
 
 - **`kicad rules --check`: the placement check no longer misses an insulation pair at random.** A net that is in two

@@ -262,3 +262,83 @@ func TestKicadRulesDefaultClassConflict(t *testing.T) {
 		t.Fatalf("built-in Default: exit %d %+v", code, rep.Conflicts)
 	}
 }
+
+// intent edge.footprintCutouts = internal: the edge rule leaves the
+// Edge.Cuts shapes of footprints alone, the report says so, and a rule on
+// the board that does not match what the intent says is a failure in
+// either direction (a relaxed rule the intent does not ask for; a rule
+// from before the intent changed).
+func TestKicadRulesEdgeFootprintCutouts(t *testing.T) {
+	const suffix = " && !(B.memberOfFootprint('*') && B.Layer == 'Edge.Cuts')"
+	if got := kicadEdgeCond("PPD_HVD", true); got != "A.hasNetclass('PPD_HVD')"+suffix || kicadEdgeCond("PPD_HVD", false) != "A.hasNetclass('PPD_HVD')" {
+		t.Fatalf("condition %q", got)
+	}
+	// The bridge writes the same text.
+	src, err := os.ReadFile("../kicad/bridge.py")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(src), `cond += "`+suffix+`"`) {
+		t.Fatal("bridge.py does not write the footprint cut-out condition of kicadEdgeCond")
+	}
+	plain := strings.Replace(rulesTestIntent, `"copper":`, rulesEdgeIntent+`"copper":`, 1)
+	internal := strings.Replace(plain, `"edge":{`, `"edge":{"footprintCutouts":"internal",`, 1)
+	if internal == plain {
+		t.Fatal("no edge in the intent")
+	}
+	if _, err := parseDesignIntent([]byte(strings.Replace(internal, `"internal"`, `"none"`, 1))); err == nil || !strings.Contains(err.Error(), "footprintCutouts") {
+		t.Fatalf("an unknown footprintCutouts must be refused: %v", err)
+	}
+	f := newRulesFixture(t)
+	dru := boardSibling(f.o.pcb, ".kicad_dru")
+	apply := func(intent string) *rulesReport {
+		t.Helper()
+		if err := os.WriteFile(f.o.intent, []byte(intent), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		a := f.o
+		a.apply = true
+		rep, code, se := runRules(t, a)
+		if code != 0 {
+			t.Fatalf("apply: %d %+v %s", code, rep.Errors, se)
+		}
+		return rep
+	}
+	check := func(intent string) rulesCheck {
+		t.Helper()
+		if err := os.WriteFile(f.o.intent, []byte(intent), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		c := f.o
+		c.check, c.stage = true, "placed"
+		rep, _, _ := runRules(t, c)
+		return checkOf(rep, "effective-rules")
+	}
+	rep := apply(internal)
+	b, _ := os.ReadFile(dru)
+	if !strings.Contains(string(b), `(condition "A.hasNetclass('PPD_HVD')`+suffix+`")`) {
+		t.Fatalf("the edge rule does not exclude footprint cut-outs:\n%s", b)
+	}
+	if !strings.Contains(strings.Join(rep.Assumptions, "\n"), "edge.footprintCutouts = internal") {
+		t.Fatalf("the report does not state the exclusion: %v", rep.Assumptions)
+	}
+	if e := check(internal); e.Status != gate.Pass {
+		t.Fatalf("applied and checked with the same intent: %+v", e)
+	}
+	// The intent no longer says internal: the relaxed rule on the board fails.
+	if e := check(plain); e.Status != gate.Fail || !strings.Contains(strings.Join(e.Items, "\n"), "is not edge_clearance") {
+		t.Fatalf("relaxed rule against a plain intent: %+v", e)
+	}
+	// Re-applied plain: no exclusion, nothing said about it.
+	rep = apply(plain)
+	b, _ = os.ReadFile(dru)
+	if strings.Contains(string(b), "memberOfFootprint") || strings.Contains(strings.Join(rep.Assumptions, "\n"), "footprintCutouts") {
+		t.Fatalf("plain intent wrote the exclusion:\n%s\n%v", b, rep.Assumptions)
+	}
+	if e := check(plain); e.Status != gate.Pass {
+		t.Fatalf("plain: %+v", e)
+	}
+	if e := check(internal); e.Status != gate.Fail {
+		t.Fatalf("a rule from before the intent changed must be re-applied: %+v", e)
+	}
+}

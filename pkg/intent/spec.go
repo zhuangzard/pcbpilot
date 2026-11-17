@@ -133,6 +133,18 @@ type SpecEdge struct {
 	// DomainMil raises a domain's edge distance (key: domain id or any net
 	// of the domain, mil). A value below the insulation distance is ignored.
 	DomainMil map[string]float64 `json:"domainMil,omitempty"`
+	// DomainInsulation is the grade of one domain (key: domain id or any
+	// net of the domain; basic | supplementary | double | reinforced). It
+	// wins over Insulation; of two keys that name the same domain the
+	// stricter grade counts.
+	DomainInsulation map[string]string `json:"domainInsulation,omitempty"`
+	// FootprintCutouts says what an Edge.Cuts shape drawn inside a
+	// footprint is: edge (default — a board edge like any other: the domain
+	// distance applies to it) or internal (an isolation slot or a cut-out
+	// under a part, not a surface anyone can touch: the domain distance is
+	// not applied to it; the fabricator's edge clearance and the pair
+	// clearance / creepage across the slot still are).
+	FootprintCutouts string `json:"footprintCutouts,omitempty"`
 }
 
 // SpecRail is a declared rail.
@@ -312,6 +324,18 @@ func ParseSpec(b []byte) (*Spec, error) {
 			if v < 0 {
 				return nil, fmt.Errorf("spec.edge.domainMil[%s]: negative distance", k)
 			}
+		}
+		for k, v := range e.DomainInsulation {
+			switch strings.ToLower(v) {
+			case "basic", "supplementary", "double", "reinforced":
+			default:
+				return nil, fmt.Errorf("spec.edge.domainInsulation[%s] %q: want basic|supplementary|double|reinforced", k, v)
+			}
+		}
+		switch e.FootprintCutouts {
+		case "", pcbauto.EdgeCutoutsEdge, pcbauto.EdgeCutoutsInternal:
+		default:
+			return nil, fmt.Errorf("spec.edge.footprintCutouts %q: want %s|%s", e.FootprintCutouts, pcbauto.EdgeCutoutsEdge, pcbauto.EdgeCutoutsInternal)
 		}
 	}
 	return &s, nil

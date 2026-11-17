@@ -108,7 +108,11 @@ IPC B2 100/300/500 V = 0.6/1.25/2.5 mm；61010 CAT II 300 V 基本 1.5 / 3.0、�
 11. **板边与金属安装孔是可触及面**：危险/市电/病人域的铜到板框中心线、到金属安装孔螺钉头（禁铜环外沿）
    ≥ `max(间隙, 爬电)`（`intent.edge.byDomain`，由 `safety.Distances(域 ↔ edge:accessible)` 算出，默认
    **加强绝缘** —— 板边可能被手指、接地机壳、金属支柱碰到；外壳提供另一重保护或安装件保护接地时写
-   `spec.edge.insulation: "basic"`）。路由器对这些网另加到板边/螺钉头的距离场，铺铜/平面按域内缩，
+   `spec.edge.insulation: "basic"`；只有某个域如此时写 `spec.edge.domainInsulation: {"<域或网>": "basic"}`）。
+   **封装自带的隔离槽**（跨接件封装里画在 Edge.Cuts 上的槽）默认也按板边量；它们在板内、手碰不到时由负责人写
+   `spec.edge.footprintCutouts: "internal"`，`kicad rules` 的域板边规则就不再量到封装里的 Edge.Cuts 图形（报告
+   `assumptions` 写明；槽两侧的绝缘距离仍由绝缘对的 clearance / creepage 规则管；画在板上而不在封装里的开槽、
+   封装的 NPTH 安装孔照旧按域距离量）。路由器对这些网另加到板边/螺钉头的距离场，铺铜/平面按域内缩，
    引擎 DRC 与 `pcb check copper-to-edge` / `copper-to-hole` 复核；`pcb rules apply --intent` 把该域所在
    网络类 `PP_<类>` 的 Board Outline 格写成域距离。SELV 域用默认 20 / 30 mil。原生 Creepage Distance
    规则只在计划里给建议值，不自动启用（全板、不分网，会误报所有 SELV 对）。例：230 Vac 加强绝缘

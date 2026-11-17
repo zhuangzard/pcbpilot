@@ -520,7 +520,10 @@ pcbpilot kicad route --pcb board-b-v5a.kicad_pcb --intent intent.json --sim sim.
      （实测 1443 件板：85 条 creepage 违规每一条都同时报为同一对的 clearance 违规）；而 KiCad 的 creepage 检查占了大板 DRC
      的大部分时间（同一块摆好的板 1227 s → 312 s，除那 85 条 creepage 外结果逐条相同）。creepage 大于 clearance 的对照写不误；
      绝缘对两侧每个网的 DSN 间距抬到该对的电气间隙（fastroute 每类只有一个间距）。危险域的板边距离
-     （`EdgeFromIntent.ByDomain`）写成 `(constraint edge_clearance (min …))`。
+     （`EdgeFromIntent.ByDomain`）写成 `(constraint edge_clearance (min …))`，条件 `A.hasNetclass('PPD_<域>')`；意图
+     `edge.footprintCutouts = "internal"`（来自 `spec.edge.footprintCutouts`，负责人的明示）时条件追加
+     `&& !(B.memberOfFootprint('*') && B.Layer == 'Edge.Cuts')`：封装里的 Edge.Cuts 图形（隔离槽）不按板边量，板框、板级开槽、
+     封装的 NPTH 孔照量。`--check` 按意图核对条件，板上规则与意图不一致（多了或少了这一段）都是失败，要重新 `--apply`。
    - DSN：原生 `ExportSpecctraDSN`（um），再：复合类名的逗号改 `+`（`--no-neckdown-classes` 用逗号分隔）、加内层 layer_rule、
      所有间距 +0.2 mil（KiCad DRC 在 Board-A 上量出 0.1484 < 0.1501 mm）、**板边禁布带**（边框内侧与每个 Edge.Cuts 挖空外侧，
      外层/内层各自距离，且不低于板规则；安装孔禁布圆按外层距离放大）——KiCad 导出器不带铜到板边规则（Board-B V5 A 曾有内层线

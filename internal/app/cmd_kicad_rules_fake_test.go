@@ -297,7 +297,7 @@ func (f *rulesFakeKiCad) NetclassesReq(pcb string, req kicad.NetclassRequest, ou
 		}
 		milv, _ := ed["mil"].(float64)
 		mm := strings.TrimRight(strings.TrimRight(fmt.Sprintf("%.4f", milv*0.0254), "0"), ".")
-		rules = append(rules, fmt.Sprintf("(rule \"pcbpilot edge %s\"\n  (condition \"A.hasNetclass('%s')\")\n  (constraint edge_clearance (min %smm)))", cls, cls, mm))
+		rules = append(rules, fmt.Sprintf("(rule \"pcbpilot edge %s\"\n  (condition \"%s\")\n  (constraint edge_clearance (min %smm)))", cls, kicadEdgeCond(cls, ed["footprintCutouts"] == "internal"), mm))
 	}
 	if req.Sizes != nil {
 		old := map[int64]bool{}

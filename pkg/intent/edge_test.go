@@ -62,6 +62,8 @@ func TestSpecEdge(t *testing.T) {
 		`{"edge":{"edgeKind":"vcut","outerMil":12}}`,
 		`{"edge":{"insulation":"functional"}}`,
 		`{"edge":{"domainMil":{"X":-1}}}`,
+		`{"edge":{"domainInsulation":{"X":"functional"}}}`,
+		`{"edge":{"footprintCutouts":"none"}}`,
 	} {
 		if _, err := ParseSpec([]byte(bad)); err == nil {
 			t.Fatalf("accepted %s", bad)
@@ -91,5 +93,47 @@ func TestSpecEdge(t *testing.T) {
 	})
 	if d := low.Edge.ByDomain[mainsID]; d.Mil != base.Edge.ByDomain[mainsID].Mil || !strings.Contains(strings.Join(d.Why, " "), "ignored") {
 		t.Fatalf("low domainMil: %+v", d)
+	}
+}
+
+// spec.edge.domainInsulation grades one domain (it wins over
+// spec.edge.insulation; the stricter of two keys of the same domain
+// counts), and spec.edge.footprintCutouts reaches the intent only as the
+// owner's explicit "internal".
+func TestSpecEdgeDomainGradeAndFootprintCutouts(t *testing.T) {
+	withSafety(t)
+	base := stressIntent(t, "flyback", "spec.json", nil)
+	var mains *Domain
+	for _, d := range base.Domains {
+		if d.Kind == "mains" {
+			mains = d
+		}
+	}
+	if mains == nil || len(mains.Nets) == 0 {
+		t.Fatal("no mains domain in the fixture")
+	}
+	bd := base.Edge.ByDomain[mains.ID]
+	if bd.Insulation != "reinforced" || base.Edge.FootprintCutouts != "" {
+		t.Fatalf("default: %+v cutouts %q", bd, base.Edge.FootprintCutouts)
+	}
+	it := stressIntent(t, "flyback", "spec.json", func(in *Input) {
+		in.Spec.Edge = &SpecEdge{Insulation: "reinforced", DomainInsulation: map[string]string{mains.ID: "basic"}, FootprintCutouts: "internal"}
+	})
+	ed := it.Edge.ByDomain[mains.ID]
+	if ed.Insulation != "basic" || ed.Mil >= bd.Mil || !strings.Contains(strings.Join(ed.Why, " "), "spec.edge.domainInsulation["+mains.ID+"] = basic") {
+		t.Fatalf("domain grade: %+v (default %.1f mil)", ed, bd.Mil)
+	}
+	if it.Edge.FootprintCutouts != "internal" || !strings.Contains(strings.Join(it.Edge.Why, " "), "spec.edge.footprintCutouts = internal") {
+		t.Fatalf("cutouts: %q %v", it.Edge.FootprintCutouts, it.Edge.Why)
+	}
+	// Two keys of one domain (its id and one of its nets): the stricter.
+	two := stressIntent(t, "flyback", "spec.json", func(in *Input) {
+		in.Spec.Edge = &SpecEdge{DomainInsulation: map[string]string{mains.ID: "basic", mains.Nets[0]: "reinforced"}, FootprintCutouts: "edge"}
+	})
+	if d := two.Edge.ByDomain[mains.ID]; d.Insulation != "reinforced" || d.Mil != bd.Mil {
+		t.Fatalf("two keys: %+v", d)
+	}
+	if two.Edge.FootprintCutouts != "" {
+		t.Fatalf("edge is the default and is not written: %q", two.Edge.FootprintCutouts)
 	}
 }

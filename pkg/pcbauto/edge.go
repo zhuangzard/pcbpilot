@@ -59,6 +59,13 @@ type EdgeDomain struct {
 	Why         []string `json:"why,omitempty"`
 }
 
+// What an Edge.Cuts shape inside a footprint is to the domain edge
+// distance (intent edge.footprintCutouts).
+const (
+	EdgeCutoutsEdge     = "edge"     // a board edge like any other (default)
+	EdgeCutoutsInternal = "internal" // an isolation slot / cut-out under a part: not an accessible edge
+)
+
 // IntentEdge mirrors intent.json "edge" (additive field).
 type IntentEdge struct {
 	OuterMil float64                `json:"outerMil"`
@@ -66,7 +73,11 @@ type IntentEdge struct {
 	VcutMil  float64                `json:"vcutMil"`
 	EdgeKind string                 `json:"edgeKind"`
 	ByDomain map[string]*EdgeDomain `json:"byDomain,omitempty"`
-	Why      []string               `json:"why,omitempty"`
+	// FootprintCutouts: "internal" keeps the domain distances off the
+	// Edge.Cuts shapes of footprints (the owner's statement in spec.edge);
+	// anything else is "edge".
+	FootprintCutouts string   `json:"footprintCutouts,omitempty"`
+	Why              []string `json:"why,omitempty"`
 }
 
 // EdgePolicy is the resolved board-edge distance of one board.
@@ -78,8 +89,10 @@ type EdgePolicy struct {
 	FabMinMil float64                `json:"fabMinMil"`
 	RuleMil   float64                `json:"boardRuleMil,omitempty"` // live Board Outline rule (a floor, never lowers the policy)
 	ByDomain  map[string]*EdgeDomain `json:"byDomain,omitempty"`
-	Source    string                 `json:"source"` // default | intent
-	Why       []string               `json:"why,omitempty"`
+	// FootprintCutouts is EdgeCutoutsInternal only when the intent says so.
+	FootprintCutouts string   `json:"footprintCutouts,omitempty"`
+	Source           string   `json:"source"` // default | intent
+	Why              []string `json:"why,omitempty"`
 	// netDomain maps a net to its insulated domain id (only domains listed
 	// in ByDomain).
 	netDomain map[string]string
@@ -191,6 +204,9 @@ func EdgeFromIntent(in *Intent, b *Board) *EdgePolicy {
 		}
 		if len(e.Why) > 0 {
 			p.Why = append([]string(nil), e.Why...)
+		}
+		if e.FootprintCutouts == EdgeCutoutsInternal {
+			p.FootprintCutouts = EdgeCutoutsInternal
 		}
 		for id, d := range e.ByDomain {
 			if d == nil || d.Mil <= 0 {

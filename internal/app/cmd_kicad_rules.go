@@ -794,6 +794,12 @@ func (r *rulesRun) derive() int {
 	widths, bases := planRulesWidths(ob, sp, decl, cu, sc)
 	r.bases = bases
 	r.ri = deriveKicadRules(ob, r.intentCopy, widths)
+	for _, e := range r.ri.Edges {
+		if e["footprintCutouts"] == pcbauto.EdgeCutoutsInternal {
+			rep.Assumptions = append(rep.Assumptions, "intent edge.footprintCutouts = internal: the domain edge rules do not measure to Edge.Cuts shapes inside footprints (isolation slots, cut-outs under parts); the board's own edge clearance and the pair clearance / creepage rules still do, and the outline, board-level cut-outs and mounting holes keep the domain distance")
+			break
+		}
+	}
 	rep.RequestSHA = r.ri.sha()
 	st, _ := parseRulesStamp(string(r.data[r.dru]))
 	out := filepath.Join(r.stage, "out", filepath.Base(o.pcb))

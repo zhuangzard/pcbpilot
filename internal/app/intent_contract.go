@@ -197,7 +197,9 @@ type intentEdge struct {
 	VcutMil  float64                      `json:"vcutMil"`
 	EdgeKind string                       `json:"edgeKind"`
 	ByDomain map[string]*intentEdgeDomain `json:"byDomain,omitempty"`
-	Why      []string                     `json:"why,omitempty"`
+	// FootprintCutouts: "" | edge | internal (pcbauto.EdgeCutouts*).
+	FootprintCutouts string   `json:"footprintCutouts,omitempty"`
+	Why              []string `json:"why,omitempty"`
 }
 
 type intentEdgeDomain struct {
@@ -319,6 +321,11 @@ func (in *designIntent) validate() error {
 		if err := nonNeg("edge", e.OuterMil, e.InnerMil, e.VcutMil); err != nil {
 			return err
 		}
+		switch e.FootprintCutouts {
+		case "", pcbauto.EdgeCutoutsEdge, pcbauto.EdgeCutoutsInternal:
+		default:
+			return fmt.Errorf("intent: edge.footprintCutouts %q: want %s|%s", e.FootprintCutouts, pcbauto.EdgeCutoutsEdge, pcbauto.EdgeCutoutsInternal)
+		}
 		for id, d := range e.ByDomain {
 			if d == nil {
 				return fmt.Errorf("intent: edge.byDomain[%s] is null", id)
@@ -344,7 +351,7 @@ func (in *designIntent) edgePolicy() *pcbauto.EdgePolicy {
 	}
 	pi.Standard = in.Standard
 	if e := in.Edge; e != nil {
-		pe := &pcbauto.IntentEdge{OuterMil: e.OuterMil, InnerMil: e.InnerMil, VcutMil: e.VcutMil, EdgeKind: e.EdgeKind, Why: e.Why}
+		pe := &pcbauto.IntentEdge{OuterMil: e.OuterMil, InnerMil: e.InnerMil, VcutMil: e.VcutMil, EdgeKind: e.EdgeKind, FootprintCutouts: e.FootprintCutouts, Why: e.Why}
 		for id, d := range e.ByDomain {
 			if pe.ByDomain == nil {
 				pe.ByDomain = map[string]*pcbauto.EdgeDomain{}

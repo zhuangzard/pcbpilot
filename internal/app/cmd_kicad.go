@@ -178,6 +178,19 @@ func intentBoardRules(path string) kicad.Rules {
 	return r
 }
 
+// kicadEdgeCond is the condition of a domain's edge rule. internal (intent
+// edge.footprintCutouts): the Edge.Cuts shapes of footprints are left to
+// the board's own edge clearance; the outline, cut-outs drawn on the board
+// and the holes of footprints (mounting holes) keep the domain distance.
+// The bridge writes the same text (bridge.py, edge rules).
+func kicadEdgeCond(class string, internal bool) string {
+	cond := "A.hasNetclass('" + class + "')"
+	if internal {
+		cond += " && !(B.memberOfFootprint('*') && B.Layer == 'Edge.Cuts')"
+	}
+	return cond
+}
+
 // kicadEdges are the insulated domains' edge distances as bridge edge rules.
 func kicadEdges(path string, in *designIntent) []map[string]any {
 	pi, err := loadEdgeIntent(path)
@@ -188,7 +201,11 @@ func kicadEdges(path string, in *designIntent) []map[string]any {
 	var out []map[string]any
 	for _, d := range in.Domains {
 		if ed := p.ByDomain[d.ID]; ed != nil && ed.Mil > 0 {
-			out = append(out, map[string]any{"domain": d.ID, "nets": d.Nets, "mil": ed.Mil})
+			e := map[string]any{"domain": d.ID, "nets": d.Nets, "mil": ed.Mil}
+			if p.FootprintCutouts == pcbauto.EdgeCutoutsInternal {
+				e["footprintCutouts"] = pcbauto.EdgeCutoutsInternal
+			}
+			out = append(out, e)
 		}
 	}
 	return out

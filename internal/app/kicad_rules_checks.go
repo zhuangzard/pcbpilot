@@ -2045,7 +2045,7 @@ func (r *rulesRun) clearanceEdgeProblems(rules []kicad.DRURule) (bad, unknown []
 		milv, _ := ed["mil"].(float64)
 		want := int64(math.Round(milv*0.0254*1e4) * 100) // the bridge writes 4-decimal mm
 		name := "pcbpilot edge " + cls
-		cond := "A.hasNetclass('" + cls + "')"
+		cond := kicadEdgeCond(cls, ed["footprintCutouts"] == pcbauto.EdgeCutoutsInternal)
 		names := r.domainIdentity(dom)
 		at := -1
 		// The rule at the end, or — moved before the user's rules by
