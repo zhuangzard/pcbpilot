@@ -1887,6 +1887,9 @@ func (r *rulesRun) isolationRuleProblems(rules []kicad.DRURule, p rulesIsoPlan) 
 	if u.Layer != "" {
 		bad = append(bad, fmt.Sprintf("pair %s|%s: rule %q is limited to layer %s", p.A, p.B, name, u.Layer))
 	}
+	if u.Severity != "" && u.Severity != "error" {
+		bad = append(bad, fmt.Sprintf("pair %s|%s: rule %q has severity %q: a violation of the pair's distances would not be an error", p.A, p.B, name, u.Severity))
+	}
 	for _, want := range []struct {
 		typ string
 		mm  float64

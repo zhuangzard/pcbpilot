@@ -100,6 +100,16 @@ func TestKicadRulesCheckClearanceAndEdge(t *testing.T) {
 		"later edge ignore, larger value": {func(s string) string {
 			return s + "(rule \"edge-all\"\n  (severity ignore)\n  (constraint edge_clearance (min 3mm)))\n"
 		}, gate.Fail, "would not be an error"},
+		"isolation rule only a warning": {func(s string) string {
+			i := strings.Index(s, "(rule \"pcbpilot isolation ")
+			j := strings.Index(s[i:], "\n") + i + 1
+			return s[:j] + "  (severity warning)\n" + s[j:]
+		}, gate.Fail, "would not be an error"},
+		"isolation rule ignored": {func(s string) string {
+			i := strings.Index(s, "(rule \"pcbpilot isolation ")
+			j := strings.Index(s[i:], "\n") + i + 1
+			return s[:j] + "  (severity ignore)\n" + s[j:]
+		}, gate.Fail, "violation of the pair's distances"},
 		"later edge override": {func(s string) string {
 			return s + "(rule \"edge-all\"\n  (constraint edge_clearance (min 0.3mm)))\n"
 		}, gate.Fail, "may lower edge_clearance"},
