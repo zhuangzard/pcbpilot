@@ -1699,11 +1699,14 @@ func (r *rulesRun) placementProxy() {
 	}
 	// Board net → domain class, from the domain classes bridge netclasses
 	// put the board nets in (the membership the pair rules use); the pair
-	// ends ("domain:<id>") are keyed the same way (ClassA / ClassB).
-	domOf := map[string]string{}
+	// ends ("domain:<id>") are keyed the same way (ClassA / ClassB). A net
+	// is in every domain class that lists it (a pair end and an edge
+	// domain, two pairs' ends): all of them count, not whichever the map
+	// happened to give last.
+	domOf := map[string][]string{}
 	for dom, nets := range r.full.Domains {
 		for _, n := range nets {
-			domOf[n] = "PPD_" + dom
+			domOf[n] = append(domOf[n], "PPD_"+dom)
 		}
 	}
 	type part struct {
@@ -1724,7 +1727,7 @@ func (r *rulesRun) placementProxy() {
 			continue
 		}
 		for _, pd := range c.Pads {
-			if d := domOf[pd.Net]; d != "" {
+			for _, d := range domOf[pd.Net] {
 				p.doms[d] = true
 			}
 		}

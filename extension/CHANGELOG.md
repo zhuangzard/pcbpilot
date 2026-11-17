@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- **`kicad rules --check`: the placement check no longer misses an insulation pair at random.** A net that is in two
+  domain classes (a pair end and a board-edge domain of the same nets) was counted in only one of them, picked by map
+  order: when it was the edge class, the parts of that domain were not compared with the other side of the pair and
+  `isolation-placement` passed. A net now counts in every domain class that lists it, so the result is the same on
+  every run.
 - **`kicad rules --keep-stricter`: a stricter user rule is kept even when the generated rule must stay last.** A
   generated minimum that has to stay after a weaker user rule (or that another generated rule overlaps) could not also
   go before a stricter user rule, so the conflict stayed and the apply was refused. The generated rule now stays last
